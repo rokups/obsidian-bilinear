@@ -86,6 +86,8 @@ bilinear lint --fix
   `BILINEAR_TRACKER`, then a search upward from the working directory.
 - The comment author is `--author`, then `BILINEAR_USER`, then `$USER`.
 - `--json` on `list`, `show`, `new`, `label`, `state` and `lint`.
+- `list` shows progress as `[1/2]` and `show` names the linked issues and
+  their states; in JSON it is `progress: {done, total, issues}`.
 - Colours are `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `purple`,
   `pink`, `gray`, or a hex value such as `#7c5cff`.
 - State icons are one of the shapes `dashed`, `circle`, `quarter`, `half`,
@@ -147,7 +149,10 @@ or by sync, show up live.
   toolbar (also a command): pick an icon and a colour for each state, and a
   colour for each label. Right-clicking a label on a row, or in the labels
   picker, is a shortcut to its colour.
-- Sub-issue progress on parent rows, and a "blocked" marker.
+- Progress on every issue that has linked issues: its sub-issues, plus any
+  issues its description links to, so a checklist of `[[BL-3]]` links in a
+  note becomes a progress ring that follows those issues' states. Hover it for
+  the list. A "blocked" marker shows while a `blocked-by` issue is open.
 - Bulk edit on a multi-selection.
 - "Note missing" rows with recreate and remove actions.
 

@@ -1274,6 +1274,64 @@ def describe(where: list[str] | str) -> str:
 # Issue records
 
 
+_WIKILINK_RE = re.compile(r"\[\[([^\[\]]+)\]\]")
+_INLINE_CODE_RE = re.compile(r"`[^`]*`")
+
+
+def body_links(body: str, self_id: str | None = None) -> list[str]:
+    """IDs of the issues a note's body links to, in order, each once.
+
+    Links and embeds count wherever they are in the description; links in
+    code and under `## Comments` do not, so that mentioning an issue in a
+    comment does not make it part of this one.
+    """
+    lines = split_lines(body)
+    sections, _, kinds = find_sections(lines, (COMMENTS,))
+    comments = range(*sections[COMMENTS]) if COMMENTS in sections else range(0)
+    out: list[str] = []
+    for i, line in enumerate(lines):
+        if kinds[i][0] == "code" or i in comments:
+            continue
+        for m in _WIKILINK_RE.finditer(_INLINE_CODE_RE.sub("", chomp(line))):
+            target = link_target(m.group(1))
+            if ID_RE.match(target) and target != self_id and target not in out:
+                out.append(target)
+    return out
+
+
+def linked_progress(records: list[dict], closed_states: list[str]) -> dict[str, dict]:
+    """Progress of each issue, from the state of the issues linked to it.
+
+    An issue's linked issues are its sub-issues (those naming it as
+    `parent`) and the issues its description links to. Progress is how many
+    of them are in a closed state. Issues with none have no progress.
+    """
+    by_id = {r["id"]: r for r in records}
+    children: dict[str, list[str]] = {}
+    for r in records:
+        if r["parent"] in by_id and r["parent"] != r["id"]:
+            children.setdefault(r["parent"], []).append(r["id"])
+    out: dict[str, dict] = {}
+    for r in records:
+        linked: list[str] = []
+        for other in children.get(r["id"], []) + r["links"]:
+            if other in by_id and other != r["id"] and other not in linked:
+                linked.append(other)
+        if linked:
+            done = sum(1 for i in linked if by_id[i]["status"] in closed_states)
+            out[r["id"]] = {"done": done, "total": len(linked), "issues": linked}
+    return out
+
+
+def all_records(t: Tracker, idx: Index) -> list[dict]:
+    """A record for every issue, open and archived, with `progress` filled in."""
+    records = [issue_record(t, it) for it in idx.unique()]
+    progress = linked_progress(records, idx.closed_states)
+    for r in records:
+        r["progress"] = progress.get(r["id"])
+    return records
+
+
 def issue_record(t: Tracker, item: Item) -> dict:
     path = t.resolve(item)
     rec = {
@@ -1287,6 +1345,8 @@ def issue_record(t: Tracker, item: Item) -> dict:
         "parent": None,
         "blocked-by": [],
         "created": None,
+        "links": [],
+        "progress": None,
         "archived": item.archived,
         "missing": path is None,
     }
@@ -1302,6 +1362,7 @@ def issue_record(t: Tracker, item: Item) -> dict:
     rec["parent"] = link_id(doc.get_str("parent"))
     rec["blocked-by"] = [i for i in (link_id(v) for v in doc.get_list("blocked-by")) if i]
     rec["created"] = doc.get_str("created")
+    rec["links"] = body_links(doc.body, item.id)
     return rec
 
 
@@ -1426,10 +1487,9 @@ def cmd_list(t: Tracker, args) -> int:
     assignees = csv_values(args.assignee)
     priorities = csv_values(args.priority)
     out = []
-    for it in idx.unique():
-        if not args.all and it.archived != bool(args.archived):
+    for rec in all_records(t, idx):
+        if not args.all and rec["archived"] != bool(args.archived):
             continue
-        rec = issue_record(t, it)
         if statuses and rec["status"] not in statuses:
             continue
         if labels and not any(label in rec["labels"] for label in labels):
@@ -1451,6 +1511,8 @@ def cmd_list(t: Tracker, args) -> int:
         extra = ""
         if r["missing"]:
             extra += "  (note missing)"
+        if r["progress"]:
+            extra += f"  [{r['progress']['done']}/{r['progress']['total']}]"
         if r["assignee"]:
             extra += f"  @{r['assignee']}"
         if r["labels"]:
@@ -1464,7 +1526,8 @@ def cmd_list(t: Tracker, args) -> int:
 def cmd_show(t: Tracker, args) -> int:
     idx = t.read_index()
     it = t.require(idx, args.id)
-    rec = issue_record(t, it)
+    records = {r["id"]: r for r in all_records(t, idx)}
+    rec = records[it.id]
     path = t.resolve(it)
     doc = Doc(read_text(path)) if path else None
     if args.json:
@@ -1486,6 +1549,9 @@ def cmd_show(t: Tracker, args) -> int:
         print(f"{key + ':':<12} {value if value is not None else ''}")
     if rec["archived"]:
         print(f"{'archived:':<12} yes")
+    if rec["progress"]:
+        linked = ", ".join(f"{i} {records[i]['status'] or 'note missing'}" for i in rec["progress"]["issues"])
+        print(f"{'progress:':<12} {rec['progress']['done']}/{rec['progress']['total']}  ({linked})")
     body = doc.body.strip("\r\n")
     if body:
         print()

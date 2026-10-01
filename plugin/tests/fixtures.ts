@@ -6,6 +6,7 @@ import type { Tracker } from "../src/ops/io";
 import { adoptIssue, archiveClosed, archiveIssues, commentIssue, createIssue, deleteIssue, moveIssue, setLabel, setProps, setStateStyle, unarchiveIssues } from "../src/ops/issues";
 import { lint } from "../src/ops/lint";
 import { indexNotes, listIssues, readIndex } from "../src/ops/tracker";
+import { linkedProgress, type Progress } from "../src/store/query";
 import { MemoryIO } from "./memory-io";
 
 export const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "spec", "fixtures");
@@ -52,9 +53,15 @@ export async function openTracker(io: MemoryIO, dir = TRACKER_DIR): Promise<Trac
 }
 
 /** A record with the key names the fixtures and the CLI's JSON use. */
-export function toFixtureRecord(r: IssueRecord): Record<string, unknown> {
+export function toFixtureRecord(r: IssueRecord, progress: Progress | null = null): Record<string, unknown> {
   const { blockedBy, path: _path, ...rest } = r;
-  return { ...rest, "blocked-by": blockedBy };
+  return { ...rest, "blocked-by": blockedBy, progress };
+}
+
+/** Records in the shape of the CLI's `list --json`, with progress filled in. */
+export function toFixtureRecords(records: IssueRecord[], closedStates: string[]): Array<Record<string, unknown>> {
+  const progress = linkedProgress(records, closedStates);
+  return records.map((r) => toFixtureRecord(r, progress.get(r.id) ?? null));
 }
 
 export interface Result {
@@ -119,7 +126,7 @@ export async function apply(t: Tracker, op: Op): Promise<Result> {
     case "lint":
       return { problems: (await lint(t, !!a.fix)).map((p) => `${p.code}:${p.id ?? "-"}`).sort() };
     case "list":
-      return { issues: (await listIssues(t)).map(toFixtureRecord) };
+      return { issues: toFixtureRecords(await listIssues(t), (await readIndex(t)).closedStates) };
     default:
       throw new Error(`unknown op ${op.op}`);
   }

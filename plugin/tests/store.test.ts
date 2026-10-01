@@ -3,10 +3,11 @@ import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 import { Doc } from "../src/format/yaml";
 import type { IssueRecord } from "../src/format/record";
-import { applyFilter, childProgress, defaultSpec, emptyFilter, groupIssues, normalizeSpec, sortIssues, type TrackerConfig } from "../src/store/query";
+import { applyFilter, defaultSpec, linkedProgress, emptyFilter, groupIssues, normalizeSpec, sortIssues, type TrackerConfig } from "../src/store/query";
 import { buildSnapshot } from "../src/store/snapshot";
 import { readViews, writeViews, type SavedView } from "../src/store/views";
-import { TRACKER_DIR, cases, openTracker, toFixtureRecord } from "./fixtures";
+import { bodyLinks } from "../src/format/issue-note";
+import { TRACKER_DIR, cases, openTracker, toFixtureRecords } from "./fixtures";
 import { MemoryIO } from "./memory-io";
 
 /** Stand-in for Obsidian's metadata cache: a real YAML parser over the frontmatter. */
@@ -14,12 +15,14 @@ function cacheLookup(io: MemoryIO) {
   return (path: string) => {
     const text = io.files.get(path);
     if (text === undefined) return undefined;
+    // Obsidian parses the links itself; the subset parser stands in for it here.
+    const links = bodyLinks(new Doc(text).body);
     const m = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)/.exec(text);
-    if (!m) return null;
+    if (!m) return { frontmatter: null, links };
     try {
-      return (parseYaml(m[1]) as Record<string, unknown>) ?? null;
+      return { frontmatter: (parseYaml(m[1]) as Record<string, unknown>) ?? null, links };
     } catch {
-      return null;
+      return { frontmatter: null, links };
     }
   };
 }
@@ -35,7 +38,7 @@ describe("snapshot from the metadata cache", () => {
     const io = MemoryIO.fromDisk(join(c.dir, "before"), TRACKER_DIR);
     const t = await openTracker(io);
     const snap = buildSnapshot(io.files.get(t.indexPath)!, t.dir, cacheLookup(io));
-    const got = [...snap.issues, ...snap.archived].map(toFixtureRecord);
+    const got = toFixtureRecords([...snap.issues, ...snap.archived], snap.config.closedStates);
     const want = c.op.expect!.issues!;
     expect(got.map((i) => i.id).sort()).toEqual(want.map((i) => i.id).sort());
     for (const w of want) expect(got.find((g) => g.id === w.id)).toMatchObject(w);
@@ -53,21 +56,21 @@ describe("snapshot from the metadata cache", () => {
   it("looks in issues/, then archive/, then the tracker folder", () => {
     const index = "---\nbilinear: tracker\nprefix: BL\nnext: 4\nstates: [todo]\n---\n## Issues\n- [[BL-1]] a\n- [[BL-2]] b\n- [[BL-3]] c\n\n## Archive\n- [[BL-4]] d\n";
     const notes = new Set(["T/issues/BL-1.md", "T/archive/BL-1.md", "T/BL-1.md", "T/archive/BL-2.md", "T/BL-2.md", "T/BL-3.md", "T/issues/BL-4.md", "T/BL-4.md"]);
-    const snap = buildSnapshot(index, "T", (p) => (notes.has(p) ? {} : undefined));
+    const snap = buildSnapshot(index, "T", (p) => (notes.has(p) ? { frontmatter: {}, links: [] } : undefined));
     expect([...snap.issues, ...snap.archived].map((i) => i.path)).toEqual(["T/issues/BL-1.md", "T/archive/BL-2.md", "T/BL-3.md", "T/issues/BL-4.md"]);
   });
 
   it("coerces typed YAML values to text", () => {
     const index = "---\nbilinear: tracker\nprefix: BL\nnext: 2\nstates: [todo]\n---\n## Issues\n- [[BL-1]] line title\n";
-    const snap = buildSnapshot(index, "T", (p) => (p === "T/BL-1.md" ? { title: 42, status: true, labels: "solo", assignee: null, "blocked-by": "[[BL-7]]" } : undefined));
-    expect(snap.issues[0]).toMatchObject({ title: "42", status: "true", labels: ["solo"], assignee: null, blockedBy: ["BL-7"], path: "T/BL-1.md" });
+    const snap = buildSnapshot(index, "T", (p) => (p === "T/BL-1.md" ? { frontmatter: { title: 42, status: true, labels: "solo", assignee: null, "blocked-by": "[[BL-7]]" }, links: ["archive/BL-4|x", "BL-1", "Note", "BL-4"] } : undefined));
+    expect(snap.issues[0]).toMatchObject({ title: "42", status: "true", labels: ["solo"], assignee: null, blockedBy: ["BL-7"], links: ["BL-4"], path: "T/BL-1.md" });
   });
 });
 
 function issue(id: string, over: Partial<IssueRecord> = {}): IssueRecord {
   return {
     id, title: id, status: "todo", priority: "none", labels: [], assignee: null, due: null, parent: null,
-    blockedBy: [], created: null, archived: false, missing: false, path: `T/${id}.md`, ...over,
+    blockedBy: [], created: null, links: [], archived: false, missing: false, path: `T/${id}.md`, ...over,
   };
 }
 
@@ -124,9 +127,20 @@ describe("query", () => {
     expect(groupIssues(issues, "none", config)).toHaveLength(1);
   });
 
-  it("counts sub-issue progress over open and archived children", () => {
-    const all = [...issues, issue("BL-5", { parent: "BL-1", status: "done", archived: true })];
-    expect(childProgress(all, config.closedStates)).toEqual(new Map([["BL-1", { done: 1, total: 3 }]]));
+  it("derives progress from sub-issues and linked issues, open or archived", () => {
+    const all = [
+      ...issues,
+      issue("BL-5", { parent: "BL-1", status: "done", archived: true }),
+      issue("BL-6", { links: ["BL-2", "BL-3", "BL-6", "BL-99", "BL-2"] }),
+      issue("BL-7", { parent: "BL-7", links: ["BL-4"] }),
+    ];
+    expect(linkedProgress(all, config.closedStates)).toEqual(
+      new Map([
+        ["BL-1", { done: 1, total: 3, issues: ["BL-3", "BL-4", "BL-5"] }],
+        ["BL-6", { done: 1, total: 2, issues: ["BL-2", "BL-3"] }],
+        ["BL-7", { done: 0, total: 1, issues: ["BL-4"] }],
+      ]),
+    );
   });
 
   it("normalizes untrusted specs", () => {
@@ -218,5 +232,30 @@ describe("state drawings", () => {
     expect([stateColor("in-review", styled), stateColor("done", styled), stateColor("todo", styled), stateColor("in-progress", styled)]).toEqual([
       "var(--color-purple)", "#2da44e", "var(--text-faint)", "var(--color-yellow)",
     ]);
+  });
+});
+
+describe("description links from the metadata cache", () => {
+  it("takes links and embeds in order, leaving out the comments section", async () => {
+    const { descriptionLinks } = await import("../src/store/snapshot");
+    const at = (line: number, offset: number) => ({ start: { line, offset } });
+    expect(
+      descriptionLinks({
+        links: [
+          { link: "BL-3", position: at(4, 40) },
+          { link: "BL-9", position: at(9, 120) },
+          { link: "BL-5", position: at(12, 200) },
+        ],
+        embeds: [{ link: "BL-1#Notes", position: at(2, 10) }],
+        headings: [
+          { heading: "Plan", level: 2, position: at(1, 0) },
+          { heading: "Comments", level: 2, position: at(8, 100) },
+          { heading: "Detail", level: 3, position: at(10, 150) },
+          { heading: "Links", level: 2, position: at(11, 180) },
+        ],
+      }),
+    ).toEqual(["BL-1#Notes", "BL-3", "BL-5"]);
+    expect(descriptionLinks(null)).toEqual([]);
+    expect(descriptionLinks({ links: [{ link: "BL-2", position: at(3, 5) }] })).toEqual(["BL-2"]);
   });
 });

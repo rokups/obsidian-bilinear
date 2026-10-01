@@ -171,17 +171,37 @@ export function groupIssues(issues: IssueRecord[], groupBy: GroupKey, config: Tr
 export interface Progress {
   done: number;
   total: number;
+  /** The linked issues counted, sub-issues first. */
+  issues: string[];
 }
 
-/** Sub-issue progress per parent ID, over all issues including archived ones. */
-export function childProgress(all: IssueRecord[], closedStates: string[]): Map<string, Progress> {
+/**
+ * Progress of each issue, from the state of the issues linked to it: its
+ * sub-issues (those naming it as `parent`) and the issues its description
+ * links to. Progress is how many of them are in a closed state; issues with
+ * none are not in the map. `all` includes archived issues.
+ */
+export function linkedProgress(all: IssueRecord[], closedStates: string[]): Map<string, Progress> {
+  const byId = new Map(all.map((i) => [i.id, i]));
+  const children = new Map<string, string[]>();
+  for (const i of all) {
+    if (!i.parent || i.parent === i.id || !byId.has(i.parent)) continue;
+    const list = children.get(i.parent);
+    if (list) list.push(i.id);
+    else children.set(i.parent, [i.id]);
+  }
   const out = new Map<string, Progress>();
   for (const i of all) {
-    if (!i.parent) continue;
-    let p = out.get(i.parent);
-    if (!p) out.set(i.parent, (p = { done: 0, total: 0 }));
-    p.total += 1;
-    if (i.status !== null && closedStates.includes(i.status)) p.done += 1;
+    const issues: string[] = [];
+    for (const other of [...(children.get(i.id) ?? []), ...i.links]) {
+      if (byId.has(other) && other !== i.id && !issues.includes(other)) issues.push(other);
+    }
+    if (!issues.length) continue;
+    const done = issues.filter((id) => {
+      const status = byId.get(id)!.status;
+      return status !== null && closedStates.includes(status);
+    }).length;
+    out.set(i.id, { done, total: issues.length, issues });
   }
   return out;
 }

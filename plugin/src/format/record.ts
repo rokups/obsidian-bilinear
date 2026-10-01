@@ -1,4 +1,5 @@
-import { cleanTitle, linkId } from "./ids";
+import { ID_RE, cleanTitle, linkId, linkTarget } from "./ids";
+import { bodyLinks } from "./issue-note";
 import type { Item } from "./index-note";
 import type { Doc } from "./yaml";
 
@@ -14,6 +15,8 @@ export interface IssueRecord {
   parent: string | null;
   blockedBy: string[];
   created: string | null;
+  /** IDs of the issues the note's description links to. */
+  links: string[];
   archived: boolean;
   missing: boolean;
   /** Vault path of the note, or null when it is missing. */
@@ -32,6 +35,7 @@ function emptyRecord(item: Item, path: string | null): IssueRecord {
     parent: null,
     blockedBy: [],
     created: null,
+    links: [],
     archived: item.archived,
     missing: path === null,
     path,
@@ -51,6 +55,7 @@ export function recordFromDoc(item: Item, doc: Doc | null, path: string | null):
   rec.parent = linkId(doc.getStr("parent"));
   rec.blockedBy = doc.getList("blocked-by").map(linkId).filter((v): v is string => v !== null);
   rec.created = doc.getStr("created");
+  rec.links = bodyLinks(doc.body, item.id);
   return rec;
 }
 
@@ -74,8 +79,16 @@ function toStr(v: unknown): string | null {
   return list.length ? list[0] : null;
 }
 
-/** Record from Obsidian's metadata cache (`CachedMetadata.frontmatter`). */
-export function recordFromFrontmatter(item: Item, fm: Record<string, unknown> | null | undefined, path: string | null): IssueRecord {
+/**
+ * Record from Obsidian's metadata cache: the note's frontmatter and the
+ * targets of the links in its description (see `descriptionLinks`).
+ */
+export function recordFromFrontmatter(
+  item: Item,
+  fm: Record<string, unknown> | null | undefined,
+  path: string | null,
+  links: string[] = [],
+): IssueRecord {
   const rec = emptyRecord(item, path);
   if (path === null) return rec;
   fm = fm ?? {};
@@ -88,5 +101,9 @@ export function recordFromFrontmatter(item: Item, fm: Record<string, unknown> | 
   rec.parent = linkId(toStr(fm["parent"]));
   rec.blockedBy = toList(fm["blocked-by"]).map(linkId).filter((v): v is string => v !== null);
   rec.created = toStr(fm["created"]);
+  for (const link of links) {
+    const target = linkTarget(link);
+    if (ID_RE.test(target) && target !== item.id && !rec.links.includes(target)) rec.links.push(target);
+  }
   return rec;
 }

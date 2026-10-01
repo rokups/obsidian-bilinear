@@ -4,7 +4,7 @@ import { LOCATIONS } from "../format/ids";
 import { folderOf as locationFolder } from "../ops/tracker";
 import type { Tracker } from "../ops/io";
 import { VaultIO } from "../view/vault-io";
-import { buildSnapshot, emptySnapshot, type Snapshot } from "./snapshot";
+import { buildSnapshot, descriptionLinks, emptySnapshot, type Snapshot } from "./snapshot";
 import { writeViews, type SavedView } from "./views";
 
 export function folderOf(file: TFile): string {
@@ -89,7 +89,8 @@ export class TrackerStore {
     this.snapshot.value = buildSnapshot(text, this.dir, (path) => {
       const file = this.app.vault.getFileByPath(path);
       if (!file) return undefined;
-      return this.app.metadataCache.getFileCache(file)?.frontmatter ?? null;
+      const cache = this.app.metadataCache.getFileCache(file);
+      return { frontmatter: cache?.frontmatter ?? null, links: descriptionLinks(cache) };
     });
     this.loaded.value = true;
   }

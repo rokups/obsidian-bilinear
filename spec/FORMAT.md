@@ -224,6 +224,22 @@ one space and the ends are trimmed, both when reading and when writing.
 A new note has the properties above in the order of the table, omitting those
 with no value, and an empty body.
 
+**Linked issues and progress.** An issue's *linked issues* are its sub-issues
+(the issues that name it as `parent`) followed by the issues its description
+links to, each counted once and in that order. Only issues in the index count,
+open or archived; an issue is never linked to itself.
+
+The description is the note body outside the `## Comments` section. A link is
+a wikilink or an embed, `[[BL-3]]` or `![[BL-3]]`, reduced to an ID the same
+way as an index line link. Links inside fenced code blocks and inline code do
+not count. `blocked-by` is not part of this: a blocker is something to wait
+for, not part of the work.
+
+An issue's *progress* is the number of its linked issues whose `status` is one
+of the `closed-states`, out of the number of linked issues. A linked issue
+whose note is missing counts as not closed. An issue with no linked issues has
+no progress. Progress is derived every time it is shown; nothing is stored.
+
 **Comments** are list items under `## Comments` in the form
 
 ```
@@ -454,4 +470,6 @@ identity.
 
 `today` is the date used for `created` and for comments; `author` is the
 comment author. In `list` results `parent` and `blocked-by` are IDs, an absent
-text property is `null`, and each issue has `archived` and `missing` flags.
+text property is `null`, and each issue has `archived` and `missing` flags,
+`links` (the IDs its description links to, known or not) and `progress`:
+`{done, total, issues}` with the linked issues counted, or `null`.

@@ -199,6 +199,11 @@ button.bl-filter-chip {
   stroke: var(--bl-accent);
 }
 
+.bl-progress.is-complete {
+  color: var(--text-accent);
+  border-color: var(--bl-accent);
+}
+
 .bl-due {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);

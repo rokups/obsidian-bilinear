@@ -1,0 +1,55 @@
+{
+  "op": "list",
+  "args": {},
+  "expect": {
+    "issues": [
+      {
+        "id": "BL-13",
+        "links": [],
+        "progress": null
+      },
+      {
+        "id": "BL-9",
+        "links": [
+          "BL-11",
+          "BL-4",
+          "BL-13",
+          "BL-99",
+          "BL-22"
+        ],
+        "progress": {
+          "done": 3,
+          "total": 4,
+          "issues": [
+            "BL-13",
+            "BL-11",
+            "BL-4",
+            "BL-22"
+          ]
+        }
+      },
+      {
+        "id": "BL-11",
+        "progress": null
+      },
+      {
+        "id": "BL-20",
+        "progress": null
+      },
+      {
+        "id": "BL-21",
+        "progress": null
+      },
+      {
+        "id": "BL-22",
+        "parent": "BL-22",
+        "progress": null
+      },
+      {
+        "id": "BL-4",
+        "archived": true,
+        "progress": null
+      }
+    ]
+  }
+}

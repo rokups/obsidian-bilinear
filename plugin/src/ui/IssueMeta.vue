@@ -19,12 +19,21 @@ const blockers = computed(() =>
     return !b || b.status === null || !c.config.value.closedStates.includes(b.status);
   }),
 );
+const progressTitle = computed(() => {
+  const p = progress.value;
+  if (!p) return "";
+  const lines = p.issues.map((id) => {
+    const i = c.byId.value.get(id);
+    return `${id}  ${i?.status ?? "note missing"}  ${i?.title ?? ""}`.trimEnd();
+  });
+  return `${p.done} of ${p.total} linked issues closed\n${lines.join("\n")}`;
+});
 const initials = computed(() => (props.issue.assignee ?? "").trim().slice(0, 2).toUpperCase());
 </script>
 
 <template>
   <span v-if="blockers.length" class="bl-chip is-blocked" :title="`Blocked by ${blockers.join(', ')}`">blocked</span>
-  <span v-if="progress" class="bl-chip bl-progress" :title="`${progress.done} of ${progress.total} sub-issues closed`">
+  <span v-if="progress" class="bl-chip bl-progress" :class="{ 'is-complete': progress.done === progress.total }" :title="progressTitle">
     <svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true">
       <circle cx="7" cy="7" r="5" class="bl-ring" />
       <circle

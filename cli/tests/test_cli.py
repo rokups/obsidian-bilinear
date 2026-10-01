@@ -403,9 +403,23 @@ class CommandTest(CliCase):
     def test_list_text(self):
         out = self.ok("list")
         self.assertEqual(
-            "BL-1  backlog  high  Alpha  @rk  #bug\n"
+            "BL-1  backlog  high  Alpha  [1/1]  @rk  #bug\n"
             "BL-2  done     none  Beta\n"
             "BL-3  backlog  none  Gamma  #ui #bug\n", out)
+
+    def test_progress_follows_linked_issues(self):
+        note = self.dir / "issues" / "BL-3.md"
+        note.write_text(note.read_text() + "\nDepends on [[BL-1]] and [[BL-2]].\n\n## Comments\n- 2026-10-01 rk: unlike [[BL-9]]\n")
+        by_id = {i["id"]: i for i in json.loads(self.ok("list", "--json"))}
+        self.assertEqual({"done": 1, "total": 1, "issues": ["BL-2"]}, by_id["BL-1"]["progress"])
+        self.assertIsNone(by_id["BL-2"]["progress"])
+        self.assertEqual(["BL-1", "BL-2"], by_id["BL-3"]["links"])
+        self.assertEqual({"done": 1, "total": 2, "issues": ["BL-1", "BL-2"]}, by_id["BL-3"]["progress"])
+        self.assertIn("progress:    1/2  (BL-1 backlog, BL-2 done)\n", self.ok("show", "BL-3"))
+        self.ok("set", "BL-1", "status=canceled")
+        self.assertIn("  [2/2]", self.ok("list", "--status", "backlog"))
+        self.ok("archive", "--closed")
+        self.assertEqual({"done": 2, "total": 2, "issues": ["BL-1", "BL-2"]}, json.loads(self.ok("show", "BL-3", "--json"))["progress"])
 
     def test_show(self):
         out = self.ok("show", "BL-2")

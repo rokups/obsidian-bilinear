@@ -5,7 +5,7 @@ import { COLOR_NAMES, PRIORITIES, todayIso } from "../format/ids";
 import type { IssueRecord } from "../format/record";
 import type { Tracker } from "../ops/io";
 import { archiveClosed, archiveIssues, commentIssue, deleteIssue, moveIssue, recreateNote, setLabel, setProps, unarchiveIssues, type PropEdits } from "../ops/issues";
-import { applyFilter, childProgress, groupIssues, groupProperty, sortIssues, type Filter, type GroupKey, type ViewSpec } from "../store/query";
+import { applyFilter, groupIssues, groupProperty, linkedProgress, sortIssues, type Filter, type GroupKey, type ViewSpec } from "../store/query";
 import { labelColorName } from "../store/labels";
 import type { Snapshot } from "../store/snapshot";
 import type { SavedView } from "../store/views";
@@ -72,7 +72,7 @@ export function createController(store: StoreLike, host: Host, initial: ViewSpec
   const order = computed<RowRef[]>(() =>
     groups.value.flatMap((g) => (spec.layout === "list" && collapsed.has(g.key) ? [] : g.issues.map((i) => ({ id: i.id, group: g.key })))),
   );
-  const progress = computed(() => childProgress(all.value, config.value.closedStates));
+  const progress = computed(() => linkedProgress(all.value, config.value.closedStates));
   const canReorder = computed(() => spec.sortBy === "manual" && !showArchived.value);
   const assignees = computed(() => [...new Set(all.value.map((i) => i.assignee).filter((a): a is string => !!a))].sort((a, b) => a.localeCompare(b)));
   const labels = computed(() => [...new Set([...config.value.labels, ...all.value.flatMap((i) => i.labels)])]);
