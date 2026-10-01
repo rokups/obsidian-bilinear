@@ -1,7 +1,7 @@
 {
   "op": "set",
   "args": {
-    "id": "RB-11",
+    "id": "BL-11",
     "props": {
       "status": "todo",
       "labels": [

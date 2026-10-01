@@ -5,15 +5,15 @@
   },
   "expect": {
     "problems": [
-      "blocked-by-invalid:RB-9",
-      "blocked-by-unknown:RB-9",
-      "due-invalid:RB-9",
-      "label-unknown:RB-13",
-      "parent-invalid:RB-9",
-      "priority-invalid:RB-9",
-      "status-missing:RB-11",
-      "status-unknown:RB-13",
-      "title-missing:RB-11"
+      "blocked-by-invalid:BL-9",
+      "blocked-by-unknown:BL-9",
+      "due-invalid:BL-9",
+      "label-unknown:BL-13",
+      "parent-invalid:BL-9",
+      "priority-invalid:BL-9",
+      "status-missing:BL-11",
+      "status-unknown:BL-13",
+      "title-missing:BL-11"
     ]
   }
 }

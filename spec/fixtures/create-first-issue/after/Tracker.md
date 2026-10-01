@@ -1,6 +1,6 @@
 ---
 bilinear: tracker
-prefix: RB
+prefix: BL
 next: 2
 states: [backlog, todo, in-progress, in-review, done, canceled]
 closed-states: [done, canceled]
@@ -8,6 +8,6 @@ labels: [bug, build, ui]
 ---
 
 ## Issues
-- [[RB-1]] First issue
+- [[BL-1]] First issue
 
 ## Archive

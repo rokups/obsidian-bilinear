@@ -10,10 +10,10 @@
     ],
     "assignee": "rk",
     "due": "2026-10-10",
-    "parent": "RB-9"
+    "parent": "BL-9"
   },
   "today": "2026-10-01",
   "expect": {
-    "id": "RB-14"
+    "id": "BL-14"
   }
 }

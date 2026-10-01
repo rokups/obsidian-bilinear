@@ -5,8 +5,8 @@
   },
   "expect": {
     "problems": [
-      "orphan:RB-12",
-      "orphan:RB-2"
+      "orphan:BL-12",
+      "orphan:BL-2"
     ]
   }
 }

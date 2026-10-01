@@ -555,7 +555,7 @@ _LIST_LINE_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[\[([^\[\]]*)\]\](?:[ \t]+(.*?))
 
 
 def link_target(inner: str) -> str:
-    """Reduce a wikilink body (``path/RB-4.md#h|alias``) to its note name."""
+    """Reduce a wikilink body (``path/BL-4.md#h|alias``) to its note name."""
     inner = re.split(r"[|#]", inner, maxsplit=1)[0].strip(" \t")
     inner = inner.rsplit("/", 1)[-1]
     if inner.endswith(".md"):
@@ -564,7 +564,7 @@ def link_target(inner: str) -> str:
 
 
 def link_id(value: str | None) -> str | None:
-    """Issue ID named by a property value: ``[[RB-9]]`` or a bare ``RB-9``."""
+    """Issue ID named by a property value: ``[[BL-9]]`` or a bare ``BL-9``."""
     if not value:
         return None
     value = value.strip(" \t")
@@ -1941,7 +1941,7 @@ def build_parser() -> Parser:
 
     sp = cmd("init", "create a tracker folder, its index note, issues/ and archive/", cmd_init, needs_tracker=False)
     sp.add_argument("folder")
-    sp.add_argument("--prefix", required=True, help="ID prefix, e.g. RB")
+    sp.add_argument("--prefix", required=True, help="ID prefix, e.g. BL")
 
     sp = cmd("new", "create an issue and print its ID", cmd_new)
     sp.add_argument("title")

@@ -26,11 +26,11 @@ class ScalarTest(unittest.TestCase):
         for raw in ('"open', "'open", '"a" b', "&anchor x", "*alias", "| ", ">-", "{a: 1}", "!tag x", "a: b"):
             with self.subTest(raw=raw):
                 self.assertIsNotNone(parse_scalar(raw)[1])
-        self.assertEqual(("[[RB-9]]", "unquoted wikilink"), parse_scalar("[[RB-9]]"))
+        self.assertEqual(("[[BL-9]]", "unquoted wikilink"), parse_scalar("[[BL-9]]"))
 
     def test_format_round_trips(self):
         values = [
-            "plain", "in-progress", "2026-10-10", "", " padded ", "a: b", "a #b", "ends:", "[[RB-9]]", "-dash",
+            "plain", "in-progress", "2026-10-10", "", " padded ", "a: b", "a #b", "ends:", "[[BL-9]]", "-dash",
             "123", "1.5", "true", "No", "null", "~", 'say "hi"', "back\\slash", "tab\there", "line\nbreak",
             "it's", "@rk", "#tag", "é ü", "a,b", "100%", "x: ", "? what",
         ]
@@ -42,7 +42,7 @@ class ScalarTest(unittest.TestCase):
     def test_format_quotes_only_when_needed(self):
         self.assertEqual("Fix flaky cache test", format_scalar("Fix flaky cache test"))
         self.assertEqual("it's", format_scalar("it's"))
-        self.assertEqual('"[[RB-9]]"', format_scalar("[[RB-9]]"))
+        self.assertEqual('"[[BL-9]]"', format_scalar("[[BL-9]]"))
         self.assertEqual('"a, b"', format_scalar("a, b", flow=True))
         self.assertEqual("a, b", format_scalar("a, b"))
 
@@ -50,9 +50,9 @@ class ScalarTest(unittest.TestCase):
         self.assertEqual(([], None), parse_flow_list("[]"))
         self.assertEqual(([], None), parse_flow_list("[  ]"))
         self.assertEqual((["a", "b c", "d, e"], None), parse_flow_list('[a, b c , "d, e"]'))
-        self.assertEqual((["[[RB-3]]", "x]"], None), parse_flow_list("""["[[RB-3]]", 'x]']"""))
-        self.assertEqual(["[[RB-3]]", "[[RB-4]]"], parse_flow_list("[[[RB-3]], [[RB-4]]]")[0])
-        self.assertIsNotNone(parse_flow_list("[[[RB-3]], [[RB-4]]]")[1])
+        self.assertEqual((["[[BL-3]]", "x]"], None), parse_flow_list("""["[[BL-3]]", 'x]']"""))
+        self.assertEqual(["[[BL-3]]", "[[BL-4]]"], parse_flow_list("[[[BL-3]], [[BL-4]]]")[0])
+        self.assertIsNotNone(parse_flow_list("[[[BL-3]], [[BL-4]]]")[1])
         self.assertIsNotNone(parse_flow_list("[a, b")[1])
         self.assertIsNotNone(parse_flow_list("[a, {b: 1}]")[1])
 
@@ -67,7 +67,7 @@ tags: [a, b]
 empty:
 # a comment
 
-parent: "[[RB-9]]"
+parent: "[[BL-9]]"
 ---
 Body
 """
@@ -81,7 +81,7 @@ class DocTest(unittest.TestCase):
         self.assertEqual(["a", "b"], d.get("tags"))
         self.assertIsNone(d.get("empty"))
         self.assertEqual([], d.get_list("empty"))
-        self.assertEqual("[[RB-9]]", d.get_str("parent"))
+        self.assertEqual("[[BL-9]]", d.get_str("parent"))
         self.assertEqual(["title", "status", "labels", "tags", "empty", "parent"], d.keys())
         self.assertEqual("Body\n", d.body)
         self.assertEqual([], d.problems())
@@ -136,7 +136,7 @@ class DocTest(unittest.TestCase):
         d.set("assignee", "rk")
         text = d.text()
         self.assertNotIn("build", text)
-        self.assertTrue(text.endswith('parent: "[[RB-9]]"\nassignee: rk\n---\nBody\n'))
+        self.assertTrue(text.endswith('parent: "[[BL-9]]"\nassignee: rk\n---\nBody\n'))
 
     def test_crlf_and_missing_final_newline(self):
         text = "---\r\ntitle: x\r\n---"

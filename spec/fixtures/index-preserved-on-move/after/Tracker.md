@@ -1,6 +1,6 @@
 ---
 bilinear: tracker
-prefix: RB
+prefix: BL
 next: 14
 states:
   - backlog
@@ -13,7 +13,7 @@ closed-states: [done, canceled]
 labels: [bug, build, ui]
 cssclasses: [wide]
 ---
-# RedBolt
+# Bilinear
 
 Free-form project notes. Never modified by the tools.
 
@@ -23,21 +23,21 @@ Free-form project notes. Never modified by the tools.
 
 ````markdown
 ## Issues
-- [[RB-1]] this is an example inside a code block
+- [[BL-1]] this is an example inside a code block
 ````
 
 ## Issues
 Loose text inside the section is kept.
-- [[RB-11]] Speed up cold start
-* [[RB-13|the flaky one]]   Fix flaky cache test
-- [[RB-9]] Rework cache layer
+- [[BL-11]] Speed up cold start
+* [[BL-13|the flaky one]]   Fix flaky cache test
+- [[BL-9]] Rework cache layer
 
 ### Later
 - [[Some other note]] is not an issue
 
 ## Archive
-- [[RB-4]] Remove legacy loader
+- [[BL-4]] Remove legacy loader
 
 ## Decisions
-- [[RB-9]] is the umbrella issue
+- [[BL-9]] is the umbrella issue
 - Keep it simple

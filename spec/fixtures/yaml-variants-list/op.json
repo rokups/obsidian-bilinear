@@ -4,7 +4,7 @@
   "expect": {
     "issues": [
       {
-        "id": "RB-13",
+        "id": "BL-13",
         "title": "Fix flaky: cache test",
         "status": "in-progress",
         "priority": "high",
@@ -14,14 +14,14 @@
         ],
         "assignee": null,
         "due": "2026-10-10",
-        "parent": "RB-9",
+        "parent": "BL-9",
         "blocked-by": [
-          "RB-11",
-          "RB-4"
+          "BL-11",
+          "BL-4"
         ]
       },
       {
-        "id": "RB-9",
+        "id": "BL-9",
         "title": "It's the cache layer",
         "status": "todo",
         "priority": "none",
@@ -29,15 +29,15 @@
           "ui",
           "build"
         ],
-        "parent": "RB-11"
+        "parent": "BL-11"
       },
       {
-        "id": "RB-11",
+        "id": "BL-11",
         "title": "Speed up cold start",
         "status": "done"
       },
       {
-        "id": "RB-4"
+        "id": "BL-4"
       }
     ]
   }

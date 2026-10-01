@@ -66,7 +66,7 @@ export class EmbedChild extends MarkdownRenderChild {
     if (!file) {
       this.state.error = opts.tracker
         ? `Bilinear: no tracker found for "${opts.tracker}"`
-        : "Bilinear: add a line such as 'tracker: Trackers/RedBolt' to say which tracker to show";
+        : "Bilinear: add a line such as 'tracker: Trackers/Bilinear' to say which tracker to show";
       return false;
     }
     this.state.error = null;

@@ -1,6 +1,6 @@
 ---
 bilinear: tracker
-prefix: RB
+prefix: BL
 next: 5
 states: [backlog, todo, in-progress, in-review, done, canceled]
 closed-states: [done, canceled]
@@ -10,4 +10,4 @@ labels: [bug, build, ui]
 Notes.
 
 ## Archive
-- [[RB-4]] Remove legacy loader
+- [[BL-4]] Remove legacy loader

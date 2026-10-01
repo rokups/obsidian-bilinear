@@ -4,18 +4,18 @@
   "expect": {
     "issues": [
       {
-        "id": "RB-13"
+        "id": "BL-13"
       },
       {
-        "id": "RB-9",
+        "id": "BL-9",
         "status": "todo",
         "archived": false
       },
       {
-        "id": "RB-11"
+        "id": "BL-11"
       },
       {
-        "id": "RB-4"
+        "id": "BL-4"
       }
     ]
   }

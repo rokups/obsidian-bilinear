@@ -5,8 +5,8 @@
   },
   "expect": {
     "problems": [
-      "duplicate-id:RB-13",
-      "duplicate-id:RB-9"
+      "duplicate-id:BL-13",
+      "duplicate-id:BL-9"
     ]
   }
 }

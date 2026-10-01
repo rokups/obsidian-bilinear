@@ -1,7 +1,7 @@
 {
   "op": "set",
   "args": {
-    "id": "RB-9",
+    "id": "BL-9",
     "props": {
       "priority": "high",
       "assignee": "ana",
@@ -10,8 +10,8 @@
         "build"
       ],
       "blocked-by": [
-        "RB-13",
-        "RB-11"
+        "BL-13",
+        "BL-11"
       ]
     }
   }

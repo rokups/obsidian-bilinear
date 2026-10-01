@@ -1,6 +1,6 @@
 ---
 bilinear: tracker
-prefix: RB
+prefix: BL
 next: 14
 states: [backlog, todo, in-progress, in-review, done, canceled]
 closed-states: [done, canceled]
@@ -11,9 +11,9 @@ state-icons: [in-review=eye]
 Free-form project notes. Never modified by the tools.
 
 ## Issues
-- [[RB-13]] Fix flaky cache test
-- [[RB-9]] Rework cache layer
-- [[RB-11]] Speed up cold start
+- [[BL-13]] Fix flaky cache test
+- [[BL-9]] Rework cache layer
+- [[BL-11]] Speed up cold start
 
 ## Archive
-- [[RB-4]] Remove legacy loader
+- [[BL-4]] Remove legacy loader

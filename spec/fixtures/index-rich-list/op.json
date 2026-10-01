@@ -4,20 +4,20 @@
   "expect": {
     "issues": [
       {
-        "id": "RB-13",
+        "id": "BL-13",
         "title": "Fix flaky cache test",
         "archived": false
       },
       {
-        "id": "RB-9"
+        "id": "BL-9"
       },
       {
-        "id": "RB-11",
+        "id": "BL-11",
         "archived": false,
         "missing": false
       },
       {
-        "id": "RB-4",
+        "id": "BL-4",
         "archived": true
       }
     ]

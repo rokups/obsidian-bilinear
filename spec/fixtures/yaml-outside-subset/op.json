@@ -5,9 +5,9 @@
   },
   "expect": {
     "problems": [
-      "note-yaml:RB-9",
-      "note-yaml:RB-9",
-      "note-yaml:RB-9"
+      "note-yaml:BL-9",
+      "note-yaml:BL-9",
+      "note-yaml:BL-9"
     ]
   }
 }

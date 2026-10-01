@@ -5,8 +5,8 @@
   },
   "expect": {
     "problems": [
-      "line-format:RB-11",
-      "line-format:RB-13"
+      "line-format:BL-11",
+      "line-format:BL-13"
     ]
   }
 }

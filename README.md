@@ -9,13 +9,13 @@ issue is open and in `archive/` once it is archived. Everything is
 hand-editable; both tools preserve what they do not understand.
 
 ```
-Trackers/RedBolt/
-  RedBolt.md        index note: config, `## Issues`, `## Archive`
+Trackers/Bilinear/
+  Bilinear.md        index note: config, `## Issues`, `## Archive`
   issues/
-    RB-9.md
-    RB-13.md
+    BL-9.md
+    BL-13.md
   archive/
-    RB-4.md
+    BL-4.md
 ```
 
 ![The tracker as a list, with an issue note open in the side split](docs/screenshots/list.png)
@@ -54,20 +54,20 @@ ln -s "$PWD/cli/bilinear.py" ~/.local/bin/bilinear
 ```
 
 ```sh
-bilinear init Trackers/RedBolt --prefix RB
-cd Trackers/RedBolt
+bilinear init Trackers/Bilinear --prefix BL
+cd Trackers/Bilinear
 bilinear new "Fix flaky cache test" --priority high --label build,bug
 bilinear list --status todo,in-progress
-bilinear set RB-1 status=in-progress assignee=rk labels+=ui due=2026-10-10
-bilinear comment RB-1 "reproduced on a clean cache"
-bilinear move RB-1 --top
+bilinear set BL-1 status=in-progress assignee=rk labels+=ui due=2026-10-10
+bilinear comment BL-1 "reproduced on a clean cache"
+bilinear move BL-1 --top
 bilinear archive --closed
 bilinear lint --fix
 ```
 
 | Command | Purpose |
 |---|---|
-| `init <folder> --prefix RB` | Create the folder, index note, `issues/` and `archive/` |
+| `init <folder> --prefix BL` | Create the folder, index note, `issues/` and `archive/` |
 | `new "Title" [--status ..] [--priority ..] [--label ..] [--assignee ..] [--due ..] [--parent ..] [--top]` | Create an issue; prints the ID |
 | `list [--status ..] [--label ..] [--assignee ..] [--priority ..] [--archived] [--all]` | List in index order |
 | `show <ID>` | Print properties and body |
@@ -110,7 +110,7 @@ bilinear lint --fix
   and nothing is added to the vault; on Windows a `.bilinear.lock` file in
   the tracker folder is used. CI runs the CLI tests on all three.
 
-The CLI moves notes with a plain file move. Bare `[[RB-4]]` links survive;
+The CLI moves notes with a plain file move. Bare `[[BL-4]]` links survive;
 path-style links in other notes are only rewritten when the plugin does the
 move.
 
@@ -175,7 +175,7 @@ A `bilinear` code block shows a filtered, read-only list in any note:
 
 ````markdown
 ```bilinear
-tracker: Trackers/RedBolt
+tracker: Trackers/Bilinear
 status: todo, in-progress
 assignee: rk
 limit: 10

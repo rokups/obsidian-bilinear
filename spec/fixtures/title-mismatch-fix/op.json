@@ -5,7 +5,7 @@
   },
   "expect": {
     "problems": [
-      "title-mismatch:RB-9"
+      "title-mismatch:BL-9"
     ]
   }
 }

@@ -29,12 +29,12 @@ describe("scalars", () => {
     for (const raw of ['"open', "'open", '"a" b', "&anchor x", "*alias", "| ", ">-", "{a: 1}", "!tag x", "a: b"]) {
       expect(parseScalar(raw)[1], raw).not.toBeNull();
     }
-    expect(parseScalar("[[RB-9]]")).toEqual(["[[RB-9]]", "unquoted wikilink"]);
+    expect(parseScalar("[[BL-9]]")).toEqual(["[[BL-9]]", "unquoted wikilink"]);
   });
 
   it("formats so that parsing gives the value back", () => {
     const values = [
-      "plain", "in-progress", "2026-10-10", "", " padded ", "a: b", "a #b", "ends:", "[[RB-9]]", "-dash", "123", "1.5",
+      "plain", "in-progress", "2026-10-10", "", " padded ", "a: b", "a #b", "ends:", "[[BL-9]]", "-dash", "123", "1.5",
       "true", "No", "null", "~", 'say "hi"', "back\\slash", "tab\there", "line\nbreak", "it's", "@rk", "#tag", "é ü",
       "a,b", "100%", "x: ", "? what",
     ];
@@ -47,7 +47,7 @@ describe("scalars", () => {
   it("quotes only when needed", () => {
     expect(formatScalar("Fix flaky cache test")).toBe("Fix flaky cache test");
     expect(formatScalar("it's")).toBe("it's");
-    expect(formatScalar("[[RB-9]]")).toBe('"[[RB-9]]"');
+    expect(formatScalar("[[BL-9]]")).toBe('"[[BL-9]]"');
     expect(formatScalar("a, b", true)).toBe('"a, b"');
     expect(formatScalar("a, b")).toBe("a, b");
   });
@@ -56,9 +56,9 @@ describe("scalars", () => {
     expect(parseFlowList("[]")).toEqual([[], null]);
     expect(parseFlowList("[  ]")).toEqual([[], null]);
     expect(parseFlowList('[a, b c , "d, e"]')).toEqual([["a", "b c", "d, e"], null]);
-    expect(parseFlowList(`["[[RB-3]]", 'x]']`)).toEqual([["[[RB-3]]", "x]"], null]);
-    expect(parseFlowList("[[[RB-3]], [[RB-4]]]")[0]).toEqual(["[[RB-3]]", "[[RB-4]]"]);
-    expect(parseFlowList("[[[RB-3]], [[RB-4]]]")[1]).not.toBeNull();
+    expect(parseFlowList(`["[[BL-3]]", 'x]']`)).toEqual([["[[BL-3]]", "x]"], null]);
+    expect(parseFlowList("[[[BL-3]], [[BL-4]]]")[0]).toEqual(["[[BL-3]]", "[[BL-4]]"]);
+    expect(parseFlowList("[[[BL-3]], [[BL-4]]]")[1]).not.toBeNull();
     expect(parseFlowList("[a, b")[1]).not.toBeNull();
     expect(parseFlowList("[a, {b: 1}]")[1]).not.toBeNull();
   });
@@ -74,7 +74,7 @@ tags: [a, b]
 empty:
 # a comment
 
-parent: "[[RB-9]]"
+parent: "[[BL-9]]"
 ---
 Body
 `;
@@ -87,7 +87,7 @@ describe("frontmatter document", () => {
     expect(d.get("tags")).toEqual(["a", "b"]);
     expect(d.get("empty")).toBeNull();
     expect(d.getList("empty")).toEqual([]);
-    expect(d.getStr("parent")).toBe("[[RB-9]]");
+    expect(d.getStr("parent")).toBe("[[BL-9]]");
     expect(d.keys()).toEqual(["title", "status", "labels", "tags", "empty", "parent"]);
     expect(d.body).toBe("Body\n");
     expect(d.problems()).toEqual([]);
@@ -142,7 +142,7 @@ describe("frontmatter document", () => {
     d.set("labels", null);
     d.set("assignee", "rk");
     expect(d.text()).not.toContain("build");
-    expect(d.text().endsWith('parent: "[[RB-9]]"\nassignee: rk\n---\nBody\n')).toBe(true);
+    expect(d.text().endsWith('parent: "[[BL-9]]"\nassignee: rk\n---\nBody\n')).toBe(true);
   });
 
   it("keeps CRLF, a missing final newline and a BOM", () => {
@@ -168,22 +168,22 @@ describe("frontmatter document", () => {
 
 describe("ids and links", () => {
   it("reduces links to IDs", () => {
-    expect(linkTarget("archive/RB-4.md#h|alias")).toBe("RB-4");
-    expect(linkId("[[RB-9]]")).toBe("RB-9");
-    expect(linkId("[[Trackers/RedBolt/archive/RB-4|the loader]]")).toBe("RB-4");
-    expect(linkId("RB-9")).toBe("RB-9");
+    expect(linkTarget("archive/BL-4.md#h|alias")).toBe("BL-4");
+    expect(linkId("[[BL-9]]")).toBe("BL-9");
+    expect(linkId("[[Trackers/Bilinear/archive/BL-4|the loader]]")).toBe("BL-4");
+    expect(linkId("BL-9")).toBe("BL-9");
     expect(linkId("[[Some note]]")).toBeNull();
-    expect(linkId("rb-9")).toBeNull();
+    expect(linkId("bl-9")).toBeNull();
     expect(linkId(null)).toBeNull();
   });
 
   it("numbers, titles, lines and dates", () => {
-    expect(idNumber("RB-12", "RB")).toBe(12);
-    expect(idNumber("XY-12", "RB")).toBeNull();
+    expect(idNumber("BL-12", "BL")).toBe(12);
+    expect(idNumber("XY-12", "BL")).toBeNull();
     expect(idNumber("XY-12", null)).toBe(12);
     expect(cleanTitle("  a \n b\t c ")).toBe("a b c");
-    expect(formatLine("RB-1", "T")).toBe("- [[RB-1]] T");
-    expect(formatLine("RB-1", "")).toBe("- [[RB-1]]");
+    expect(formatLine("BL-1", "T")).toBe("- [[BL-1]] T");
+    expect(formatLine("BL-1", "")).toBe("- [[BL-1]]");
     expect(validDate("2026-10-01")).toBe(true);
     expect(validDate("2024-02-29")).toBe(true);
     for (const bad of ["2026-02-30", "2026-13-01", "2026-1-1", "tomorrow", "", null, "0000-01-01"]) expect(validDate(bad), String(bad)).toBe(false);
@@ -192,33 +192,33 @@ describe("ids and links", () => {
 
 describe("index note", () => {
   it("creates a usable empty index", () => {
-    const idx = new Index(newIndexText("RB"));
+    const idx = new Index(newIndexText("BL"));
     expect(idx.isTracker()).toBe(true);
     expect(idx.keyProblems()).toEqual([]);
-    expect([idx.prefix, idx.next, idx.items.length]).toEqual(["RB", 1, 0]);
-    idx.add("RB-1", "First");
-    idx.add("RB-2", "Top", "Issues", true);
+    expect([idx.prefix, idx.next, idx.items.length]).toEqual(["BL", 1, 0]);
+    idx.add("BL-1", "First");
+    idx.add("BL-2", "Top", "Issues", true);
     idx.setNext(3);
     expect(idx.text()).toContain("next: 3\n");
-    expect(idx.text()).toContain("## Issues\n- [[RB-2]] Top\n- [[RB-1]] First\n\n## Archive\n");
+    expect(idx.text()).toContain("## Issues\n- [[BL-2]] Top\n- [[BL-1]] First\n\n## Archive\n");
   });
 
   it("ignores headings and lists inside code fences", () => {
-    const text = "---\nbilinear: tracker\n---\n~~~\n## Issues\n- [[RB-1]] fake\n~~~\n## Issues\n- [[RB-2]] real\n";
-    expect(new Index(text).items.map((i) => i.id)).toEqual(["RB-2"]);
+    const text = "---\nbilinear: tracker\n---\n~~~\n## Issues\n- [[BL-1]] fake\n~~~\n## Issues\n- [[BL-2]] real\n";
+    expect(new Index(text).items.map((i) => i.id)).toEqual(["BL-2"]);
   });
 
   it("uses only the first section of a name and reports the rest", () => {
-    const idx = new Index("## Issues\n- [[RB-1]] a\n## Issues\n- [[RB-2]] b\n# Top\n## Archive\n### Sub\n- [[RB-3]] c\n");
-    expect(idx.items.map((i) => [i.id, i.section])).toEqual([["RB-1", "Issues"], ["RB-3", "Archive"]]);
+    const idx = new Index("## Issues\n- [[BL-1]] a\n## Issues\n- [[BL-2]] b\n# Top\n## Archive\n### Sub\n- [[BL-3]] c\n");
+    expect(idx.items.map((i) => [i.id, i.section])).toEqual([["BL-1", "Issues"], ["BL-3", "Archive"]]);
     expect(idx.dupSections).toEqual(["Issues"]);
   });
 });
 
 describe("issue note", () => {
   it("writes properties in the documented order and omits empty ones", () => {
-    expect(newNoteText({ created: "2026-10-01", title: "T", labels: [], assignee: null, status: "todo", parent: "[[RB-1]]" })).toBe(
-      '---\ntitle: T\nstatus: todo\nparent: "[[RB-1]]"\ncreated: 2026-10-01\n---\n',
+    expect(newNoteText({ created: "2026-10-01", title: "T", labels: [], assignee: null, status: "todo", parent: "[[BL-1]]" })).toBe(
+      '---\ntitle: T\nstatus: todo\nparent: "[[BL-1]]"\ncreated: 2026-10-01\n---\n',
     );
   });
 

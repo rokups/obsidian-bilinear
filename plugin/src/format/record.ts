@@ -56,7 +56,7 @@ export function recordFromDoc(item: Item, doc: Doc | null, path: string | null):
 
 /**
  * A frontmatter value as a list of strings. A full YAML parser turns an
- * unquoted `[[RB-9]]` into a nested list; that is read back as the link.
+ * unquoted `[[BL-9]]` into a nested list; that is read back as the link.
  */
 function toList(v: unknown): string[] {
   if (v === null || v === undefined || v === "") return [];

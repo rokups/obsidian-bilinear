@@ -1,11 +1,11 @@
 {
   "op": "set",
   "args": {
-    "id": "RB-13",
+    "id": "BL-13",
     "props": {
       "assignee": "ana",
       "blocked-by": [
-        "RB-11"
+        "BL-11"
       ],
       "priority": "low"
     }

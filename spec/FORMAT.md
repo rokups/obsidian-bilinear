@@ -13,13 +13,13 @@ A tracker is one folder. It holds one index note and two subfolders: `issues/`
 for the notes of open issues and `archive/` for the notes of archived ones.
 
 ```
-Trackers/RedBolt/
-  RedBolt.md        index note
+Trackers/Bilinear/
+  Bilinear.md        index note
   issues/
-    RB-9.md
-    RB-13.md
+    BL-9.md
+    BL-13.md
   archive/
-    RB-4.md
+    BL-4.md
 ```
 
 Either subfolder may be absent; tools create it when they first need it.
@@ -77,7 +77,7 @@ and `lint` reports the others.
 ```markdown
 ---
 bilinear: tracker
-prefix: RB
+prefix: BL
 next: 14
 states: [backlog, todo, in-progress, in-review, done, canceled]
 closed-states: [done, canceled]
@@ -87,11 +87,11 @@ labels: [bug, build, ui]
 Free-form project notes. Never modified by the tools.
 
 ## Issues
-- [[RB-13]] Fix flaky cache test
-- [[RB-9]] Rework cache layer
+- [[BL-13]] Fix flaky cache test
+- [[BL-9]] Rework cache layer
 
 ## Archive
-- [[RB-4]] Remove legacy loader
+- [[BL-4]] Remove legacy loader
 ```
 
 | Key | Meaning |
@@ -187,8 +187,8 @@ priority: high
 labels: [build, bug]
 assignee: rk
 due: 2026-10-10
-parent: "[[RB-9]]"
-blocked-by: ["[[RB-3]]"]
+parent: "[[BL-9]]"
+blocked-by: ["[[BL-3]]"]
 created: 2026-10-01
 ---
 
@@ -215,7 +215,7 @@ absent key. Where a list is expected a single scalar is read as a one-item
 list.
 
 A link property is read by reducing the wikilink the same way as an index line
-link, so `"[[archive/RB-4|the loader]]"` names `RB-4`. A bare ID with no
+link, so `"[[archive/BL-4|the loader]]"` names `BL-4`. A bare ID with no
 brackets is also accepted. Tools write `"[[<ID>]]"`.
 
 Titles are single-line: runs of whitespace, including line breaks, collapse to
@@ -259,7 +259,7 @@ aliases, tags, block scalars (`|`, `>`), inline maps, multi-line values, quoted
 keys, duplicate keys, and a plain scalar containing `: `. Such keys and the
 lines belonging to them are kept as they are and can still be edited around.
 
-An unquoted wikilink (`parent: [[RB-9]]`, or as a list item) is read as the
+An unquoted wikilink (`parent: [[BL-9]]`, or as a list item) is read as the
 link it obviously means and reported by `lint` as a warning; it is quoted the
 next time a tool writes that key.
 
@@ -401,7 +401,7 @@ the index note.
 
 - A bad sync merge of the index can drop an issue from the tracker. The note
   survives as an orphan and `lint` reports it.
-- The CLI moves notes with a plain file move. Bare `[[RB-4]]` links survive, but
+- The CLI moves notes with a plain file move. Bare `[[BL-4]]` links survive, but
   path-style links in other notes (vault link format set to relative or
   absolute) are only rewritten when the move is done from the plugin.
 
@@ -431,7 +431,7 @@ identity.
   "args": { "title": "Add retry to fetcher" },
   "today": "2026-10-01",
   "author": "rk",
-  "expect": { "id": "RB-14" }
+  "expect": { "id": "BL-14" }
 }
 ```
 

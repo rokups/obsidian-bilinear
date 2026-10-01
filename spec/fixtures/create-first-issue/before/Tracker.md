@@ -1,6 +1,6 @@
 ---
 bilinear: tracker
-prefix: RB
+prefix: BL
 next: 1
 states: [backlog, todo, in-progress, in-review, done, canceled]
 closed-states: [done, canceled]

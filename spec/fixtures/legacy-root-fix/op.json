@@ -5,9 +5,9 @@
   },
   "expect": {
     "problems": [
-      "wrong-location:RB-11",
-      "wrong-location:RB-13",
-      "wrong-location:RB-9"
+      "wrong-location:BL-11",
+      "wrong-location:BL-13",
+      "wrong-location:BL-9"
     ]
   }
 }

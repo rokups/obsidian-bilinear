@@ -10,7 +10,7 @@ export interface EmbedOptions {
 /**
  * Parse the body of a `bilinear` code block: one `key: value` per line.
  *
- *     tracker: Trackers/RedBolt
+ *     tracker: Trackers/Bilinear
  *     status: todo, in-progress
  *     label: bug
  *     limit: 10

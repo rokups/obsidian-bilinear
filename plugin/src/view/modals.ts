@@ -151,16 +151,16 @@ export class CreateTrackerModal extends Modal {
       if (name.trim() && (await this.submit(folder, prefix.trim()))) this.close();
     };
     new Setting(this.contentEl).setName("Name").setDesc("The tracker's folder and index note are named after it.").addText((t) => {
-      t.setPlaceholder("RedBolt").onChange((v) => {
+      t.setPlaceholder("Bilinear").onChange((v) => {
         name = v;
         if (!prefixEdited && prefixInput) prefixInput.value = prefix = suggest(v);
       });
       window.setTimeout(() => t.inputEl.focus());
     });
     new Setting(this.contentEl).setName("Parent folder").setDesc("Leave empty for the vault root.").addText((t) => t.setValue(parent).onChange((v) => (parent = v)));
-    new Setting(this.contentEl).setName("ID prefix").setDesc("Capital letters and digits, starting with a letter. Issues are numbered RB-1, RB-2, …").addText((t) => {
+    new Setting(this.contentEl).setName("ID prefix").setDesc("Capital letters and digits, starting with a letter. Issues are numbered BL-1, BL-2, …").addText((t) => {
       prefixInput = t.inputEl;
-      t.setPlaceholder("RB").onChange((v) => {
+      t.setPlaceholder("BL").onChange((v) => {
         prefix = v;
         prefixEdited = true;
       });
