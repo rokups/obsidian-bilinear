@@ -1,0 +1,44 @@
+{
+  "op": "list",
+  "args": {},
+  "expect": {
+    "issues": [
+      {
+        "id": "RB-13",
+        "title": "Fix flaky: cache test",
+        "status": "in-progress",
+        "priority": "high",
+        "labels": [
+          "build",
+          "bug"
+        ],
+        "assignee": null,
+        "due": "2026-10-10",
+        "parent": "RB-9",
+        "blocked-by": [
+          "RB-11",
+          "RB-4"
+        ]
+      },
+      {
+        "id": "RB-9",
+        "title": "It's the cache layer",
+        "status": "todo",
+        "priority": "none",
+        "labels": [
+          "ui",
+          "build"
+        ],
+        "parent": "RB-11"
+      },
+      {
+        "id": "RB-11",
+        "title": "Speed up cold start",
+        "status": "done"
+      },
+      {
+        "id": "RB-4"
+      }
+    ]
+  }
+}

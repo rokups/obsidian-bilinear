@@ -1,0 +1,11 @@
+{
+  "op": "set",
+  "args": {
+    "id": "RB-13",
+    "props": {
+      "assignee": null,
+      "parent": null,
+      "labels": []
+    }
+  }
+}

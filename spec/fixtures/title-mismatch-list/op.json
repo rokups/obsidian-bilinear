@@ -1,0 +1,21 @@
+{
+  "op": "list",
+  "args": {},
+  "expect": {
+    "issues": [
+      {
+        "id": "RB-13"
+      },
+      {
+        "id": "RB-9",
+        "title": "Rework the cache layer"
+      },
+      {
+        "id": "RB-11"
+      },
+      {
+        "id": "RB-4"
+      }
+    ]
+  }
+}

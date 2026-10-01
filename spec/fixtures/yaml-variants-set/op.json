@@ -1,0 +1,13 @@
+{
+  "op": "set",
+  "args": {
+    "id": "RB-13",
+    "props": {
+      "assignee": "ana",
+      "blocked-by": [
+        "RB-11"
+      ],
+      "priority": "low"
+    }
+  }
+}

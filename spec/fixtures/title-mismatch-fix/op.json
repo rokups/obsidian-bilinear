@@ -1,0 +1,11 @@
+{
+  "op": "lint",
+  "args": {
+    "fix": true
+  },
+  "expect": {
+    "problems": [
+      "title-mismatch:RB-9"
+    ]
+  }
+}

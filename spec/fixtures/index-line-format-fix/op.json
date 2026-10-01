@@ -1,0 +1,12 @@
+{
+  "op": "lint",
+  "args": {
+    "fix": true
+  },
+  "expect": {
+    "problems": [
+      "line-format:RB-11",
+      "line-format:RB-13"
+    ]
+  }
+}

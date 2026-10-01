@@ -1,0 +1,24 @@
+{
+  "op": "list",
+  "args": {},
+  "expect": {
+    "issues": [
+      {
+        "id": "RB-13",
+        "archived": false
+      },
+      {
+        "id": "RB-9",
+        "archived": false
+      },
+      {
+        "id": "RB-11",
+        "archived": false
+      },
+      {
+        "id": "RB-4",
+        "archived": true
+      }
+    ]
+  }
+}

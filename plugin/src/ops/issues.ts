@@ -1,0 +1,234 @@
+// The operations of spec/FORMAT.md section 2. In each, the index write comes
+// last, so an interrupted operation leaves at worst a stray note.
+
+import { ARCHIVE, ARCHIVE_DIR, ID_RE, ISSUES, PREFIX_RE, PRIORITIES, cleanTitle, idNumber, linkId, makeLink, validDate } from "../format/ids";
+import { newIndexText, type Index, type Where } from "../format/index-note";
+import { addComment, newNoteText } from "../format/issue-note";
+import { Doc, type Value } from "../format/yaml";
+import { OpError, joinPath, type Tracker, type TrackerIO } from "./io";
+import { indexNotes, issueRecord, locate, moveNote, noteIds, notePath, readIndex, requireItem, resolveNote, updateIndex } from "./tracker";
+
+export interface NewIssue {
+  title: string;
+  status?: string;
+  priority?: string;
+  labels?: string[];
+  assignee?: string;
+  due?: string;
+  /** Parent issue ID. */
+  parent?: string;
+  top?: boolean;
+}
+
+/** Property edits. null or [] removes a key; `parent` and `blocked-by` take IDs. */
+export type PropEdits = Record<string, Value>;
+
+function checkProps(idx: Index, props: PropEdits, selfId: string | null): void {
+  const str = (key: string) => (typeof props[key] === "string" ? (props[key] as string) : null);
+  if ("title" in props && !str("title")) throw new OpError("title must not be empty");
+  if ("status" in props) {
+    const status = str("status");
+    if (!status) throw new OpError("status must not be empty");
+    if (!idx.states.includes(status)) throw new OpError(`unknown status '${status}' (states: ${idx.states.join(", ")})`);
+  }
+  const priority = str("priority");
+  if (priority !== null && !(PRIORITIES as readonly string[]).includes(priority)) {
+    throw new OpError(`unknown priority '${priority}' (one of: ${PRIORITIES.join(", ")})`);
+  }
+  for (const key of ["due", "created"]) {
+    if (str(key) !== null && !validDate(str(key))) throw new OpError(`${key} must be a date in the form YYYY-MM-DD`);
+  }
+  const blocked = props["blocked-by"];
+  const links = Array.isArray(blocked) ? [...blocked] : typeof blocked === "string" ? [blocked] : [];
+  if (str("parent") !== null) links.push(str("parent")!);
+  for (const link of links) {
+    const target = linkId(link);
+    if (target === null) throw new OpError(`'${link}' is not an issue ID`);
+    if (target === selfId) throw new OpError(`${target}: an issue cannot refer to itself`);
+    if (!idx.find(target)) throw new OpError(`${target}: no such issue`);
+  }
+}
+
+/** Create the tracker folder, its index note and archive/. Returns the index path. */
+export async function createTracker(io: TrackerIO, folder: string, prefix: string): Promise<string> {
+  if (!PREFIX_RE.test(prefix)) throw new OpError("the prefix must be of the form [A-Z][A-Z0-9]*");
+  if (!folder) throw new OpError("a tracker needs its own folder");
+  if ((await indexNotes(io, folder)).length) throw new OpError(`${folder} already contains a tracker`);
+  await io.mkdir(folder);
+  await io.mkdir(joinPath(folder, ARCHIVE_DIR));
+  const indexPath = joinPath(folder, `${folder.slice(folder.lastIndexOf("/") + 1)}.md`);
+  if (!(await io.createExclusive(indexPath, newIndexText(prefix)))) {
+    throw new OpError(`${indexPath} already exists and is not a tracker index`);
+  }
+  return indexPath;
+}
+
+export async function createIssue(t: Tracker, args: NewIssue, today: string): Promise<string> {
+  const idx = await readIndex(t);
+  const title = cleanTitle(args.title);
+  const props: PropEdits = {
+    title,
+    status: args.status || idx.states[0],
+    priority: args.priority || "none",
+    labels: args.labels ?? [],
+    assignee: args.assignee || null,
+    due: args.due || null,
+    parent: args.parent || null,
+    created: today,
+  };
+  checkProps(idx, props, null);
+  if (props["parent"]) props["parent"] = makeLink(linkId(props["parent"] as string)!);
+  const text = newNoteText(props);
+
+  const prefix = idx.prefix!;
+  let highest = idx.highest();
+  for (const archived of [false, true]) {
+    for (const id of await noteIds(t, archived)) highest = Math.max(highest, idNumber(id, prefix) ?? 0);
+  }
+  let n = Math.max(idx.next!, highest + 1);
+  let id: string;
+  for (;;) {
+    id = `${prefix}-${n}`;
+    if (!(await t.io.exists(notePath(t, id, true))) && (await t.io.createExclusive(notePath(t, id, false), text))) break;
+    n += 1;
+  }
+
+  await updateIndex(
+    t,
+    (i) => {
+      if (!i.find(id)) i.add(id, title, ISSUES, args.top ?? false);
+      i.setNext(Math.max(i.next ?? 1, n + 1));
+    },
+    { known: new Map([[id, title]]) },
+  );
+  return id;
+}
+
+export async function setProps(t: Tracker, id: string, edits: PropEdits): Promise<void> {
+  const idx = await readIndex(t);
+  const item = requireItem(idx, id);
+  const path = await resolveNote(t, id, item.archived);
+  if (path === null) throw new OpError(`${id}: note missing`);
+  const props: PropEdits = { ...edits };
+  if (typeof props["title"] === "string") props["title"] = cleanTitle(props["title"]);
+  for (const [key, value] of Object.entries(props)) {
+    if (value === "" && key !== "title" && key !== "status") props[key] = null;
+  }
+  checkProps(idx, props, id);
+  if (typeof props["parent"] === "string") props["parent"] = makeLink(linkId(props["parent"])!);
+  const blocked = props["blocked-by"];
+  if (typeof blocked === "string") props["blocked-by"] = [makeLink(linkId(blocked)!)];
+  else if (Array.isArray(blocked)) props["blocked-by"] = blocked.map((v) => makeLink(linkId(v)!));
+
+  await t.io.process(path, (text) => {
+    const doc = new Doc(text);
+    for (const [key, value] of Object.entries(props)) {
+      doc.set(key, Array.isArray(value) && value.length === 0 ? null : value);
+    }
+    return doc.text();
+  });
+  if (typeof props["title"] === "string") {
+    // Retitle: the note first, then the index line.
+    await updateIndex(t, () => {}, { known: new Map([[id, props["title"] as string]]) });
+  }
+}
+
+export async function moveIssue(t: Tracker, id: string, where: Where, anchor?: string): Promise<void> {
+  const idx = await readIndex(t);
+  const relative = where === "before" || where === "after";
+  if (relative && !anchor) throw new OpError("an anchor issue is needed");
+  for (const each of relative ? [id, anchor!] : [id]) {
+    if (requireItem(idx, each).archived) throw new OpError(`${each} is archived; only open issues can be reordered`);
+  }
+  if (relative && anchor === id) throw new OpError("an issue cannot be moved relative to itself");
+  await updateIndex(t, (i) => {
+    if (!i.find(id) || (relative && !i.find(anchor!))) throw new OpError("the index changed; issue no longer listed");
+    i.move(id, where, anchor);
+  });
+}
+
+async function moveToSection(t: Tracker, ids: string[], toArchive: boolean): Promise<string[]> {
+  const idx = await readIndex(t);
+  const unique = [...new Set(ids)];
+  const todo = unique.filter((id) => requireItem(idx, id).archived !== toArchive);
+  for (const id of todo) await moveNote(t, id, toArchive);
+  if (todo.length) {
+    await updateIndex(t, (i) => {
+      for (const id of todo) {
+        if (i.find(id)) i.moveToSection(id, toArchive ? ARCHIVE : ISSUES);
+      }
+    });
+  }
+  return todo;
+}
+
+/** Archive issues. Returns the IDs that were actually archived. */
+export function archiveIssues(t: Tracker, ids: string[]): Promise<string[]> {
+  return moveToSection(t, ids, true);
+}
+
+export function unarchiveIssues(t: Tracker, ids: string[]): Promise<string[]> {
+  return moveToSection(t, ids, false);
+}
+
+/** Archive every open issue whose status is one of the closed states. */
+export async function archiveClosed(t: Tracker): Promise<string[]> {
+  const idx = await readIndex(t);
+  const ids: string[] = [];
+  for (const it of idx.inSection(ISSUES)) {
+    const status = (await issueRecord(t, it)).status;
+    if (status !== null && idx.closedStates.includes(status)) ids.push(it.id);
+  }
+  return ids.length ? archiveIssues(t, ids) : [];
+}
+
+/** Trash the note (wherever it is) and remove the index line. */
+export async function deleteIssue(t: Tracker, id: string): Promise<void> {
+  const idx = await readIndex(t);
+  requireItem(idx, id);
+  for (const archived of [false, true]) {
+    const p = notePath(t, id, archived);
+    if (await t.io.exists(p)) await t.io.trash(p);
+  }
+  await updateIndex(t, (i) => i.remove(id));
+}
+
+export async function commentIssue(t: Tracker, id: string, text: string, author: string, today: string): Promise<void> {
+  const idx = await readIndex(t);
+  const item = requireItem(idx, id);
+  const path = await resolveNote(t, id, item.archived);
+  if (path === null) throw new OpError(`${id}: note missing`);
+  if (!cleanTitle(text)) throw new OpError("comment text must not be empty");
+  await t.io.process(path, (note) => addComment(note, today, author || "unknown", text));
+}
+
+/** Add an index line for an orphan note. */
+export async function adoptIssue(t: Tracker, id: string): Promise<void> {
+  const idx = await readIndex(t);
+  if (!ID_RE.test(id)) throw new OpError(`'${id}' is not an issue ID`);
+  if (idx.find(id)) throw new OpError(`${id} is already in the index`);
+  const [main, arch] = await locate(t, id);
+  if (!main && !arch) throw new OpError(`${id}: no such note in the tracker folder or ${ARCHIVE_DIR}/`);
+  const section = main ? ISSUES : ARCHIVE;
+  const number = idNumber(id, idx.prefix);
+  await updateIndex(
+    t,
+    (i) => {
+      if (!i.find(id)) i.add(id, "", section);
+      if (number !== null && (i.next ?? 1) <= number) i.setNext(number + 1);
+    },
+    { extra: [[id, !main]] },
+  );
+}
+
+/** Recreate the note of a "note missing" issue from its index line. */
+export async function recreateNote(t: Tracker, id: string, today: string): Promise<string> {
+  const idx = await readIndex(t);
+  const item = requireItem(idx, id);
+  if ((await resolveNote(t, id, item.archived)) !== null) throw new OpError(`${id}: the note exists`);
+  const path = notePath(t, id, item.archived);
+  if (item.archived) await t.io.mkdir(joinPath(t.dir, ARCHIVE_DIR));
+  const text = newNoteText({ title: item.title || id, status: idx.states[0], priority: "none", created: today });
+  if (!(await t.io.createExclusive(path, text))) throw new OpError(`${id}: the note exists`);
+  return path;
+}

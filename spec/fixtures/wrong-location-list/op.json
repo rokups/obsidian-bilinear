@@ -1,0 +1,26 @@
+{
+  "op": "list",
+  "args": {},
+  "expect": {
+    "issues": [
+      {
+        "id": "RB-13"
+      },
+      {
+        "id": "RB-9",
+        "archived": false,
+        "missing": false,
+        "status": "todo"
+      },
+      {
+        "id": "RB-11"
+      },
+      {
+        "id": "RB-4",
+        "archived": true,
+        "missing": false,
+        "status": "canceled"
+      }
+    ]
+  }
+}

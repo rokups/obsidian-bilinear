@@ -1,0 +1,18 @@
+{
+  "op": "set",
+  "args": {
+    "id": "RB-9",
+    "props": {
+      "priority": "high",
+      "assignee": "ana",
+      "due": "2026-11-02",
+      "labels": [
+        "build"
+      ],
+      "blocked-by": [
+        "RB-13",
+        "RB-11"
+      ]
+    }
+  }
+}

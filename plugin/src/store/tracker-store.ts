@@ -1,0 +1,100 @@
+import { type App, type EventRef, type TAbstractFile, type TFile } from "obsidian";
+import { ref, shallowRef } from "vue";
+import { ARCHIVE_DIR } from "../format/ids";
+import type { Tracker } from "../ops/io";
+import { VaultIO } from "../view/vault-io";
+import { buildSnapshot, emptySnapshot, type Snapshot } from "./snapshot";
+import { writeViews, type SavedView } from "./views";
+
+export function folderOf(file: TFile): string {
+  const p = file.parent?.path ?? "";
+  return p === "/" ? "" : p;
+}
+
+/**
+ * The reactive state behind a tracker view: the index list resolved against
+ * the notes, with properties taken from the metadata cache. It re-reads on
+ * vault and metadata cache events, so edits made outside the plugin (the CLI,
+ * the Properties UI, sync) show up live.
+ */
+export class TrackerStore {
+  readonly snapshot = shallowRef<Snapshot>(emptySnapshot());
+  readonly loaded = ref(false);
+  private io: VaultIO;
+  private refs: Array<[{ offref(ref: EventRef): void }, EventRef]> = [];
+  private timer: number | null = null;
+  private stopped = false;
+
+  constructor(
+    private app: App,
+    readonly indexFile: TFile,
+  ) {
+    this.io = new VaultIO(app);
+  }
+
+  get dir(): string {
+    return folderOf(this.indexFile);
+  }
+
+  get tracker(): Tracker {
+    return { io: this.io, dir: this.dir, indexPath: this.indexFile.path };
+  }
+
+  start(): void {
+    const { vault, metadataCache } = this.app;
+    const onFile = (file: TAbstractFile) => this.touched(file.path);
+    this.refs.push(
+      [vault, vault.on("modify", onFile)],
+      [vault, vault.on("create", onFile)],
+      [vault, vault.on("delete", onFile)],
+      [vault, vault.on("rename", (file, oldPath) => (this.touched(file.path), this.touched(oldPath)))],
+      [metadataCache, metadataCache.on("changed", onFile)],
+    );
+    void this.reload();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    for (const [source, ref] of this.refs) source.offref(ref);
+    this.refs = [];
+    if (this.timer !== null) window.clearTimeout(this.timer);
+  }
+
+  /** Is this path the index, an issue note, or a note in archive/? */
+  private concerns(path: string): boolean {
+    if (path === this.indexFile.path) return true;
+    const slash = path.lastIndexOf("/");
+    const parent = slash < 0 ? "" : path.slice(0, slash);
+    const dir = this.dir;
+    return parent === dir || parent === (dir ? `${dir}/${ARCHIVE_DIR}` : ARCHIVE_DIR);
+  }
+
+  private touched(path: string): void {
+    if (this.stopped || !this.concerns(path) || this.timer !== null) return;
+    this.timer = window.setTimeout(() => {
+      this.timer = null;
+      void this.reload();
+    }, 40);
+  }
+
+  async reload(): Promise<void> {
+    if (this.stopped) return;
+    let text: string;
+    try {
+      text = await this.app.vault.cachedRead(this.indexFile);
+    } catch {
+      return; // The index note is gone; the view is about to close.
+    }
+    if (this.stopped) return;
+    this.snapshot.value = buildSnapshot(text, this.dir, (path) => {
+      const file = this.app.vault.getFileByPath(path);
+      if (!file) return undefined;
+      return this.app.metadataCache.getFileCache(file)?.frontmatter ?? null;
+    });
+    this.loaded.value = true;
+  }
+
+  async saveViews(views: SavedView[]): Promise<void> {
+    await this.app.vault.process(this.indexFile, (text) => writeViews(text, views));
+  }
+}

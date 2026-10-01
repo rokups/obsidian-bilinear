@@ -1,0 +1,10 @@
+{
+  "op": "create",
+  "args": {
+    "title": "Add retry to fetcher"
+  },
+  "today": "2026-10-01",
+  "expect": {
+    "id": "RB-14"
+  }
+}

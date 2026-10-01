@@ -1,0 +1,22 @@
+{
+  "op": "list",
+  "args": {},
+  "expect": {
+    "issues": [
+      {
+        "id": "RB-13",
+        "title": "Fix flaky cache test"
+      },
+      {
+        "id": "RB-9",
+        "archived": false
+      },
+      {
+        "id": "RB-11"
+      },
+      {
+        "id": "RB-4"
+      }
+    ]
+  }
+}

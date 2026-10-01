@@ -1,0 +1,11 @@
+{
+  "op": "lint",
+  "args": {
+    "fix": false
+  },
+  "expect": {
+    "problems": [
+      "note-yaml:RB-9"
+    ]
+  }
+}

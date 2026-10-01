@@ -1,0 +1,26 @@
+{
+  "op": "list",
+  "args": {},
+  "expect": {
+    "issues": [
+      {
+        "id": "RB-13",
+        "missing": false
+      },
+      {
+        "id": "RB-9",
+        "missing": true,
+        "title": "Rework cache layer",
+        "status": null
+      },
+      {
+        "id": "RB-11",
+        "missing": false
+      },
+      {
+        "id": "RB-4",
+        "missing": false
+      }
+    ]
+  }
+}

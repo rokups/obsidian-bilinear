@@ -1,0 +1,13 @@
+{
+  "op": "create",
+  "args": {
+    "title": "Crash on empty manifest",
+    "status": "todo",
+    "priority": "urgent",
+    "top": true
+  },
+  "today": "2026-10-01",
+  "expect": {
+    "id": "RB-14"
+  }
+}

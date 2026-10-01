@@ -1,0 +1,12 @@
+{
+  "op": "lint",
+  "args": {
+    "fix": true
+  },
+  "expect": {
+    "problems": [
+      "duplicate-id:RB-13",
+      "duplicate-id:RB-9"
+    ]
+  }
+}

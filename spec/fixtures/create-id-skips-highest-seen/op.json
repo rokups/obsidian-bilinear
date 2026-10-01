@@ -1,0 +1,10 @@
+{
+  "op": "create",
+  "args": {
+    "title": "Allocated after the highest number"
+  },
+  "today": "2026-10-01",
+  "expect": {
+    "id": "RB-21"
+  }
+}

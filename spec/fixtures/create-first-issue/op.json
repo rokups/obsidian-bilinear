@@ -1,0 +1,10 @@
+{
+  "op": "create",
+  "args": {
+    "title": "First issue"
+  },
+  "today": "2026-10-01",
+  "expect": {
+    "id": "RB-1"
+  }
+}
