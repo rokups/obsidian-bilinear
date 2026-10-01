@@ -1050,23 +1050,31 @@ def _digest(data: bytes) -> bytes:
     return hashlib.sha256(data).digest()
 
 
-def replace_file(src: Path | str, dst: Path) -> None:
-    """os.replace, patient with Windows.
+def patiently(fn):
+    """Call fn, retrying briefly on Windows when the file is in use.
 
     There a rename fails while another process has the destination open,
-    which a reader (a `list`, a virus scanner, a sync client) can do for a
-    moment at any time. Try again briefly before giving up.
+    and opening a file fails while it is being replaced. Either can happen
+    for a moment at any time: another bilinear process, a virus scanner, a
+    sync client. Elsewhere this is a plain call.
     """
     delay = 0.01
     for attempt in range(8):
         try:
-            os.replace(src, dst)
-            return
+            return fn()
         except PermissionError:
             if os.name != "nt" or attempt == 7:
                 raise
             time.sleep(delay)
             delay *= 2
+
+
+def replace_file(src: Path | str, dst: Path) -> None:
+    patiently(lambda: os.replace(src, dst))
+
+
+def read_bytes(path: Path) -> bytes:
+    return patiently(path.read_bytes)
 
 
 def atomic_write(path: Path, data: bytes) -> None:
@@ -1104,7 +1112,7 @@ def update_file(path: Path, fn) -> bool:
     re-read and the rename.
     """
     for _ in range(RETRIES):
-        old = path.read_bytes()
+        old = read_bytes(path)
         seen = _digest(old)
         new = fn(old.decode("utf-8"))
         if new is None:
@@ -1112,7 +1120,7 @@ def update_file(path: Path, fn) -> bool:
         data = new.encode("utf-8")
         if _before_write_hook:
             _before_write_hook(path)
-        if _digest(path.read_bytes()) != seen:
+        if _digest(read_bytes(path)) != seen:
             continue
         if data != old:
             atomic_write(path, data)
@@ -1121,13 +1129,16 @@ def update_file(path: Path, fn) -> bool:
 
 
 def read_text(path: Path) -> str:
-    return path.read_bytes().decode("utf-8")
+    return read_bytes(path).decode("utf-8")
 
 
 def is_index_note(path: Path) -> bool:
-    try:
+    def read_head() -> bytes:
         with open(path, "rb") as f:
-            head = f.read(4096).decode("utf-8", errors="replace")
+            return f.read(4096)
+
+    try:
+        head = patiently(read_head).decode("utf-8", errors="replace")
     except OSError:
         return False
     if not head.lstrip("﻿").startswith("---"):
