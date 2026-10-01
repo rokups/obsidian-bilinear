@@ -1,4 +1,5 @@
 import { COLOR_NAMES } from "../format/ids";
+import { cssColor } from "./states";
 
 // Labels without a colour in the index get one of these, picked by name, so
 // a label looks the same everywhere without any setup.
@@ -17,7 +18,5 @@ export function labelColorName(name: string, colors: Record<string, string>): st
 
 /** The same as a CSS colour, using Obsidian's theme palette for named colours. */
 export function labelCssColor(name: string, colors: Record<string, string>): string {
-  const c = labelColorName(name, colors);
-  if (c.startsWith("#")) return c;
-  return c === "gray" ? "var(--text-faint)" : `var(--color-${c})`;
+  return cssColor(labelColorName(name, colors));
 }

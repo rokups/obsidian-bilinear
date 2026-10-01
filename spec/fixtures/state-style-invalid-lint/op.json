@@ -1,0 +1,14 @@
+{
+  "op": "lint",
+  "args": {
+    "fix": true
+  },
+  "expect": {
+    "problems": [
+      "state-style-invalid:-",
+      "state-style-invalid:-",
+      "state-style-invalid:-",
+      "state-style-invalid:-"
+    ]
+  }
+}

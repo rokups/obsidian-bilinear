@@ -230,6 +230,8 @@ export function createController(store: StoreLike, host: Host, initial: ViewSpec
         checked: current === name,
         action: () => void run((t) => setLabel(t, label, name)),
       })),
+      { separator: true },
+      { title: "Customize states and labels…", icon: "palette", action: () => host.customize() },
     ]);
   }
 

@@ -1,7 +1,10 @@
-import { Modal, Setting, type App } from "obsidian";
+import { Modal, Setting, getIconIds, setIcon, type App } from "obsidian";
 import { createApp, type App as VueApp } from "vue";
 import type { NewIssue } from "../ops/issues";
 import type { Problem } from "../ops/lint";
+import type { TrackerConfig } from "../store/query";
+import CustomizeForm from "../ui/CustomizeForm.vue";
+import { SET_ICON } from "../ui/host";
 import NewIssueForm, { type TrackerChoice } from "../ui/NewIssueForm.vue";
 
 export class ConfirmModal extends Modal {
@@ -241,5 +244,54 @@ export class LintModal extends Modal {
 
   onClose(): void {
     this.contentEl.empty();
+  }
+}
+
+export interface CustomizeActions {
+  stateIcon(state: string, icon: string | null): void;
+  stateColor(state: string, color: string | null): void;
+  labelColor(label: string, color: string | null): void;
+  addLabel(label: string): void;
+}
+
+/** State icons and colours, label colours. Changes are written as they are made. */
+export class CustomizeModal extends Modal {
+  private vue: VueApp | null = null;
+
+  constructor(
+    app: App,
+    private name: string,
+    /** Reactive holder of the tracker's config, kept current by the caller. */
+    private state: { config: TrackerConfig },
+    private actions: CustomizeActions,
+    private closed: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.setTitle(`Customize ${this.name}`);
+    this.modalEl.addClass("bl-modal");
+    const iconNames = getIconIds()
+      .filter((id) => id.startsWith("lucide-"))
+      .map((id) => id.slice("lucide-".length))
+      .sort();
+    this.vue = createApp(CustomizeForm, {
+      state: this.state,
+      iconNames,
+      onStateIcon: this.actions.stateIcon,
+      onStateColor: this.actions.stateColor,
+      onLabelColor: this.actions.labelColor,
+      onAddLabel: this.actions.addLabel,
+    });
+    this.vue.provide(SET_ICON, setIcon);
+    this.vue.mount(this.contentEl);
+  }
+
+  onClose(): void {
+    this.vue?.unmount();
+    this.vue = null;
+    this.contentEl.empty();
+    this.closed();
   }
 }

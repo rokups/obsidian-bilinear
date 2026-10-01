@@ -1,14 +1,15 @@
 import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf, type ViewState } from "obsidian";
 import { ARCHIVE_DIR, ID_RE, ISSUES_DIR, todayIso } from "./format/ids";
 import type { Tracker } from "./ops/io";
-import { archiveClosed, commentIssue, createIssue, createTracker, type NewIssue } from "./ops/issues";
+import { shallowReactive, watch } from "vue";
+import { archiveClosed, commentIssue, createIssue, createTracker, setLabel, setStateStyle, type NewIssue } from "./ops/issues";
 import { lint } from "./ops/lint";
 import { notePath } from "./ops/tracker";
-import { folderOf } from "./store/tracker-store";
+import { TrackerStore, folderOf } from "./store/tracker-store";
 import "./styles.css";
 import type { TrackerChoice } from "./ui/NewIssueForm.vue";
 import { EmbedChild } from "./view/embed";
-import { CreateTrackerModal, LintModal, NewIssueModal, PromptModal } from "./view/modals";
+import { CreateTrackerModal, CustomizeModal, LintModal, NewIssueModal, PromptModal } from "./view/modals";
 import { BilinearSettingTab, DEFAULT_SETTINGS, type BilinearSettings } from "./view/settings";
 import { TrackerView, VIEW_TYPE } from "./view/tracker-view";
 import { VaultIO } from "./view/vault-io";
@@ -67,6 +68,11 @@ export default class BilinearPlugin extends Plugin {
       id: "lint",
       name: "Lint tracker",
       checkCallback: (checking) => this.withTracker(checking, (file) => this.lintTracker(file)),
+    });
+    this.addCommand({
+      id: "customize",
+      name: "Customize states and labels",
+      checkCallback: (checking) => this.withTracker(checking, (file) => this.customize(file)),
     });
     this.addCommand({
       id: "comment",
@@ -301,6 +307,34 @@ export default class BilinearPlugin extends Plugin {
       index.basename,
       (fix) => lint(t, fix),
       (id) => void this.app.workspace.openLinkText(id, index.path),
+    ).open();
+  }
+
+  /** Dialog for state icons and colours and label colours of one tracker. */
+  customize(index: TFile): void {
+    const store = new TrackerStore(this.app, index);
+    const state = shallowReactive({ config: store.snapshot.value.config });
+    const unwatch = watch(store.snapshot, (snapshot) => (state.config = snapshot.config));
+    store.start();
+    const run = (op: (t: Tracker) => Promise<void>) => {
+      op(store.tracker)
+        .catch((e) => new Notice(message(e)))
+        .finally(() => void store.reload());
+    };
+    new CustomizeModal(
+      this.app,
+      index.basename,
+      state,
+      {
+        stateIcon: (name, icon) => run((t) => setStateStyle(t, name, { icon })),
+        stateColor: (name, color) => run((t) => setStateStyle(t, name, { color })),
+        labelColor: (name, color) => run((t) => setLabel(t, name, color)),
+        addLabel: (name) => run((t) => setLabel(t, name)),
+      },
+      () => {
+        unwatch();
+        store.stop();
+      },
     ).open();
   }
 

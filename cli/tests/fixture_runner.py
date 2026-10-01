@@ -71,6 +71,14 @@ def argv_for(op: dict) -> list[str]:
         return argv
     if kind == "labels":
         return ["label", "--json"]
+    if kind == "state":
+        argv = ["state", a["name"]]
+        for key in ("icon", "color"):
+            if key in a:
+                argv += [f"--{key}", a[key] if a[key] is not None else "none"]
+        return argv
+    if kind == "states":
+        return ["state", "--json"]
     if kind == "lint":
         return ["lint", "--json"] + (["--fix"] if a.get("fix") else [])
     if kind == "list":
@@ -101,8 +109,8 @@ def run(case: Path, workdir: Path) -> tuple[Path, dict]:
     elif op["op"] == "lint":
         data = json.loads(text)
         result["problems"] = sorted(f"{p['code']}:{p['id'] or '-'}" for p in data["problems"])
-    elif op["op"] == "labels":
-        result["labels"] = json.loads(text)
+    elif op["op"] in ("labels", "states"):
+        result[op["op"]] = json.loads(text)
     elif op["op"] == "list":
         result["issues"] = json.loads(text)
     return tracker, result

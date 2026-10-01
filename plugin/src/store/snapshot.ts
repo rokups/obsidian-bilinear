@@ -25,7 +25,7 @@ export type NoteLookup = (path: string) => Record<string, unknown> | null | unde
 
 export function emptySnapshot(): Snapshot {
   return {
-    config: { prefix: null, next: null, states: [], closedStates: [], labels: [], labelColors: {} },
+    config: { prefix: null, next: null, states: [], closedStates: [], labels: [], labelColors: {}, stateIcons: {}, stateColors: {} },
     issues: [],
     archived: [],
     views: [],
@@ -43,6 +43,8 @@ export function buildSnapshot(indexText: string, dir: string, lookup: NoteLookup
     closedStates: idx.closedStates,
     labels: idx.labels,
     labelColors: idx.labelColors,
+    stateIcons: idx.stateIcons,
+    stateColors: idx.stateColors,
   };
   snap.problems = idx.doc.broken ? idx.doc.problems() : idx.keyProblems();
   snap.views = readViews(indexText);

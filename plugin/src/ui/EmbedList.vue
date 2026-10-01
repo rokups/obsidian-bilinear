@@ -32,7 +32,7 @@ const shown = computed(() => (props.limit > 0 ? matching.value.slice(0, props.li
       <div v-for="issue in shown" :key="issue.id" class="bl-row bl-embed-row" :class="{ 'is-missing': issue.missing }" @click="emit('open', issue, $event)">
         <PriorityIcon :priority="issue.priority" />
         <span class="bl-id">{{ issue.id }}</span>
-        <StatusIcon :status="issue.status" :states="snap.config.states" :closed-states="snap.config.closedStates" />
+        <StatusIcon :status="issue.status" :config="snap.config" />
         <span class="bl-title">{{ issue.title || issue.id }}</span>
         <span class="bl-spacer"></span>
         <LabelChip v-for="label in issue.labels" :key="label" :label="label" :colors="snap.config.labelColors" />

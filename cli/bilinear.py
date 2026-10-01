@@ -36,6 +36,8 @@ ARCHIVE_DIR = "archive"
 IN_ISSUES, IN_ARCHIVE, IN_ROOT = "issues", "archive", "root"
 LOCATIONS = (IN_ISSUES, IN_ARCHIVE, IN_ROOT)
 COLOR_NAMES = ["red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "gray"]
+# Shapes the plugin draws itself. Any other icon value names a Lucide icon.
+STATE_SHAPES = ["dashed", "circle", "quarter", "half", "three-quarters", "check", "cross"]
 LIST_KEYS = ("labels", "blocked-by")
 RETRIES = 3
 LOCK_TIMEOUT = 10.0  # seconds; override with BILINEAR_LOCK_TIMEOUT
@@ -602,11 +604,22 @@ def normalize_color(color: str) -> str | None:
     return color if _HEX_COLOR_RE.match(color) else None
 
 
-def parse_label_color(entry: str) -> tuple[str, str] | None:
-    """Split a `name=color` entry at its last `=`."""
-    name, sep, color = entry.rpartition("=")
+_ICON_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def normalize_icon(icon: str) -> str | None:
+    """One of STATE_SHAPES, or a Lucide icon name such as `rocket` (a `lucide-` prefix is dropped)."""
+    icon = icon.strip(" \t").lower()
+    if icon.startswith("lucide-"):
+        icon = icon[len("lucide-"):]
+    return icon if _ICON_RE.match(icon) else None
+
+
+def parse_pair(entry: str, normalize) -> tuple[str, str] | None:
+    """Split a `name=value` entry at its last `=` and normalize the value."""
+    name, sep, value = entry.rpartition("=")
     name = name.strip(" \t")
-    normalized = normalize_color(color)
+    normalized = normalize(value)
     if not sep or not name or normalized is None:
         return None
     return name, normalized
@@ -695,41 +708,73 @@ class Index:
     def labels(self) -> list[str]:
         return self.doc.get_list("labels")
 
-    @property
-    def label_colors(self) -> dict[str, str]:
-        """Colours given to labels by `label-colors: [name=color, ...]`."""
+    # Styling keys are lists of `name=value`: label-colors, state-colors, state-icons.
+
+    def pairs(self, key: str, normalize) -> dict[str, str]:
         out: dict[str, str] = {}
-        for entry in self.doc.get_list("label-colors"):
-            parsed = parse_label_color(entry)
+        for entry in self.doc.get_list(key):
+            parsed = parse_pair(entry, normalize)
             if parsed:
                 out[parsed[0]] = parsed[1]
         return out
 
-    def label_color_problems(self) -> list[str]:
-        return [
-            f"label-colors entry '{entry}' is not of the form name=color"
-            for entry in self.doc.get_list("label-colors") if parse_label_color(entry) is None
-        ]
+    def bad_pairs(self, key: str, normalize) -> list[str]:
+        return [e for e in self.doc.get_list(key) if parse_pair(e, normalize) is None]
+
+    def set_pair(self, key: str, normalize, name: str, value: str | None) -> None:
+        """Set or (value None) clear the entry for a name. Other entries are kept as they are."""
+        entries = []
+        done = False
+        for entry in self.doc.get_list(key):
+            parsed = parse_pair(entry, normalize)
+            if parsed and parsed[0] == name:
+                if value is not None and not done:
+                    entries.append(f"{name}={value}")
+                done = True
+            else:
+                entries.append(entry)
+        if value is not None and not done:
+            entries.append(f"{name}={value}")
+        self.doc.set(key, entries or None)
+
+    @property
+    def label_colors(self) -> dict[str, str]:
+        """Colours given to labels by `label-colors: [name=color, ...]`."""
+        return self.pairs("label-colors", normalize_color)
+
+    @property
+    def state_colors(self) -> dict[str, str]:
+        return self.pairs("state-colors", normalize_color)
+
+    @property
+    def state_icons(self) -> dict[str, str]:
+        return self.pairs("state-icons", normalize_icon)
+
+    def style_problems(self) -> list[tuple[str, str]]:
+        """(lint code, message) for styling entries that cannot be used."""
+        out = []
+        for entry in self.bad_pairs("label-colors", normalize_color):
+            out.append(("label-color-invalid", f"label-colors entry '{entry}' is not of the form name=color"))
+        for key, normalize, what in (("state-colors", normalize_color, "color"), ("state-icons", normalize_icon, "icon")):
+            for entry in self.bad_pairs(key, normalize):
+                out.append(("state-style-invalid", f"{key} entry '{entry}' is not of the form name={what}"))
+            for name in self.pairs(key, normalize):
+                if name not in self.states:
+                    out.append(("state-style-invalid", f"{key} names '{name}', which is not one of the states"))
+        return out
 
     def add_label(self, name: str) -> None:
         if name not in self.labels:
             self.doc.set("labels", self.labels + [name])
 
     def set_label_color(self, name: str, color: str | None) -> None:
-        """Set or (color None) clear a label's colour. Other entries are kept as they are."""
-        entries = []
-        done = False
-        for entry in self.doc.get_list("label-colors"):
-            parsed = parse_label_color(entry)
-            if parsed and parsed[0] == name:
-                if color is not None and not done:
-                    entries.append(f"{name}={color}")
-                done = True
-            else:
-                entries.append(entry)
-        if color is not None and not done:
-            entries.append(f"{name}={color}")
-        self.doc.set("label-colors", entries or None)
+        self.set_pair("label-colors", normalize_color, name, color)
+
+    def set_state_color(self, name: str, color: str | None) -> None:
+        self.set_pair("state-colors", normalize_color, name, color)
+
+    def set_state_icon(self, name: str, icon: str | None) -> None:
+        self.set_pair("state-icons", normalize_icon, name, icon)
 
     def set_next(self, n: int) -> None:
         if self.next != n:
@@ -1680,6 +1725,46 @@ def cmd_label(t: Tracker, args) -> int:
     return EXIT_OK
 
 
+def cmd_state(t: Tracker, args) -> int:
+    idx = t.read_index()
+    if args.name is None:
+        if args.icon is not None or args.color is not None:
+            raise UsageError("--icon and --color need a state name")
+        icons, colors = idx.state_icons, idx.state_colors
+        rows = [{"name": n, "icon": icons.get(n), "color": colors.get(n), "closed": n in idx.closed_states} for n in idx.states]
+        if args.json:
+            print(json.dumps(rows, indent=2, ensure_ascii=False))
+        else:
+            width = max(len(r["name"]) for r in rows)
+            for r in rows:
+                parts = [f"{k}={r[k]}" for k in ("icon", "color") if r[k]] + (["(closed)"] if r["closed"] else [])
+                print(f"{r['name']:<{width}}  {'  '.join(parts)}".rstrip())
+        return EXIT_OK
+    if args.name not in idx.states:
+        raise UsageError(f"unknown state '{args.name}' (states: {', '.join(idx.states)})")
+    if args.icon is None and args.color is None:
+        raise UsageError("give --icon, --color or both")
+    cleared = ("none", "auto")
+    icon = color = None
+    if args.icon is not None and args.icon.lower() not in cleared:
+        icon = normalize_icon(args.icon)
+        if icon is None:
+            raise UsageError(f"'{args.icon}' is not an icon (one of: {', '.join(STATE_SHAPES)}, or a Lucide icon name such as rocket)")
+    if args.color is not None and args.color.lower() not in cleared:
+        color = normalize_color(args.color)
+        if color is None:
+            raise UsageError(f"unknown colour '{args.color}' (one of: {', '.join(COLOR_NAMES)}, #rgb, #rrggbb, or none)")
+
+    def commit(i: Index) -> None:
+        if args.icon is not None:
+            i.set_state_icon(args.name, icon)
+        if args.color is not None:
+            i.set_state_color(args.name, color)
+
+    t.update_index(commit)
+    return EXIT_OK
+
+
 # --------------------------------------------------------------------------
 # Lint
 
@@ -1731,8 +1816,8 @@ def lint(t: Tracker, fix: bool) -> list[dict]:
         add("error", "index-yaml", None, p)
     for p in idx.key_problems():
         add("error", "index-key", None, p)
-    for p in idx.label_color_problems():
-        add("warning", "label-color-invalid", None, p)
+    for code, message in idx.style_problems():
+        add("warning", code, None, message)
     for other in index_notes(t.dir):
         if other != t.index_path:
             add("error", "multiple-trackers", None, f"{other.name} is also marked as a tracker index")
@@ -1917,6 +2002,12 @@ def build_parser() -> Parser:
     sp.add_argument("--color", metavar="COLOR", help=f"{', '.join(COLOR_NAMES)}, #rgb or #rrggbb; 'none' clears it")
     sp.add_argument("--json", action="store_true")
 
+    sp = cmd("state", "list the states, or set a state's icon and colour", cmd_state)
+    sp.add_argument("name", nargs="?")
+    sp.add_argument("--icon", metavar="ICON", help=f"{', '.join(STATE_SHAPES)}, or a Lucide icon name; 'none' clears it")
+    sp.add_argument("--color", metavar="COLOR", help=f"{', '.join(COLOR_NAMES)}, #rgb or #rrggbb; 'none' clears it")
+    sp.add_argument("--json", action="store_true")
+
     sp = cmd("lint", "check consistency; --fix repairs what is safe to repair", cmd_lint)
     sp.add_argument("--fix", action="store_true")
     sp.add_argument("--json", action="store_true")
@@ -1935,7 +2026,7 @@ def main(argv: list[str] | None = None) -> int:
         tracker = Tracker.open(getattr(args, "tracker", None) or os.environ.get("BILINEAR_TRACKER"))
         # Reads need no lock: every write is an atomic replace. `lint` only
         # writes with --fix.
-        if not args.writes or (args.command == "lint" and not args.fix) or (args.command == "label" and not args.name):
+        if not args.writes or (args.command == "lint" and not args.fix) or (args.command in ("label", "state") and not args.name):
             return args.func(tracker, args)
         with TrackerLock(tracker.dir):
             return args.func(tracker, args)

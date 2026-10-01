@@ -1,0 +1,44 @@
+{
+  "op": "states",
+  "args": {},
+  "expect": {
+    "states": [
+      {
+        "name": "backlog",
+        "icon": "dashed",
+        "color": null,
+        "closed": false
+      },
+      {
+        "name": "todo",
+        "icon": null,
+        "color": null,
+        "closed": false
+      },
+      {
+        "name": "in-progress",
+        "icon": null,
+        "color": null,
+        "closed": false
+      },
+      {
+        "name": "in-review",
+        "icon": "eye",
+        "color": "purple",
+        "closed": false
+      },
+      {
+        "name": "done",
+        "icon": "check",
+        "color": "green",
+        "closed": true
+      },
+      {
+        "name": "canceled",
+        "icon": null,
+        "color": null,
+        "closed": true
+      }
+    ]
+  }
+}

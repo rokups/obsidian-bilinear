@@ -110,7 +110,7 @@ onMounted(() => {
           class="bl-option" :class="{ 'is-active': n === active, 'is-checked': o.checked }" role="option" :aria-selected="o.checked"
           @mousemove="active = n" @click="choose(o)" @contextmenu.prevent="onContext($event, o)"
         >
-          <StatusIcon v-if="state.kind === 'status'" :status="o.value" :states="c.config.value.states" :closed-states="c.config.value.closedStates" />
+          <StatusIcon v-if="state.kind === 'status'" :status="o.value" :config="c.config.value" />
           <PriorityIcon v-else-if="state.kind === 'priority'" :priority="o.value ?? 'none'" />
           <LabelChip v-else-if="state.kind === 'labels' && o.value !== null" :label="o.value" :colors="c.config.value.labelColors" dot-only />
           <span class="bl-option-label">{{ o.label }}</span>

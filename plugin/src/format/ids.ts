@@ -26,13 +26,26 @@ export function normalizeColor(color: string): string | null {
   return HEX_COLOR_RE.test(c) ? c : null;
 }
 
-/** Split a `name=color` entry at its last `=`. */
-export function parseLabelColor(entry: string): [string, string] | null {
+/** Shapes the plugin draws itself. Any other icon value names a Lucide icon. */
+export const STATE_SHAPES = ["dashed", "circle", "quarter", "half", "three-quarters", "check", "cross"];
+const ICON_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** One of STATE_SHAPES, or a Lucide icon name such as `rocket` (a `lucide-` prefix is dropped). */
+export function normalizeIcon(icon: string): string | null {
+  let i = trimBlank(icon).toLowerCase();
+  if (i.startsWith("lucide-")) i = i.slice("lucide-".length);
+  return ICON_RE.test(i) ? i : null;
+}
+
+export type Normalize = (value: string) => string | null;
+
+/** Split a `name=value` entry at its last `=` and normalize the value. */
+export function parsePair(entry: string, normalize: Normalize): [string, string] | null {
   const at = entry.lastIndexOf("=");
   if (at < 0) return null;
   const name = trimBlank(entry.slice(0, at));
-  const color = normalizeColor(entry.slice(at + 1));
-  return name && color !== null ? [name, color] : null;
+  const value = normalize(entry.slice(at + 1));
+  return name && value !== null ? [name, value] : null;
 }
 export const LIST_KEYS = ["labels", "blocked-by"];
 

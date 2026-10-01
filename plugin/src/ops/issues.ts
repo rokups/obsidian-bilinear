@@ -1,7 +1,7 @@
 // The operations of spec/FORMAT.md section 2. In each, the index write comes
 // last, so an interrupted operation leaves at worst a stray note.
 
-import { ARCHIVE, COLOR_NAMES, ID_RE, ISSUES, ISSUES_DIR, ARCHIVE_DIR, LOCATIONS, PREFIX_RE, PRIORITIES, cleanTitle, idNumber, linkId, makeLink, normalizeColor, validDate } from "../format/ids";
+import { ARCHIVE, ARCHIVE_DIR, COLOR_NAMES, ID_RE, ISSUES, ISSUES_DIR, LOCATIONS, PREFIX_RE, PRIORITIES, STATE_SHAPES, cleanTitle, idNumber, linkId, makeLink, normalizeColor, normalizeIcon, validDate } from "../format/ids";
 import { newIndexText, type Index, type Where } from "../format/index-note";
 import { addComment, newNoteText } from "../format/issue-note";
 import { Doc, type Value } from "../format/yaml";
@@ -252,5 +252,29 @@ export async function setLabel(t: Tracker, name: string, color?: string | null):
   await updateIndex(t, (i) => {
     i.addLabel(label);
     if (color !== undefined) i.setLabelColor(label, normalized);
+  });
+}
+
+/**
+ * Set how a state is drawn. `icon` is one of STATE_SHAPES or a Lucide icon
+ * name; `color` a name from COLOR_NAMES, #rgb or #rrggbb. null clears a
+ * value, so the state is drawn the automatic way; undefined leaves it.
+ */
+export async function setStateStyle(t: Tracker, state: string, style: { icon?: string | null; color?: string | null }): Promise<void> {
+  const idx = await readIndex(t);
+  if (!idx.states.includes(state)) throw new OpError(`unknown state '${state}' (states: ${idx.states.join(", ")})`);
+  let icon: string | null = null;
+  let color: string | null = null;
+  if (typeof style.icon === "string") {
+    icon = normalizeIcon(style.icon);
+    if (icon === null) throw new OpError(`'${style.icon}' is not an icon (one of: ${STATE_SHAPES.join(", ")}, or a Lucide icon name such as rocket)`);
+  }
+  if (typeof style.color === "string") {
+    color = normalizeColor(style.color);
+    if (color === null) throw new OpError(`unknown colour '${style.color}' (one of: ${COLOR_NAMES.join(", ")}, #rgb, #rrggbb)`);
+  }
+  await updateIndex(t, (i) => {
+    if (style.icon !== undefined) i.setStateIcon(state, icon);
+    if (style.color !== undefined) i.setStateColor(state, color);
   });
 }

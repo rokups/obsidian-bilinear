@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { IssueRecord } from "../src/format/record";
 import type { Tracker } from "../src/ops/io";
-import { adoptIssue, archiveClosed, archiveIssues, commentIssue, createIssue, deleteIssue, moveIssue, setLabel, setProps, unarchiveIssues } from "../src/ops/issues";
+import { adoptIssue, archiveClosed, archiveIssues, commentIssue, createIssue, deleteIssue, moveIssue, setLabel, setProps, setStateStyle, unarchiveIssues } from "../src/ops/issues";
 import { lint } from "../src/ops/lint";
 import { indexNotes, listIssues, readIndex } from "../src/ops/tracker";
 import { MemoryIO } from "./memory-io";
@@ -16,7 +16,20 @@ export interface Op {
   args: Record<string, any>;
   today?: string;
   author?: string;
-  expect?: { id?: string; problems?: string[]; issues?: Array<Record<string, unknown>>; labels?: Array<{ name: string; color: string | null }> };
+  expect?: {
+    id?: string;
+    problems?: string[];
+    issues?: Array<Record<string, unknown>>;
+    labels?: Array<{ name: string; color: string | null }>;
+    states?: StateRow[];
+  };
+}
+
+export interface StateRow {
+  name: string;
+  icon: string | null;
+  color: string | null;
+  closed: boolean;
 }
 
 export interface Case {
@@ -49,6 +62,7 @@ export interface Result {
   problems?: string[];
   issues?: Array<Record<string, unknown>>;
   labels?: Array<{ name: string; color: string | null }>;
+  states?: StateRow[];
 }
 
 /** Apply one fixture operation with the plugin's ops. */
@@ -88,6 +102,19 @@ export async function apply(t: Tracker, op: Op): Promise<Result> {
       const colors = idx.labelColors;
       const names = [...idx.labels, ...Object.keys(colors).filter((n) => !idx.labels.includes(n))];
       return { labels: names.map((name) => ({ name, color: colors[name] ?? null })) };
+    }
+    case "state": {
+      const style: { icon?: string | null; color?: string | null } = {};
+      if ("icon" in a) style.icon = a.icon;
+      if ("color" in a) style.color = a.color;
+      await setStateStyle(t, a.name, style);
+      return {};
+    }
+    case "states": {
+      const idx = await readIndex(t);
+      const icons = idx.stateIcons;
+      const colors = idx.stateColors;
+      return { states: idx.states.map((name) => ({ name, icon: icons[name] ?? null, color: colors[name] ?? null, closed: idx.closedStates.includes(name) })) };
     }
     case "lint":
       return { problems: (await lint(t, !!a.fix)).map((p) => `${p.code}:${p.id ?? "-"}`).sort() };

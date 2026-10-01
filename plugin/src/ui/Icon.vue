@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { inject, onMounted, ref, watch } from "vue";
-import { HOST } from "./host";
+import { SET_ICON } from "./host";
 
 const props = defineProps<{ name: string }>();
-const host = inject(HOST)!;
+const setIcon = inject(SET_ICON)!;
 const el = ref<HTMLElement | null>(null);
 
 function draw(): void {
   if (!el.value) return;
   el.value.replaceChildren();
-  host.setIcon(el.value, props.name);
+  setIcon(el.value, props.name);
 }
 
 onMounted(draw);

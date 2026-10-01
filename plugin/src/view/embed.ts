@@ -1,10 +1,11 @@
-import { MarkdownRenderChild, type EventRef, type TFile } from "obsidian";
+import { MarkdownRenderChild, setIcon, type EventRef, type TFile } from "obsidian";
 import { createApp, shallowReactive, watch, type App as VueApp } from "vue";
 import type { IssueRecord } from "../format/record";
 import type BilinearPlugin from "../main";
 import { emptySnapshot, type Snapshot } from "../store/snapshot";
 import { TrackerStore, folderOf } from "../store/tracker-store";
 import EmbedList from "../ui/EmbedList.vue";
+import { SET_ICON } from "../ui/host";
 import { parseEmbed, type EmbedOptions } from "./embed-options";
 
 export interface EmbedState {
@@ -45,6 +46,7 @@ export class EmbedChild extends MarkdownRenderChild {
         if (this.store) void workspace.openLinkText(this.store.indexFile.path, this.sourcePath);
       },
     });
+    this.vue.provide(SET_ICON, setIcon);
     this.vue.mount(this.containerEl);
     if (!this.attach(opts)) {
       // At startup the metadata cache may not know the trackers yet.

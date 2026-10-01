@@ -63,7 +63,7 @@ function onDrop(e: DragEvent): void {
     </button>
     <span class="bl-id">{{ issue.id }}</span>
     <button class="bl-cell clickable-icon" :title="`Status: ${issue.status ?? 'none'}`" :aria-label="`Status: ${issue.status ?? 'none'}`" :disabled="issue.missing" @click.stop="c.openPicker('status', [issue.id])">
-      <StatusIcon :status="issue.status" :states="c.config.value.states" :closed-states="c.config.value.closedStates" />
+      <StatusIcon :status="issue.status" :config="c.config.value" />
     </button>
     <span class="bl-title" @click.stop="open(false)">{{ issue.title || issue.id }}</span>
     <template v-if="issue.missing">

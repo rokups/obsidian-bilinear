@@ -1,0 +1,8 @@
+{
+  "op": "state",
+  "args": {
+    "name": "done",
+    "icon": "check",
+    "color": "#2da44e"
+  }
+}

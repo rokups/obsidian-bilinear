@@ -1,7 +1,7 @@
 // The index note: frontmatter config plus the `## Issues` and `## Archive`
 // lists (spec/FORMAT.md 1.4). Edits touch only issue lines and config keys.
 
-import { ARCHIVE, DEFAULT_CLOSED, DEFAULT_STATES, ID_RE, ISSUES, PREFIX_RE, formatLine, idNumber, linkTarget, parseLabelColor } from "./ids";
+import { ARCHIVE, DEFAULT_CLOSED, DEFAULT_STATES, ID_RE, ISSUES, PREFIX_RE, formatLine, idNumber, linkTarget, normalizeColor, normalizeIcon, parsePair, type Normalize } from "./ids";
 import { chomp, hasEol, isBlank, splitLines } from "./lines";
 import { findSections } from "./markdown";
 import { Doc } from "./yaml";
@@ -87,42 +87,86 @@ export class Index {
     return this.doc.getList("labels");
   }
 
-  /** Colours given to labels by `label-colors: [name=color, ...]`. */
-  get labelColors(): Record<string, string> {
+  // Styling keys are lists of `name=value`: label-colors, state-colors, state-icons.
+
+  private pairs(key: string, normalize: Normalize): Record<string, string> {
     const out: Record<string, string> = {};
-    for (const entry of this.doc.getList("label-colors")) {
-      const parsed = parseLabelColor(entry);
+    for (const entry of this.doc.getList(key)) {
+      const parsed = parsePair(entry, normalize);
       if (parsed) out[parsed[0]] = parsed[1];
     }
     return out;
   }
 
-  labelColorProblems(): string[] {
-    return this.doc
-      .getList("label-colors")
-      .filter((entry) => parseLabelColor(entry) === null)
-      .map((entry) => `label-colors entry '${entry}' is not of the form name=color`);
+  private badPairs(key: string, normalize: Normalize): string[] {
+    return this.doc.getList(key).filter((entry) => parsePair(entry, normalize) === null);
+  }
+
+  /** Set or (value null) clear the entry for a name. Other entries are kept as they are. */
+  private setPair(key: string, normalize: Normalize, name: string, value: string | null): void {
+    const entries: string[] = [];
+    let done = false;
+    for (const entry of this.doc.getList(key)) {
+      const parsed = parsePair(entry, normalize);
+      if (parsed && parsed[0] === name) {
+        if (value !== null && !done) entries.push(`${name}=${value}`);
+        done = true;
+      } else {
+        entries.push(entry);
+      }
+    }
+    if (value !== null && !done) entries.push(`${name}=${value}`);
+    this.doc.set(key, entries.length ? entries : null);
+  }
+
+  /** Colours given to labels by `label-colors: [name=color, ...]`. */
+  get labelColors(): Record<string, string> {
+    return this.pairs("label-colors", normalizeColor);
+  }
+
+  get stateColors(): Record<string, string> {
+    return this.pairs("state-colors", normalizeColor);
+  }
+
+  get stateIcons(): Record<string, string> {
+    return this.pairs("state-icons", normalizeIcon);
+  }
+
+  /** [lint code, message] for styling entries that cannot be used. */
+  styleProblems(): Array<[string, string]> {
+    const out: Array<[string, string]> = [];
+    for (const entry of this.badPairs("label-colors", normalizeColor)) {
+      out.push(["label-color-invalid", `label-colors entry '${entry}' is not of the form name=color`]);
+    }
+    const stateKeys: Array<[string, Normalize, string]> = [
+      ["state-colors", normalizeColor, "color"],
+      ["state-icons", normalizeIcon, "icon"],
+    ];
+    for (const [key, normalize, what] of stateKeys) {
+      for (const entry of this.badPairs(key, normalize)) {
+        out.push(["state-style-invalid", `${key} entry '${entry}' is not of the form name=${what}`]);
+      }
+      for (const name of Object.keys(this.pairs(key, normalize))) {
+        if (!this.states.includes(name)) out.push(["state-style-invalid", `${key} names '${name}', which is not one of the states`]);
+      }
+    }
+    return out;
   }
 
   addLabel(name: string): void {
     if (!this.labels.includes(name)) this.doc.set("labels", [...this.labels, name]);
   }
 
-  /** Set or (color null) clear a label's colour. Other entries are kept as they are. */
   setLabelColor(name: string, color: string | null): void {
-    const entries: string[] = [];
-    let done = false;
-    for (const entry of this.doc.getList("label-colors")) {
-      const parsed = parseLabelColor(entry);
-      if (parsed && parsed[0] === name) {
-        if (color !== null && !done) entries.push(`${name}=${color}`);
-        done = true;
-      } else {
-        entries.push(entry);
-      }
-    }
-    if (color !== null && !done) entries.push(`${name}=${color}`);
-    this.doc.set("label-colors", entries.length ? entries : null);
+    this.setPair("label-colors", normalizeColor, name, color);
+  }
+
+  setStateColor(name: string, color: string | null): void {
+    this.setPair("state-colors", normalizeColor, name, color);
+  }
+
+  setStateIcon(name: string, icon: string | null): void {
+    this.setPair("state-icons", normalizeIcon, name, icon);
   }
 
   setNext(n: number): void {

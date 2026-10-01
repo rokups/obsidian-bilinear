@@ -58,7 +58,7 @@ export async function lint(t: Tracker, fix: boolean): Promise<Problem[]> {
   const idx = await readIndexRaw(t);
   for (const p of idx.doc.problems()) add("error", "index-yaml", null, p);
   for (const p of idx.keyProblems()) add("error", "index-key", null, p);
-  for (const p of idx.labelColorProblems()) add("warning", "label-color-invalid", null, p);
+  for (const [code, message] of idx.styleProblems()) add("warning", code, null, message);
   for (const other of await indexNotes(t.io, t.dir)) {
     if (other !== t.indexPath) add("error", "multiple-trackers", null, `${other.slice(other.lastIndexOf("/") + 1)} is also marked as a tracker index`);
   }

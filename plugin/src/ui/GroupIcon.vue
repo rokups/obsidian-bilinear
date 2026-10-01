@@ -11,7 +11,7 @@ const c = inject(CTRL)!;
 </script>
 
 <template>
-  <StatusIcon v-if="c.groupBy.value === 'status'" :status="group.value" :states="c.config.value.states" :closed-states="c.config.value.closedStates" />
+  <StatusIcon v-if="c.groupBy.value === 'status'" :status="group.value" :config="c.config.value" />
   <PriorityIcon v-else-if="c.groupBy.value === 'priority'" :priority="group.value ?? 'none'" />
   <LabelChip v-else-if="c.groupBy.value === 'label' && group.value !== null" :label="group.value" :colors="c.config.value.labelColors" dot-only />
 </template>

@@ -31,8 +31,9 @@ class FixtureTest(unittest.TestCase):
                 if "problems" in expect:
                     self.assertEqual(expect["problems"], result["problems"])
                     self.assertEqual(2 if result_has_open_problems(case, result) else 0, result["exit"])
-                if "labels" in expect:
-                    self.assertEqual(expect["labels"], result["labels"])
+                for key in ("labels", "states"):
+                    if key in expect:
+                        self.assertEqual(expect[key], result[key])
                 if "issues" in expect:
                     self.assertEqual([e["id"] for e in expect["issues"]], [i["id"] for i in result["issues"]])
                     for want, got in zip(expect["issues"], result["issues"]):

@@ -34,6 +34,9 @@ export interface TrackerConfig {
   labels: string[];
   /** Colours set in the index: label name to a colour name or hex value. */
   labelColors: Record<string, string>;
+  /** Icons set in the index: state to one of STATE_SHAPES or a Lucide icon name. */
+  stateIcons: Record<string, string>;
+  stateColors: Record<string, string>;
 }
 
 export interface Group {

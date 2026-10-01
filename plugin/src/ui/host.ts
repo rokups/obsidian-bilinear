@@ -16,7 +16,6 @@ export interface MenuEntry {
 }
 
 export interface Host {
-  setIcon(el: HTMLElement, icon: string): void;
   showMenu(event: MouseEvent, entries: MenuEntry[]): void;
   notice(message: string): void;
   confirm(title: string, message: string, action: string): Promise<boolean>;
@@ -26,9 +25,14 @@ export interface Host {
   newIssue(defaults: Partial<NewIssue>): void;
   openAsMarkdown(): void;
   lint(): void;
+  /** Open the dialog for state icons and label colours. */
+  customize(): void;
   author(): string;
   /** The view spec changed and should be remembered with the workspace. */
   specChanged(spec: ViewSpec): void;
 }
 
 export const HOST: InjectionKey<Host> = Symbol("bilinear-host");
+
+/** Draws an Obsidian icon into an element. Provided to every mounted app. */
+export const SET_ICON: InjectionKey<(el: HTMLElement, icon: string) => void> = Symbol("bilinear-set-icon");

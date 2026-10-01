@@ -28,6 +28,10 @@ Trackers/RedBolt/
 |---|---|
 | ![Picker for setting an issue's status](docs/screenshots/picker.png) | ![A filtered issue list embedded in another note](docs/screenshots/embed.png) |
 
+| Customize states and labels |
+|---|
+| ![Dialog for choosing state icons and colours and label colours](docs/screenshots/customize.png) |
+
 The format is specified in [spec/FORMAT.md](spec/FORMAT.md). The plugin and the
 CLI are tested against the same cases in `spec/fixtures/`.
 
@@ -75,15 +79,21 @@ bilinear lint --fix
 | `rm <ID> [--force]` | Remove the line; move the note to the vault's `.trash/` |
 | `adopt <ID>` | Add an index line for an orphan note |
 | `label [name] [--color COLOR]` | List the labels, or add one and set its colour (`none` clears it) |
+| `state [name] [--icon ICON] [--color COLOR]` | List the states, or set a state's icon and colour (`none` clears it) |
 | `lint [--fix]` | Check and optionally repair consistency |
 
 - The tracker is taken from `--tracker PATH` (folder or index note), then
   `BILINEAR_TRACKER`, then a search upward from the working directory.
 - The comment author is `--author`, then `BILINEAR_USER`, then `$USER`.
-- `--json` on `list`, `show`, `new`, `label` and `lint`.
-- Label colours are `red`, `orange`, `yellow`, `green`, `cyan`, `blue`,
-  `purple`, `pink`, `gray`, or a hex value such as `#7c5cff`. They are stored
-  in the index note as `label-colors: [bug=red, ...]`.
+- `--json` on `list`, `show`, `new`, `label`, `state` and `lint`.
+- Colours are `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `purple`,
+  `pink`, `gray`, or a hex value such as `#7c5cff`.
+- State icons are one of the shapes `dashed`, `circle`, `quarter`, `half`,
+  `three-quarters`, `check`, `cross`, or the name of any
+  [Lucide](https://lucide.dev/icons) icon, such as `eye` or `rocket`.
+- Colours and icons are stored in the index note, as
+  `label-colors: [bug=red]`, `state-icons: [in-review=eye]` and
+  `state-colors: [in-review=purple]`, so they can also be edited by hand.
 - A tracker made before `issues/` existed, with open notes directly in the
   tracker folder, keeps working as it is; `bilinear lint --fix` moves the
   notes into `issues/`.
@@ -132,14 +142,18 @@ or by sync, show up live.
 - Drag to reorder when the sort order is "manual"; this rewrites the index.
 - Filter by text, status, priority, label and assignee; saved views, kept in
   a `bilinear-views` code block in the index note.
-- Coloured labels. Every label gets a colour from its name; right-click a
-  label on a row, or in the labels picker, to choose another.
+- Coloured labels and state icons, both with sensible defaults. To change
+  them, open "Customize states and labels…" from the `…` menu in the tracker's
+  toolbar (also a command): pick an icon and a colour for each state, and a
+  colour for each label. Right-clicking a label on a row, or in the labels
+  picker, is a shortcut to its colour.
 - Sub-issue progress on parent rows, and a "blocked" marker.
 - Bulk edit on a multi-selection.
 - "Note missing" rows with recreate and remove actions.
 
 Commands: create tracker, new issue (from anywhere), toggle tracker / Markdown
-view, archive closed issues, lint tracker, add comment to this issue.
+view, archive closed issues, lint tracker, customize states and labels, add
+comment to this issue.
 
 Settings: the author name for comments, and the default folder for new
 trackers.

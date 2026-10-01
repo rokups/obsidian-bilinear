@@ -103,6 +103,8 @@ Free-form project notes. Never modified by the tools.
 | `closed-states` | Subset of `states` that count as closed |
 | `labels` | Known labels; others produce a lint warning |
 | `label-colors` | Optional. Colours for labels, as a list of `name=color` |
+| `state-icons` | Optional. Icons for states, as a list of `name=icon` |
+| `state-colors` | Optional. Colours for states, as a list of `name=color` |
 
 A `label-colors` entry is split at its last `=`. The colour is one of `red`,
 `orange`, `yellow`, `green`, `cyan`, `blue`, `purple`, `pink`, `gray` (any
@@ -115,6 +117,23 @@ last entry goes.
 ```yaml
 labels: [bug, build, ui]
 label-colors: [bug=red, ui=#7c5cff]
+```
+
+`state-icons` and `state-colors` have the same shape, keyed by state. A
+colour is as for labels. An icon is one of the shapes `dashed`, `circle`,
+`quarter`, `half`, `three-quarters`, `check`, `cross`, or the name of a Lucide
+icon such as `rocket` or `eye`: lower-case words joined by hyphens. A
+`lucide-` prefix and upper case are accepted when read and dropped when
+written. A state with no entry is drawn automatically by the plugin: a dashed
+ring for the first state, a ring that fills as the workflow advances for the
+other open states, a check for closed states and a cross for closed states
+whose name reads as "not done" (canceled, duplicate and the like). Entries
+that do not parse, or that name something that is not a state, are kept and
+reported by `lint`.
+
+```yaml
+state-icons: [in-review=eye, done=check]
+state-colors: [in-review=purple]
 ```
 
 An issue ID is `<prefix>-<number>`, matching `[A-Z][A-Z0-9]*-[0-9]+`.
@@ -274,6 +293,7 @@ operation leaves the index correct and at worst a stray note.
 | Comment | Append under `## Comments` in the issue note |
 | Adopt | Move a note lying in the tracker folder to `issues/`; add a line for it; raise `next` if needed |
 | Label | Add the label to `labels` if absent; set or clear its `label-colors` entry |
+| State style | Set or clear a state's `state-icons` and `state-colors` entries |
 
 New issues are appended at the end of `## Issues` unless "top" is requested.
 An adopted note is listed in the section matching where the note is.
@@ -324,6 +344,7 @@ of the two, then the tracker folder itself.
 | `index-key` | error | | `prefix`, `next`, `states` or `closed-states` missing or invalid |
 | `multiple-trackers` | error | | Another note in the folder has `bilinear: tracker` |
 | `label-color-invalid` | warning | | A `label-colors` entry is not `name=color` with a known colour |
+| `state-style-invalid` | warning | | A `state-icons` or `state-colors` entry does not parse, or names no state |
 | `missing-section` | warning | | No `## Issues` section |
 | `duplicate-section` | warning | | A second `## Issues` or `## Archive` heading |
 | `duplicate-id` | warning | yes | ID listed more than once |
@@ -426,6 +447,8 @@ identity.
 | `adopt` | `id` | |
 | `label` | `name`, optional `color`: a colour sets it, `null` clears it, absent leaves it | |
 | `labels` | | `labels`: the known labels in order, each `{name, color}` with `null` for no colour |
+| `state` | `name`, optional `icon` and `color`: a value sets it, `null` clears it, absent leaves it | |
+| `states` | | `states`: the states in order, each `{name, icon, color, closed}` |
 | `lint` | `fix` | `problems`: sorted list of `<code>:<id>`, with `-` for the index |
 | `list` | | `issues`: every issue, open and archived, in index order; each entry lists the fields to compare |
 

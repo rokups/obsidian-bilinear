@@ -6,7 +6,7 @@ import type BilinearPlugin from "../main";
 import { defaultSpec, normalizeSpec, type ViewSpec } from "../store/query";
 import { TrackerStore } from "../store/tracker-store";
 import { CTRL, createController, type Controller } from "../ui/controller";
-import { HOST, type Host, type MenuEntry } from "../ui/host";
+import { HOST, SET_ICON, type Host, type MenuEntry } from "../ui/host";
 import TrackerApp from "../ui/TrackerApp.vue";
 import { ConfirmModal, PromptModal } from "./modals";
 
@@ -60,6 +60,7 @@ export class TrackerView extends FileView implements Host {
     const controller = createController(store, this, this.spec);
     const vue = createApp(TrackerApp);
     vue.provide(HOST, this);
+    vue.provide(SET_ICON, setIcon);
     vue.provide(CTRL, controller);
     this.store = store;
     this.controller = controller;
@@ -109,10 +110,6 @@ export class TrackerView extends FileView implements Host {
   }
 
   // -- Host
-
-  setIcon(el: HTMLElement, icon: string): void {
-    setIcon(el, icon);
-  }
 
   showMenu(event: MouseEvent, entries: MenuEntry[]): void {
     const menu = new Menu();
@@ -171,6 +168,10 @@ export class TrackerView extends FileView implements Host {
 
   lint(): void {
     if (this.file) this.plugin.lintTracker(this.file);
+  }
+
+  customize(): void {
+    if (this.file) this.plugin.customize(this.file);
   }
 
   author(): string {

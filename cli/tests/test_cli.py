@@ -328,6 +328,42 @@ class LabelTest(CliCase):
         self.assertEqual("", self.run_cli("new", "B", "--label", "bug")[2])
 
 
+class StateTest(CliCase):
+    def test_set_list_and_clear(self):
+        self.ok("state", "in-review", "--icon", "lucide-eye", "--color", "Purple")
+        self.ok("state", "done", "--color", "#2da44e")
+        self.ok("state", "backlog", "--icon", "dashed")
+        text = self.index.read_text()
+        self.assertIn("state-icons: [in-review=eye, backlog=dashed]\n", text)
+        self.assertIn("state-colors: [in-review=purple, done=#2da44e]\n", text)
+        self.assertEqual(
+            "backlog      icon=dashed\ntodo\nin-progress\nin-review    icon=eye  color=purple\n"
+            "done         color=#2da44e  (closed)\ncanceled     (closed)\n", self.ok("state"))
+        rows = json.loads(self.ok("state", "--json"))
+        self.assertEqual({"name": "in-review", "icon": "eye", "color": "purple", "closed": False}, rows[3])
+        self.ok("state", "in-review", "--icon", "none")
+        self.ok("state", "in-review", "--color", "auto")
+        self.ok("state", "done", "--color", "none")
+        self.ok("state", "backlog", "--icon", "none")
+        self.assertNotIn("state-", self.index.read_text())
+        self.assertEqual((0, "no problems found\n"), self.run_cli("lint")[:2])
+
+    def test_refuses_unknown_states_and_bad_values(self):
+        before = self.index.read_bytes()
+        for argv in (["nope", "--icon", "check"], ["done"], ["done", "--icon", "two words"], ["done", "--color", "mauve"],
+                     ["--icon", "check"]):
+            with self.subTest(argv=argv):
+                self.assertEqual(1, self.run_cli("state", *argv)[0])
+        self.assertEqual(before, self.index.read_bytes())
+
+    def test_lint_reports_unusable_entries(self):
+        self.index.write_text(self.index.read_text().replace("labels: []", "labels: []\nstate-icons: [gone=check]\nstate-colors: [done=mauve]"))
+        code, out, _ = self.run_cli("lint")
+        self.assertEqual(2, code)
+        self.assertIn("state-icons names 'gone', which is not one of the states [state-style-invalid]", out)
+        self.assertIn("state-colors entry 'done=mauve' is not of the form name=color [state-style-invalid]", out)
+
+
 class CommandTest(CliCase):
     def setUp(self):
         super().setUp()

@@ -45,6 +45,7 @@ function moreMenu(e: MouseEvent): void {
   c.host.showMenu(e, [
     { title: "Archive closed issues", icon: "archive", action: () => void c.archiveAllClosed() },
     { title: "Lint tracker", icon: "stethoscope", action: () => c.host.lint() },
+    { title: "Customize states and labels…", icon: "palette", action: () => c.host.customize() },
     { separator: true },
     { title: "Open as Markdown", icon: "file-text", action: () => c.host.openAsMarkdown() },
   ]);

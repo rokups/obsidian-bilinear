@@ -236,33 +236,15 @@ button.bl-filter-chip {
   display: block;
 }
 
+/* A state icon takes its colour from --bl-state, set inline per state. */
 .bl-status-icon .bl-ring {
   fill: none;
-  stroke: var(--text-muted);
+  stroke: var(--bl-state, var(--text-faint));
   stroke-width: 1.5;
 }
 
-.bl-status-icon.is-open .bl-ring,
-.bl-status-icon.is-open .bl-fill {
-  stroke: var(--color-yellow);
-}
-
-.bl-status-icon.is-open .bl-fill {
-  fill: var(--color-yellow);
-  stroke: none;
-}
-
-.bl-status-icon.is-open[data-first="true"] .bl-ring,
-.bl-status-icon.is-unknown .bl-ring {
-  stroke: var(--text-faint);
-}
-
-.bl-status-icon.is-done .bl-fill {
-  fill: var(--bl-accent);
-}
-
-.bl-status-icon.is-dropped .bl-fill {
-  fill: var(--text-faint);
+.bl-status-icon .bl-fill {
+  fill: var(--bl-state, var(--text-faint));
 }
 
 .bl-status-icon .bl-mark {
@@ -271,6 +253,18 @@ button.bl-filter-chip {
   stroke-width: 1.6;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.bl-status-icon.is-lucide {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  color: var(--bl-state, var(--text-faint));
+}
+
+.bl-status-icon.is-lucide .bl-icon {
+  --icon-size: 14px;
+  --icon-stroke: 2px;
 }
 
 .bl-priority-icon .bl-fill {
@@ -664,6 +658,39 @@ button.bl-filter-chip {
   display: inline-flex;
   align-items: center;
   gap: var(--size-2-3);
+  color: var(--text-muted);
+}
+
+.bl-customize h4 {
+  margin: var(--size-4-4) 0 var(--size-4-2);
+}
+
+.bl-customize h4:first-child {
+  margin-top: 0;
+}
+
+.bl-customize-row {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-2-2) 0;
+}
+
+.bl-customize-name {
+  flex: 1 1 auto;
+  min-width: 6em;
+}
+
+.bl-customize-row input[type="text"] {
+  flex: 1 1 8em;
+  min-width: 0;
+}
+
+.bl-customize-row input.bl-customize-icon {
+  flex: 0 1 12em;
+}
+
+.bl-customize-empty {
   color: var(--text-muted);
 }
 
