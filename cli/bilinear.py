@@ -942,6 +942,25 @@ def _digest(data: bytes) -> bytes:
     return hashlib.sha256(data).digest()
 
 
+def replace_file(src: Path | str, dst: Path) -> None:
+    """os.replace, patient with Windows.
+
+    There a rename fails while another process has the destination open,
+    which a reader (a `list`, a virus scanner, a sync client) can do for a
+    moment at any time. Try again briefly before giving up.
+    """
+    delay = 0.01
+    for attempt in range(8):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if os.name != "nt" or attempt == 7:
+                raise
+            time.sleep(delay)
+            delay *= 2
+
+
 def atomic_write(path: Path, data: bytes) -> None:
     """Replace a file's contents in one step: readers see the old or the new, never a mix."""
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix="." + path.name + ".", suffix=".tmp")
@@ -954,7 +973,7 @@ def atomic_write(path: Path, data: bytes) -> None:
             os.chmod(tmp, os.stat(path).st_mode & 0o7777)
         except FileNotFoundError:
             os.chmod(tmp, 0o644)
-        os.replace(tmp, path)
+        replace_file(tmp, path)
         _sync_dir(path.parent)
     except BaseException:
         try:
@@ -1117,7 +1136,7 @@ class Tracker:
         if dst.exists():
             raise UsageError(f"{issue_id}: note exists in both the tracker folder and {ARCHIVE_DIR}/")
         dst.parent.mkdir(exist_ok=True)
-        os.replace(src, dst)
+        replace_file(src, dst)
 
 
 # --------------------------------------------------------------------------

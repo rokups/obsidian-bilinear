@@ -100,9 +100,10 @@ def run(case: Path, workdir: Path) -> tuple[Path, dict]:
 
 
 def snapshot(folder: Path) -> dict[str, bytes]:
+    """Every file under a folder. The lock file used on Windows is not tracker content."""
     return {
         str(p.relative_to(folder)).replace(os.sep, "/"): p.read_bytes()
-        for p in sorted(folder.rglob("*")) if p.is_file()
+        for p in sorted(folder.rglob("*")) if p.is_file() and p.name != bilinear.LOCK_FILE
     }
 
 

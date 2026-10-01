@@ -44,6 +44,10 @@ class CliCase(unittest.TestCase):
         self.assertEqual(0, code, err)
         return out
 
+    def entries(self):
+        """Names in the tracker folder, apart from the lock file used on Windows."""
+        return sorted(p.name for p in self.dir.iterdir() if p.name != bilinear.LOCK_FILE)
+
     def ids(self, *argv):
         return [i["id"] for i in json.loads(self.ok("list", "--json", *argv))]
 
@@ -160,7 +164,7 @@ class ConflictTest(CliCase):
     def test_no_temp_files_left_behind(self):
         self.ok("new", "A")
         self.ok("set", "RB-1", "status=todo")
-        self.assertEqual(["RB-1.md", "RedBolt.md", "archive"], sorted(p.name for p in self.dir.iterdir()))
+        self.assertEqual(["RB-1.md", "RedBolt.md", "archive"], self.entries())
 
 
 class LockTest(CliCase):
@@ -181,7 +185,7 @@ class LockTest(CliCase):
                     self.assertEqual(3, code)
                     self.assertIn("locked by another bilinear process", err)
             self.assertEqual(before, self.index.read_bytes())
-            self.assertEqual(["RB-1.md", "RedBolt.md", "archive"], sorted(p.name for p in self.dir.iterdir()))
+            self.assertEqual(["RB-1.md", "RedBolt.md", "archive"], self.entries())
         self.assertEqual("RB-2\n", self.ok("new", "B"))
 
     def test_readers_do_not_wait(self):
@@ -206,7 +210,7 @@ class LockTest(CliCase):
     @unittest.skipIf(bilinear.fcntl is None, "the folder itself is only locked on POSIX")
     def test_no_lock_file_is_left_in_the_vault(self):
         self.ok("new", "B")
-        self.assertEqual(["RB-1.md", "RB-2.md", "RedBolt.md", "archive"], sorted(p.name for p in self.dir.iterdir()))
+        self.assertEqual(["RB-1.md", "RB-2.md", "RedBolt.md", "archive"], self.entries())
 
     def test_concurrent_processes_lose_nothing(self):
         import subprocess
@@ -234,7 +238,7 @@ class LockTest(CliCase):
         self.assertEqual(total, sum(1 for line in note.splitlines() if line.startswith("k")))
         self.assertIn(f"next: {total + 2}\n", self.index.read_text())
         self.assertEqual((0, "no problems found\n"), self.run_cli("lint")[:2])
-        self.assertEqual(total + 3, len(list(self.dir.iterdir())))
+        self.assertEqual(total + 3, len(self.entries()))
 
 
 class CommandTest(CliCase):
