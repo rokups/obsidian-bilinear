@@ -42,6 +42,7 @@ CLI are tested against the same cases in `spec/fixtures/`.
 | `spec/` | `FORMAT.md` and the shared fixtures |
 | `cli/` | `bilinear.py` (single file, Python 3.12, stdlib only) and its tests |
 | `plugin/` | The Obsidian plugin: Vue 3, Vite, TypeScript |
+| `manifest.json`, `versions.json` | The plugin manifest and its version history, at the root where Obsidian tooling expects them |
 | `test-vault/` | A sample vault; the plugin build is linked into `.obsidian/plugins/bilinear` |
 | `docs/screenshots/` | Screenshots of `test-vault/` in Obsidian's dark theme |
 
@@ -118,6 +119,25 @@ move.
 
 ## Plugin
 
+### Installing
+
+The plugin is not in Obsidian's community list yet. Install it with
+[BRAT](https://github.com/TfTHacker/obsidian42-brat), which works on desktop
+and on the mobile apps:
+
+1. Install and enable "BRAT" from Community plugins.
+2. Run the command "BRAT: Add a beta plugin for testing" and enter
+   `rokups/obsidian-bilinear`.
+3. Enable "Bilinear" under Community plugins.
+
+BRAT installs the latest [release](https://github.com/rokups/obsidian-bilinear/releases)
+and can keep it up to date. To install by hand instead, download `main.js`,
+`manifest.json` and `styles.css` from a release into
+`<vault>/.obsidian/plugins/bilinear/`. Each release also carries the CLI,
+`bilinear.py`.
+
+### Building
+
 ```sh
 cd plugin
 pnpm install
@@ -190,6 +210,20 @@ limit: 10
 Keys: `tracker` (folder, index note or tracker name; optional inside a tracker
 folder or when the vault has one tracker), `status`, `priority`, `label`,
 `assignee` (`none` for unassigned), `search`, `archived`, `limit`.
+
+## Releasing
+
+Set the new version in `manifest.json`, `plugin/package.json` and
+`cli/bilinear.py`, add it to `versions.json` with the minimum Obsidian version
+it needs, and check with `python3 scripts/check_version.py`. Commit, then tag
+the commit with the bare version and push the tag:
+
+```sh
+git tag 0.2.0 && git push origin 0.2.0
+```
+
+The release workflow tests and builds the plugin and publishes a GitHub release
+with the files attached.
 
 ## Testing
 

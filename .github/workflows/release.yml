@@ -1,0 +1,42 @@
+name: Release
+
+# Pushing a tag that is exactly the plugin version (0.2.0, no "v") builds the
+# plugin and publishes a GitHub release with main.js, manifest.json and
+# styles.css attached. Obsidian and BRAT install from those three files.
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check that the tag matches every version number
+        run: python3 scripts/check_version.py "$GITHUB_REF_NAME"
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: plugin/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: plugin/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: plugin
+      - run: pnpm test
+        working-directory: plugin
+      - run: pnpm build
+        working-directory: plugin
+      - run: python3 -m unittest discover -s cli/tests
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          plugin/dist/main.js plugin/dist/manifest.json plugin/dist/styles.css cli/bilinear.py
+          --title "$GITHUB_REF_NAME" --generate-notes

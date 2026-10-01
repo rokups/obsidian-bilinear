@@ -3,12 +3,16 @@ import { builtinModules } from "node:module";
 import vue from "@vitejs/plugin-vue";
 import { defineConfig, type Plugin } from "vite";
 
-/** Obsidian loads main.js, styles.css and manifest.json from one folder. */
+/**
+ * Obsidian loads main.js, styles.css and manifest.json from one folder. The
+ * manifest lives at the repository root, where Obsidian's plugin tooling
+ * (the community list, BRAT) looks for it.
+ */
 function manifest(): Plugin {
   return {
     name: "bilinear-manifest",
     generateBundle() {
-      this.emitFile({ type: "asset", fileName: "manifest.json", source: readFileSync("manifest.json", "utf8") });
+      this.emitFile({ type: "asset", fileName: "manifest.json", source: readFileSync("../manifest.json", "utf8") });
     },
   };
 }

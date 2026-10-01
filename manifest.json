@@ -5,5 +5,6 @@
   "minAppVersion": "1.6.6",
   "description": "Linear-style issue tracker stored as plain Markdown notes, with a companion CLI.",
   "author": "rk",
-  "isDesktopOnly": false
+  "isDesktopOnly": false,
+  "authorUrl": "https://github.com/rokups"
 }
