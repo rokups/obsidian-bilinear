@@ -510,9 +510,11 @@ button.bl-filter-chip {
 
 .bl-bulk {
   position: absolute;
-  left: 50%;
+  left: var(--size-4-3);
+  right: var(--size-4-3);
   bottom: var(--size-4-6);
-  transform: translateX(-50%);
+  width: fit-content;
+  margin: 0 auto;
   display: flex;
   align-items: center;
   gap: var(--size-4-2);
@@ -522,8 +524,8 @@ button.bl-filter-chip {
   border-radius: var(--radius-l);
   box-shadow: var(--shadow-l);
   z-index: 5;
-  max-width: calc(100% - 2 * var(--size-4-3));
   flex-wrap: wrap;
+  justify-content: center;
 }
 
 .bl-bulk-count {
@@ -683,6 +685,8 @@ input.bl-prompt-input {
 /* -- embedded lists */
 
 .bl-embed {
+  --bl-row-height: 34px;
+  --bl-accent: var(--interactive-accent);
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-m);
   font-size: var(--font-ui-small);

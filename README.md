@@ -16,6 +16,16 @@ Trackers/RedBolt/
     RB-4.md
 ```
 
+![The tracker as a list, with an issue note open in the side split](docs/screenshots/list.png)
+
+| Board | Bulk edit |
+|---|---|
+| ![Board layout with a column per status](docs/screenshots/board.png) | ![Three issues selected with the bulk edit bar](docs/screenshots/bulk-edit.png) |
+
+| Status picker | Embedded list |
+|---|---|
+| ![Picker for setting an issue's status](docs/screenshots/picker.png) | ![A filtered issue list embedded in another note](docs/screenshots/embed.png) |
+
 The format is specified in [spec/FORMAT.md](spec/FORMAT.md). The plugin and the
 CLI are tested against the same cases in `spec/fixtures/`.
 
@@ -27,6 +37,7 @@ CLI are tested against the same cases in `spec/fixtures/`.
 | `cli/` | `bilinear.py` (single file, Python 3.12, stdlib only) and its tests |
 | `plugin/` | The Obsidian plugin: Vue 3, Vite, TypeScript |
 | `test-vault/` | A sample vault; the plugin build is linked into `.obsidian/plugins/bilinear` |
+| `docs/screenshots/` | Screenshots of `test-vault/` in Obsidian's dark theme |
 
 ## CLI
 
@@ -76,7 +87,9 @@ bilinear lint --fix
   `bilinear` processes (scripts, agents, cron jobs) can work on one tracker
   at once without losing each other's changes; they simply run in turn. A
   command waits up to 10 seconds for its turn; set `BILINEAR_LOCK_TIMEOUT`
-  (seconds) to change that.
+  (seconds) to change that. On Linux and macOS the folder itself is locked
+  and nothing is added to the vault; on Windows a `.bilinear.lock` file in
+  the tracker folder is used. CI runs the CLI tests on all three.
 
 The CLI moves notes with a plain file move. Bare `[[RB-4]]` links survive;
 path-style links in other notes are only rewritten when the plugin does the
