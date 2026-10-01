@@ -6,7 +6,34 @@ export const DEFAULT_CLOSED = ["done", "canceled"];
 export const ISSUES = "Issues";
 export const ARCHIVE = "Archive";
 export const COMMENTS = "Comments";
+export const ISSUES_DIR = "issues";
 export const ARCHIVE_DIR = "archive";
+
+/**
+ * Where a note can be: the folder for open issues, the archive, or directly
+ * in the tracker folder (the layout before issues/ existed; still read).
+ */
+export type Location = "issues" | "archive" | "root";
+export const LOCATIONS: Location[] = ["issues", "archive", "root"];
+
+export const COLOR_NAMES = ["red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "gray"];
+const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+/** A colour name from COLOR_NAMES (any letter case) or #rgb / #rrggbb; else null. */
+export function normalizeColor(color: string): string | null {
+  const c = trimBlank(color);
+  if (COLOR_NAMES.includes(c.toLowerCase())) return c.toLowerCase();
+  return HEX_COLOR_RE.test(c) ? c : null;
+}
+
+/** Split a `name=color` entry at its last `=`. */
+export function parseLabelColor(entry: string): [string, string] | null {
+  const at = entry.lastIndexOf("=");
+  if (at < 0) return null;
+  const name = trimBlank(entry.slice(0, at));
+  const color = normalizeColor(entry.slice(at + 1));
+  return name && color !== null ? [name, color] : null;
+}
 export const LIST_KEYS = ["labels", "blocked-by"];
 
 export const ID_RE = /^([A-Z][A-Z0-9]*)-([0-9]+)$/;

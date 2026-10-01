@@ -1,8 +1,9 @@
 import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf, type ViewState } from "obsidian";
-import { ARCHIVE_DIR, ID_RE, todayIso } from "./format/ids";
+import { ARCHIVE_DIR, ID_RE, ISSUES_DIR, todayIso } from "./format/ids";
 import type { Tracker } from "./ops/io";
 import { archiveClosed, commentIssue, createIssue, createTracker, type NewIssue } from "./ops/issues";
 import { lint } from "./ops/lint";
+import { notePath } from "./ops/tracker";
 import { folderOf } from "./store/tracker-store";
 import "./styles.css";
 import type { TrackerChoice } from "./ui/NewIssueForm.vue";
@@ -128,14 +129,15 @@ export default class BilinearPlugin extends Plugin {
       .sort((a, b) => a.path.localeCompare(b.path));
   }
 
-  /** The index note of the tracker a path belongs to: itself, its folder's, or (from archive/) the one above. */
+  /** The index note of the tracker a path belongs to: itself, its folder's, or (from issues/ or archive/) the one above. */
   trackerContaining(path: string): TFile | null {
     const file = this.app.vault.getFileByPath(path);
     if (!file) return null;
     if (this.isTracker(file)) return file;
     const trackers = this.findTrackers();
     const dir = folderOf(file);
-    const above = dir.endsWith(`/${ARCHIVE_DIR}`) ? dir.slice(0, -ARCHIVE_DIR.length - 1) : dir === ARCHIVE_DIR ? "" : null;
+    const sub = [ISSUES_DIR, ARCHIVE_DIR].find((name) => dir === name || dir.endsWith(`/${name}`));
+    const above = sub === undefined ? null : dir.slice(0, Math.max(0, dir.length - sub.length - 1));
     return trackers.find((t) => folderOf(t) === dir) ?? (above !== null ? trackers.find((t) => folderOf(t) === above) : undefined) ?? null;
   }
 
@@ -272,7 +274,7 @@ export default class BilinearPlugin extends Plugin {
           if (leaf.view instanceof TrackerView && leaf.view.file === index) leaf.view.reveal(id);
         }
         if (open) {
-          const note = this.app.vault.getFileByPath(`${folderOf(index) ? folderOf(index) + "/" : ""}${id}.md`);
+          const note = this.app.vault.getFileByPath(notePath({ dir: folderOf(index) }, id, false));
           if (note) await this.app.workspace.getLeaf("tab").openFile(note);
         }
         return true;

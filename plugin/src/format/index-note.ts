@@ -1,7 +1,7 @@
 // The index note: frontmatter config plus the `## Issues` and `## Archive`
 // lists (spec/FORMAT.md 1.4). Edits touch only issue lines and config keys.
 
-import { ARCHIVE, DEFAULT_CLOSED, DEFAULT_STATES, ID_RE, ISSUES, PREFIX_RE, formatLine, idNumber, linkTarget } from "./ids";
+import { ARCHIVE, DEFAULT_CLOSED, DEFAULT_STATES, ID_RE, ISSUES, PREFIX_RE, formatLine, idNumber, linkTarget, parseLabelColor } from "./ids";
 import { chomp, hasEol, isBlank, splitLines } from "./lines";
 import { findSections } from "./markdown";
 import { Doc } from "./yaml";
@@ -85,6 +85,44 @@ export class Index {
 
   get labels(): string[] {
     return this.doc.getList("labels");
+  }
+
+  /** Colours given to labels by `label-colors: [name=color, ...]`. */
+  get labelColors(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const entry of this.doc.getList("label-colors")) {
+      const parsed = parseLabelColor(entry);
+      if (parsed) out[parsed[0]] = parsed[1];
+    }
+    return out;
+  }
+
+  labelColorProblems(): string[] {
+    return this.doc
+      .getList("label-colors")
+      .filter((entry) => parseLabelColor(entry) === null)
+      .map((entry) => `label-colors entry '${entry}' is not of the form name=color`);
+  }
+
+  addLabel(name: string): void {
+    if (!this.labels.includes(name)) this.doc.set("labels", [...this.labels, name]);
+  }
+
+  /** Set or (color null) clear a label's colour. Other entries are kept as they are. */
+  setLabelColor(name: string, color: string | null): void {
+    const entries: string[] = [];
+    let done = false;
+    for (const entry of this.doc.getList("label-colors")) {
+      const parsed = parseLabelColor(entry);
+      if (parsed && parsed[0] === name) {
+        if (color !== null && !done) entries.push(`${name}=${color}`);
+        done = true;
+      } else {
+        entries.push(entry);
+      }
+    }
+    if (color !== null && !done) entries.push(`${name}=${color}`);
+    this.doc.set("label-colors", entries.length ? entries : null);
   }
 
   setNext(n: number): void {

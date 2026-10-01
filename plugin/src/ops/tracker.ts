@@ -1,31 +1,59 @@
 // Reading the tracker and the index commit step shared by all operations.
 
-import { ARCHIVE_DIR, ID_RE, cleanTitle } from "../format/ids";
+import { ARCHIVE_DIR, ID_RE, ISSUES_DIR, LOCATIONS, cleanTitle, type Location } from "../format/ids";
 import { Index, type Item } from "../format/index-note";
 import { recordFromDoc, type IssueRecord } from "../format/record";
 import { Doc } from "../format/yaml";
 import { OpError, joinPath, type Tracker } from "./io";
 
-export function notePath(t: Tracker, id: string, archived: boolean): string {
-  return joinPath(archived ? joinPath(t.dir, ARCHIVE_DIR) : t.dir, `${id}.md`);
+export function place(archived: boolean): Location {
+  return archived ? "archive" : "issues";
 }
 
-export async function locate(t: Tracker, id: string): Promise<[boolean, boolean]> {
-  return [await t.io.exists(notePath(t, id, false)), await t.io.exists(notePath(t, id, true))];
+export function folderOf(dir: string, where: Location): string {
+  return where === "root" ? dir : joinPath(dir, where === "issues" ? ISSUES_DIR : ARCHIVE_DIR);
 }
 
-/** The note for an index line: its section's location first, then the other. */
+export function pathIn(t: Pick<Tracker, "dir">, id: string, where: Location): string {
+  return joinPath(folderOf(t.dir, where), `${id}.md`);
+}
+
+/** Where the note belongs: issues/ for an open issue, archive/ for an archived one. */
+export function notePath(t: Pick<Tracker, "dir">, id: string, archived: boolean): string {
+  return pathIn(t, id, place(archived));
+}
+
+/** The order in which a line's note is looked for: where its section says, the other folder, the tracker folder. */
+export function searchOrder(archived: boolean): Location[] {
+  return [place(archived), place(!archived), "root"];
+}
+
+export function describe(where: Location | Location[]): string {
+  const names: Record<Location, string> = { issues: `${ISSUES_DIR}/`, archive: `${ARCHIVE_DIR}/`, root: "the tracker folder" };
+  return Array.isArray(where) ? where.map((w) => names[w]).join(", ") : names[where];
+}
+
+/** The locations that hold a note for this ID. */
+export async function found(t: Tracker, id: string): Promise<Location[]> {
+  const out: Location[] = [];
+  for (const where of LOCATIONS) {
+    if (await t.io.exists(pathIn(t, id, where))) out.push(where);
+  }
+  return out;
+}
+
+/** The note for an index line, or null if it is missing everywhere. */
 export async function resolveNote(t: Tracker, id: string, archived: boolean): Promise<string | null> {
-  for (const where of [archived, !archived]) {
-    const p = notePath(t, id, where);
+  for (const where of searchOrder(archived)) {
+    const p = pathIn(t, id, where);
     if (await t.io.exists(p)) return p;
   }
   return null;
 }
 
-/** IDs of the notes in the folder or in archive/, in numeric order. */
-export async function noteIds(t: Tracker, archived: boolean): Promise<string[]> {
-  const names = await t.io.listNotes(archived ? joinPath(t.dir, ARCHIVE_DIR) : t.dir);
+/** IDs of the notes in one location, in numeric order. */
+export async function noteIds(t: Tracker, where: Location): Promise<string[]> {
+  const names = await t.io.listNotes(folderOf(t.dir, where));
   const key = (n: string): [string, number] => [n.split("-")[0], parseInt(n.split("-")[1], 10)];
   return names
     .filter((n) => ID_RE.test(n))
@@ -93,12 +121,14 @@ export async function updateIndex(
   });
 }
 
+/** Put the note where it belongs, from wherever it is. */
 export async function moveNote(t: Tracker, id: string, toArchive: boolean): Promise<void> {
-  const src = notePath(t, id, !toArchive);
-  const dst = notePath(t, id, toArchive);
-  if (!(await t.io.exists(src))) return;
-  if (await t.io.exists(dst)) throw new OpError(`${id}: note exists in both the tracker folder and ${ARCHIVE_DIR}/`);
-  await t.io.rename(src, dst);
+  const target = place(toArchive);
+  const here = await found(t, id);
+  const elsewhere = here.filter((w) => w !== target);
+  if (!elsewhere.length) return;
+  if (here.length > 1) throw new OpError(`${id}: note exists in more than one place (${describe(here)})`);
+  await t.io.rename(pathIn(t, id, elsewhere[0]), pathIn(t, id, target));
 }
 
 export async function issueRecord(t: Tracker, item: Item): Promise<IssueRecord> {

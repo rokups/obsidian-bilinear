@@ -23,6 +23,7 @@ describe("fixtures", () => {
     const expected = c.op.expect ?? {};
     if (expected.id !== undefined) expect(result.id).toBe(expected.id);
     if (expected.problems !== undefined) expect(result.problems).toEqual(expected.problems);
+    if (expected.labels !== undefined) expect(result.labels).toEqual(expected.labels);
     if (expected.issues !== undefined) {
       expect(result.issues!.map((i) => i.id)).toEqual(expected.issues.map((i) => i.id));
       expected.issues.forEach((want, n) => expect(result.issues![n]).toMatchObject(want));

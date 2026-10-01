@@ -9,19 +9,24 @@ files that break a rule are tolerated wherever this document says how.
 
 ## 1. Storage model
 
-A tracker is one folder. It holds one index note, one note per issue, and an
-`archive/` subfolder for the notes of archived issues.
+A tracker is one folder. It holds one index note and two subfolders: `issues/`
+for the notes of open issues and `archive/` for the notes of archived ones.
 
 ```
 Trackers/RedBolt/
   RedBolt.md        index note
-  RB-9.md
-  RB-13.md
+  issues/
+    RB-9.md
+    RB-13.md
   archive/
     RB-4.md
 ```
 
-`archive/` may be absent; tools create it when they first need it.
+Either subfolder may be absent; tools create it when they first need it.
+
+Before `issues/` existed, the notes of open issues lay directly in the tracker
+folder. Tools still read such notes where they are (section 3), put new notes
+in `issues/`, and `lint --fix` moves the old ones there.
 
 ### 1.1 Principles
 
@@ -97,6 +102,20 @@ Free-form project notes. Never modified by the tools.
 | `states` | Workflow states, in display order; not empty |
 | `closed-states` | Subset of `states` that count as closed |
 | `labels` | Known labels; others produce a lint warning |
+| `label-colors` | Optional. Colours for labels, as a list of `name=color` |
+
+A `label-colors` entry is split at its last `=`. The colour is one of `red`,
+`orange`, `yellow`, `green`, `cyan`, `blue`, `purple`, `pink`, `gray` (any
+letter case when read; written in lower case), or a hex value `#rgb` or
+`#rrggbb`. A label with no entry gets a colour chosen by the plugin from its
+name. Entries that do not parse are kept and reported by `lint`; setting a
+colour rewrites only the entry for that label, and the key is removed when the
+last entry goes.
+
+```yaml
+labels: [bug, build, ui]
+label-colors: [bug=red, ui=#7c5cff]
+```
 
 An issue ID is `<prefix>-<number>`, matching `[A-Z][A-Z0-9]*-[0-9]+`.
 
@@ -139,7 +158,7 @@ before its first issue line, or after the heading.
 
 ### 1.5 Issue note
 
-The filename is the ID: `<ID>.md`, in the tracker folder or in `archive/`.
+The filename is the ID: `<ID>.md`, in `issues/` or in `archive/`.
 
 ```markdown
 ---
@@ -245,15 +264,16 @@ operation leaves the index correct and at worst a stray note.
 
 | Operation | Steps, in order |
 |---|---|
-| Create | Allocate ID; create note; add line to `## Issues` and raise `next` |
+| Create | Allocate ID; create note in `issues/`; add line to `## Issues` and raise `next` |
 | Edit property | Write the issue note only |
 | Retitle | Write `title` in the note; rewrite the index line |
 | Reorder | Move the line within `## Issues` |
 | Archive | Move note to `archive/`; move line to the end of `## Archive` |
-| Unarchive | Move note back; move line to the end of `## Issues` |
-| Delete | Trash the note; remove the line |
+| Unarchive | Move note to `issues/`; move line to the end of `## Issues` |
+| Delete | Trash the note, wherever it is; remove the line |
 | Comment | Append under `## Comments` in the issue note |
-| Adopt | Add a line for an orphan note; raise `next` if needed |
+| Adopt | Move a note lying in the tracker folder to `issues/`; add a line for it; raise `next` if needed |
+| Label | Add the label to `labels` if absent; set or clear its `label-colors` entry |
 
 New issues are appended at the end of `## Issues` unless "top" is requested.
 An adopted note is listed in the section matching where the note is.
@@ -262,9 +282,10 @@ An adopted note is listed in the section matching where the note is.
 a different, non-empty `title` property.
 
 **ID allocation.** Take `n = max(next, 1 + the highest number seen)`, where
-"seen" covers IDs with the tracker's prefix on index lines, in the folder and
-in `archive/`. Create `<PREFIX>-<n>.md` with an exclusive create; if a note
-with that name exists in either location, increment and retry. Then write the
+"seen" covers IDs with the tracker's prefix on index lines, in `issues/`, in
+`archive/` and in the tracker folder itself. Create `issues/<PREFIX>-<n>.md`
+with an exclusive create; if a note with that name exists in any of the three
+places, increment and retry. Then write the
 index with `next` set to at least `n + 1`.
 
 **Ordering in grouped views.** There is one flat global order. Views grouped by
@@ -278,18 +299,20 @@ which they were archived.
 
 | Situation | Behaviour |
 |---|---|
-| Note in folder or `archive/`, no index line | Orphan: ignored; reported by `lint`; added only by `adopt` |
-| Index line, note missing in both locations | Issue exists; shown as "note missing" with the title from the line; `lint` error |
-| Line under `## Archive`, note in main folder (or the reverse) | Index wins; `lint --fix` moves the note |
-| Note in both locations | The one matching the line's section is used; `lint` error; not auto-fixed |
+| Note in `issues/`, `archive/` or the tracker folder, no index line | Orphan: ignored; reported by `lint`; added only by `adopt` |
+| Index line, note missing everywhere | Issue exists; shown as "note missing" with the title from the line; `lint` error |
+| Line under `## Archive`, note in `issues/` (or the reverse) | Index wins; `lint --fix` moves the note |
+| Line under `## Issues` or `## Archive`, note in the tracker folder | The note is used where it is; `lint --fix` moves it to `issues/` or `archive/` |
+| Note in more than one place | The first in the search order below is used; `lint` error; not auto-fixed |
 | Title copy differs from `title` property | Property wins; line corrected on next index write |
 | Same ID listed twice | First occurrence wins; `lint --fix` removes the rest |
 | Line not in canonical form | Read as described in 1.4; `lint --fix` rewrites it |
 | `next` not above the highest number seen | Allocation still skips ahead; `lint --fix` raises `next` |
 | `status` not in `states`, bad `priority`, unknown label | Reported by `lint`; not auto-fixed |
 
-Both tools look in the main folder and `archive/` when resolving a line: first
-the location matching the line's section, then the other.
+Both tools look in three places when resolving a line, in this order: the
+folder matching the line's section (`issues/` or `archive/`), then the other
+of the two, then the tracker folder itself.
 
 `lint --fix` never adds or removes issues.
 
@@ -300,14 +323,15 @@ the location matching the line's section, then the other.
 | `index-yaml` | error | | Index frontmatter outside the YAML subset |
 | `index-key` | error | | `prefix`, `next`, `states` or `closed-states` missing or invalid |
 | `multiple-trackers` | error | | Another note in the folder has `bilinear: tracker` |
+| `label-color-invalid` | warning | | A `label-colors` entry is not `name=color` with a known colour |
 | `missing-section` | warning | | No `## Issues` section |
 | `duplicate-section` | warning | | A second `## Issues` or `## Archive` heading |
 | `duplicate-id` | warning | yes | ID listed more than once |
 | `line-format` | warning | yes | Issue line not in canonical form |
 | `prefix-mismatch` | warning | | Listed ID does not use the tracker prefix |
-| `note-missing` | error | | No note in either location |
-| `note-duplicate` | error | | Note in both locations |
-| `wrong-location` | warning | yes | Note is in the folder the index does not say |
+| `note-missing` | error | | No note in any location |
+| `note-duplicate` | error | | Note in more than one location |
+| `wrong-location` | warning | yes | Note is not in the folder its section says, including a note left in the tracker folder |
 | `title-mismatch` | warning | yes | Title copy differs from the property |
 | `next-low` | warning | yes | `next` is not above the highest number seen |
 | `orphan` | warning | | Note with the tracker prefix and no index line |
@@ -400,6 +424,8 @@ identity.
 | `delete` | `id` | |
 | `comment` | `id`, `text` | |
 | `adopt` | `id` | |
+| `label` | `name`, optional `color`: a colour sets it, `null` clears it, absent leaves it | |
+| `labels` | | `labels`: the known labels in order, each `{name, color}` with `null` for no colour |
 | `lint` | `fix` | `problems`: sorted list of `<code>:<id>`, with `-` for the index |
 | `list` | | `issues`: every issue, open and archived, in index order; each entry lists the fields to compare |
 

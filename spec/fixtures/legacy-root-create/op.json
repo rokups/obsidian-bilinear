@@ -1,0 +1,10 @@
+{
+  "op": "create",
+  "args": {
+    "title": "New notes go to issues/"
+  },
+  "today": "2026-10-01",
+  "expect": {
+    "id": "RB-14"
+  }
+}

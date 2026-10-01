@@ -1,6 +1,7 @@
 import { type App, type EventRef, type TAbstractFile, type TFile } from "obsidian";
 import { ref, shallowRef } from "vue";
-import { ARCHIVE_DIR } from "../format/ids";
+import { LOCATIONS } from "../format/ids";
+import { folderOf as locationFolder } from "../ops/tracker";
 import type { Tracker } from "../ops/io";
 import { VaultIO } from "../view/vault-io";
 import { buildSnapshot, emptySnapshot, type Snapshot } from "./snapshot";
@@ -60,13 +61,12 @@ export class TrackerStore {
     if (this.timer !== null) window.clearTimeout(this.timer);
   }
 
-  /** Is this path the index, an issue note, or a note in archive/? */
+  /** Is this path the index, or a note in issues/, archive/ or the tracker folder? */
   private concerns(path: string): boolean {
     if (path === this.indexFile.path) return true;
     const slash = path.lastIndexOf("/");
     const parent = slash < 0 ? "" : path.slice(0, slash);
-    const dir = this.dir;
-    return parent === dir || parent === (dir ? `${dir}/${ARCHIVE_DIR}` : ARCHIVE_DIR);
+    return LOCATIONS.some((where) => parent === locationFolder(this.dir, where));
   }
 
   private touched(path: string): void {

@@ -32,6 +32,8 @@ export interface TrackerConfig {
   states: string[];
   closedStates: string[];
   labels: string[];
+  /** Colours set in the index: label name to a colour name or hex value. */
+  labelColors: Record<string, string>;
 }
 
 export interface Group {

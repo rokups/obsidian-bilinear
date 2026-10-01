@@ -1,0 +1,11 @@
+{
+  "op": "lint",
+  "args": {
+    "fix": true
+  },
+  "expect": {
+    "problems": [
+      "note-duplicate:RB-9"
+    ]
+  }
+}

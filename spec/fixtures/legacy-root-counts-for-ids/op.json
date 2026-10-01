@@ -1,0 +1,10 @@
+{
+  "op": "create",
+  "args": {
+    "title": "After the stray"
+  },
+  "today": "2026-10-01",
+  "expect": {
+    "id": "RB-31"
+  }
+}

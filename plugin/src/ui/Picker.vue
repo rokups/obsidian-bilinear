@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onMounted, ref, watch } from "vue";
 import { CTRL, type PickerState } from "./controller";
+import LabelChip from "./LabelChip.vue";
 import PriorityIcon from "./PriorityIcon.vue";
 import StatusIcon from "./StatusIcon.vue";
 
@@ -76,6 +77,10 @@ function choose(o: Option | undefined): void {
   if (props.state.kind === "labels") query.value = "";
 }
 
+function onContext(e: MouseEvent, o: Option): void {
+  if (props.state.kind === "labels" && o.value !== null && !o.create) c.labelMenu(e, o.value);
+}
+
 function onKey(e: KeyboardEvent): void {
   if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) active.value = Math.min(options.value.length - 1, active.value + 1);
   else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) active.value = Math.max(0, active.value - 1);
@@ -98,15 +103,16 @@ onMounted(() => {
   <div class="bl-overlay" @mousedown.self="c.closePicker()">
     <div class="bl-picker" role="dialog" :aria-label="title" @keydown="onKey">
       <div class="bl-picker-title">{{ title }}</div>
-      <input ref="input" v-model="query" type="text" class="bl-picker-input" :placeholder="state.kind === 'labels' || state.kind === 'assignee' ? 'Filter or type a new value' : 'Filter'" spellcheck="false" />
+      <input ref="input" v-model="query" type="text" class="bl-picker-input" :placeholder="state.kind === 'labels' ? 'Filter or type a new label; right-click one for its colour' : state.kind === 'assignee' ? 'Filter or type a new value' : 'Filter'" spellcheck="false" />
       <div ref="list" class="bl-picker-list" role="listbox">
         <div
           v-for="(o, n) in options" :key="`${o.create ? 'new' : 'opt'}:${o.value}`"
           class="bl-option" :class="{ 'is-active': n === active, 'is-checked': o.checked }" role="option" :aria-selected="o.checked"
-          @mousemove="active = n" @click="choose(o)"
+          @mousemove="active = n" @click="choose(o)" @contextmenu.prevent="onContext($event, o)"
         >
           <StatusIcon v-if="state.kind === 'status'" :status="o.value" :states="c.config.value.states" :closed-states="c.config.value.closedStates" />
           <PriorityIcon v-else-if="state.kind === 'priority'" :priority="o.value ?? 'none'" />
+          <LabelChip v-else-if="state.kind === 'labels' && o.value !== null" :label="o.value" :colors="c.config.value.labelColors" dot-only />
           <span class="bl-option-label">{{ o.label }}</span>
           <span v-if="o.checked" class="bl-option-check">✓</span>
         </div>

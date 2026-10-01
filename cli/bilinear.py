@@ -29,7 +29,13 @@ DEFAULT_CLOSED = ["done", "canceled"]
 ISSUES = "Issues"
 ARCHIVE = "Archive"
 COMMENTS = "Comments"
+ISSUES_DIR = "issues"
 ARCHIVE_DIR = "archive"
+# Where a note can be: the folder for open issues, the archive, or directly in
+# the tracker folder (the layout before issues/ existed; still read).
+IN_ISSUES, IN_ARCHIVE, IN_ROOT = "issues", "archive", "root"
+LOCATIONS = (IN_ISSUES, IN_ARCHIVE, IN_ROOT)
+COLOR_NAMES = ["red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "gray"]
 LIST_KEYS = ("labels", "blocked-by")
 RETRIES = 3
 LOCK_TIMEOUT = 10.0  # seconds; override with BILINEAR_LOCK_TIMEOUT
@@ -585,6 +591,27 @@ def format_line(issue_id: str, title: str) -> str:
     return f"- [[{issue_id}]] {title}" if title else f"- [[{issue_id}]]"
 
 
+_HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+
+def normalize_color(color: str) -> str | None:
+    """A colour name from COLOR_NAMES (any letter case) or #rgb / #rrggbb; else None."""
+    color = color.strip(" \t")
+    if color.lower() in COLOR_NAMES:
+        return color.lower()
+    return color if _HEX_COLOR_RE.match(color) else None
+
+
+def parse_label_color(entry: str) -> tuple[str, str] | None:
+    """Split a `name=color` entry at its last `=`."""
+    name, sep, color = entry.rpartition("=")
+    name = name.strip(" \t")
+    normalized = normalize_color(color)
+    if not sep or not name or normalized is None:
+        return None
+    return name, normalized
+
+
 def valid_date(s: str | None) -> bool:
     if not s or not re.match(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$", s):
         return False
@@ -667,6 +694,42 @@ class Index:
     @property
     def labels(self) -> list[str]:
         return self.doc.get_list("labels")
+
+    @property
+    def label_colors(self) -> dict[str, str]:
+        """Colours given to labels by `label-colors: [name=color, ...]`."""
+        out: dict[str, str] = {}
+        for entry in self.doc.get_list("label-colors"):
+            parsed = parse_label_color(entry)
+            if parsed:
+                out[parsed[0]] = parsed[1]
+        return out
+
+    def label_color_problems(self) -> list[str]:
+        return [
+            f"label-colors entry '{entry}' is not of the form name=color"
+            for entry in self.doc.get_list("label-colors") if parse_label_color(entry) is None
+        ]
+
+    def add_label(self, name: str) -> None:
+        if name not in self.labels:
+            self.doc.set("labels", self.labels + [name])
+
+    def set_label_color(self, name: str, color: str | None) -> None:
+        """Set or (color None) clear a label's colour. Other entries are kept as they are."""
+        entries = []
+        done = False
+        for entry in self.doc.get_list("label-colors"):
+            parsed = parse_label_color(entry)
+            if parsed and parsed[0] == name:
+                if color is not None and not done:
+                    entries.append(f"{name}={color}")
+                done = True
+            else:
+                entries.append(entry)
+        if color is not None and not done:
+            entries.append(f"{name}={color}")
+        self.doc.set("label-colors", entries or None)
 
     def set_next(self, n: int) -> None:
         if self.next != n:
@@ -1066,22 +1129,31 @@ class Tracker:
 
     # -- paths
 
-    def note_path(self, issue_id: str, archived: bool) -> Path:
-        return (self.dir / ARCHIVE_DIR if archived else self.dir) / f"{issue_id}.md"
+    def folder(self, where: str) -> Path:
+        return {IN_ISSUES: self.dir / ISSUES_DIR, IN_ARCHIVE: self.dir / ARCHIVE_DIR, IN_ROOT: self.dir}[where]
 
-    def locate(self, issue_id: str) -> tuple[bool, bool]:
-        return self.note_path(issue_id, False).is_file(), self.note_path(issue_id, True).is_file()
+    def path_in(self, issue_id: str, where: str) -> Path:
+        return self.folder(where) / f"{issue_id}.md"
+
+    def note_path(self, issue_id: str, archived: bool) -> Path:
+        """Where the note belongs: issues/ for an open issue, archive/ for an archived one."""
+        return self.path_in(issue_id, place(archived))
+
+    def found(self, issue_id: str) -> list[str]:
+        """The locations that hold a note for this ID."""
+        return [w for w in LOCATIONS if self.path_in(issue_id, w).is_file()]
 
     def resolve(self, item: Item) -> Path | None:
-        """The note for an index line: its section's location first, then the other."""
-        for archived in (item.archived, not item.archived):
-            p = self.note_path(item.id, archived)
+        """The note for an index line: where its section says, then the other
+        folder, then the tracker folder itself."""
+        for where in (place(item.archived), place(not item.archived), IN_ROOT):
+            p = self.path_in(item.id, where)
             if p.is_file():
                 return p
         return None
 
-    def note_ids(self, archived: bool) -> list[str]:
-        folder = self.dir / ARCHIVE_DIR if archived else self.dir
+    def note_ids(self, where: str) -> list[str]:
+        folder = self.folder(where)
         try:
             names = [p.stem for p in folder.iterdir() if p.suffix == ".md" and p.is_file()]
         except OSError:
@@ -1129,14 +1201,28 @@ class Tracker:
         return it
 
     def move_note(self, issue_id: str, to_archive: bool) -> None:
-        src = self.note_path(issue_id, not to_archive)
-        dst = self.note_path(issue_id, to_archive)
-        if not src.is_file():
+        """Put the note where it belongs, from wherever it is."""
+        target = place(to_archive)
+        here = self.found(issue_id)
+        elsewhere = [w for w in here if w != target]
+        if not elsewhere:
             return
-        if dst.exists():
-            raise UsageError(f"{issue_id}: note exists in both the tracker folder and {ARCHIVE_DIR}/")
+        if len(here) > 1:
+            raise UsageError(f"{issue_id}: note exists in more than one place ({describe(here)})")
+        dst = self.path_in(issue_id, target)
         dst.parent.mkdir(exist_ok=True)
-        replace_file(src, dst)
+        replace_file(self.path_in(issue_id, elsewhere[0]), dst)
+
+
+def place(archived: bool) -> str:
+    return IN_ARCHIVE if archived else IN_ISSUES
+
+
+def describe(where: list[str] | str) -> str:
+    names = {IN_ISSUES: f"{ISSUES_DIR}/", IN_ARCHIVE: f"{ARCHIVE_DIR}/", IN_ROOT: "the tracker folder"}
+    if isinstance(where, str):
+        return names[where]
+    return ", ".join(names[w] for w in where)
 
 
 # --------------------------------------------------------------------------
@@ -1201,6 +1287,7 @@ def cmd_init(args) -> int:
     if index_notes(folder):
         raise UsageError(f"{folder} already contains a tracker")
     folder.mkdir(parents=True, exist_ok=True)
+    (folder / ISSUES_DIR).mkdir(exist_ok=True)
     (folder / ARCHIVE_DIR).mkdir(exist_ok=True)
     index = folder / f"{folder.resolve().name}.md"
     try:
@@ -1258,12 +1345,13 @@ def cmd_new(t: Tracker, args) -> int:
 
     prefix = idx.prefix
     seen = [idx.highest()]
-    for archived in (False, True):
-        seen += [id_number(i, prefix) or 0 for i in t.note_ids(archived)]
+    for where in LOCATIONS:
+        seen += [id_number(i, prefix) or 0 for i in t.note_ids(where)]
     n = max(idx.next, max(seen) + 1)
+    t.folder(IN_ISSUES).mkdir(exist_ok=True)
     while True:
         issue_id = f"{prefix}-{n}"
-        if t.note_path(issue_id, True).exists():
+        if t.path_in(issue_id, IN_ARCHIVE).exists() or t.path_in(issue_id, IN_ROOT).exists():
             n += 1
             continue
         try:
@@ -1514,7 +1602,7 @@ def cmd_unarchive(t: Tracker, args) -> int:
 def cmd_rm(t: Tracker, args) -> int:
     idx = t.read_index()
     it = t.require(idx, args.id)
-    paths = [p for p in (t.note_path(it.id, False), t.note_path(it.id, True)) if p.is_file()]
+    paths = [t.path_in(it.id, where) for where in t.found(it.id)]
     if paths:
         vault = t.vault_root()
         if vault is None and not args.force:
@@ -1541,17 +1629,52 @@ def cmd_adopt(t: Tracker, args) -> int:
         raise UsageError(f"'{args.id}' is not an issue ID")
     if idx.find(args.id) is not None:
         raise UsageError(f"{args.id} is already in the index")
-    main, arch = t.locate(args.id)
-    if not main and not arch:
-        raise UsageError(f"{args.id}: no such note in the tracker folder or {ARCHIVE_DIR}/")
-    section = ISSUES if main else ARCHIVE
+    here = t.found(args.id)
+    if not here:
+        raise UsageError(f"{args.id}: no such note in {ISSUES_DIR}/, {ARCHIVE_DIR}/ or the tracker folder")
+    archived = here[0] == IN_ARCHIVE
+    section = ARCHIVE if archived else ISSUES
     number = id_number(args.id, idx.prefix)
+    # A note lying in the tracker folder goes to issues/ as it is adopted.
+    t.move_note(args.id, archived)
 
     def commit(i: Index) -> None:
         if i.find(args.id) is None:
             i.add(args.id, "", section)
         if number is not None and (i.next or 1) <= number:
             i.set_next(number + 1)
+
+    t.update_index(commit)
+    return EXIT_OK
+
+
+def cmd_label(t: Tracker, args) -> int:
+    idx = t.read_index()
+    if args.name is None:
+        if args.color is not None:
+            raise UsageError("--color needs a label name")
+        colors = idx.label_colors
+        names = idx.labels + [n for n in colors if n not in idx.labels]
+        if args.json:
+            print(json.dumps([{"name": n, "color": colors.get(n)} for n in names], indent=2, ensure_ascii=False))
+        else:
+            width = max((len(n) for n in names), default=0)
+            for n in names:
+                print(f"{n:<{width}}  {colors[n]}".rstrip() if n in colors else n)
+        return EXIT_OK
+    name = clean_title(args.name)
+    if not name:
+        raise UsageError("label name must not be empty")
+    color = None
+    if args.color is not None and args.color.lower() not in ("none", "auto"):
+        color = normalize_color(args.color)
+        if color is None:
+            raise UsageError(f"unknown colour '{args.color}' (one of: {', '.join(COLOR_NAMES)}, #rgb, #rrggbb, or none)")
+
+    def commit(i: Index) -> None:
+        i.add_label(name)
+        if args.color is not None:
+            i.set_label_color(name, color)
 
     t.update_index(commit)
     return EXIT_OK
@@ -1608,6 +1731,8 @@ def lint(t: Tracker, fix: bool) -> list[dict]:
         add("error", "index-yaml", None, p)
     for p in idx.key_problems():
         add("error", "index-key", None, p)
+    for p in idx.label_color_problems():
+        add("warning", "label-color-invalid", None, p)
     for other in index_notes(t.dir):
         if other != t.index_path:
             add("error", "multiple-trackers", None, f"{other.name} is also marked as a tracker index")
@@ -1628,15 +1753,16 @@ def lint(t: Tracker, fix: bool) -> list[dict]:
             add("warning", "line-format", it.id, "index line is not in the form '- [[ID]] title'", True)
         if prefix and id_number(it.id, prefix) is None:
             add("warning", "prefix-mismatch", it.id, f"ID does not use the tracker prefix {prefix}")
-        main, arch = t.locate(it.id)
-        if not main and not arch:
+        here = t.found(it.id)
+        if not here:
             add("error", "note-missing", it.id, "note missing")
             continue
-        if main and arch:
-            add("error", "note-duplicate", it.id, f"note exists in both the tracker folder and {ARCHIVE_DIR}/")
-        elif arch != it.archived:
-            where = f"## {ARCHIVE}" if it.archived else f"## {ISSUES}"
-            add("warning", "wrong-location", it.id, f"listed under {where} but the note is in the other folder", True)
+        if len(here) > 1:
+            add("error", "note-duplicate", it.id, f"note exists in more than one place ({describe(here)})")
+        elif here[0] != place(it.archived):
+            section = f"## {ARCHIVE}" if it.archived else f"## {ISSUES}"
+            add("warning", "wrong-location", it.id,
+                f"listed under {section} but the note is in {describe(here[0])}, not {describe(place(it.archived))}", True)
             moves.append((it.id, it.archived))
         doc = Doc(read_text(t.resolve(it)))
         check_note(idx, it.id, doc, add)
@@ -1645,15 +1771,15 @@ def lint(t: Tracker, fix: bool) -> list[dict]:
             add("warning", "title-mismatch", it.id, "index line title differs from the title property", True)
 
     highest = idx.highest()
-    for archived in (False, True):
-        for issue_id in t.note_ids(archived):
+    for where in LOCATIONS:
+        for issue_id in t.note_ids(where):
             number = id_number(issue_id, prefix)
             if number is None:
                 continue
             highest = max(highest, number)
             if issue_id not in seen:
-                where = f"{ARCHIVE_DIR}/{issue_id}.md" if archived else f"{issue_id}.md"
-                add("warning", "orphan", issue_id, f"{where} has no index line (use 'adopt' to add it)")
+                path = t.path_in(issue_id, where).relative_to(t.dir).as_posix()
+                add("warning", "orphan", issue_id, f"{path} has no index line (use 'adopt' to add it)")
     if idx.next is not None and idx.next <= highest:
         add("warning", "next-low", None, f"next is {idx.next} but {prefix}-{highest} exists", True)
 
@@ -1728,7 +1854,7 @@ def build_parser() -> Parser:
         sp.set_defaults(func=func, needs_tracker=needs_tracker, writes=writes)
         return sp
 
-    sp = cmd("init", "create a tracker folder, its index note and archive/", cmd_init, needs_tracker=False)
+    sp = cmd("init", "create a tracker folder, its index note, issues/ and archive/", cmd_init, needs_tracker=False)
     sp.add_argument("folder")
     sp.add_argument("--prefix", required=True, help="ID prefix, e.g. RB")
 
@@ -1786,6 +1912,11 @@ def build_parser() -> Parser:
     sp = cmd("adopt", "add an index line for an orphan note", cmd_adopt)
     sp.add_argument("id")
 
+    sp = cmd("label", "list the labels, or add one and set its colour", cmd_label)
+    sp.add_argument("name", nargs="?")
+    sp.add_argument("--color", metavar="COLOR", help=f"{', '.join(COLOR_NAMES)}, #rgb or #rrggbb; 'none' clears it")
+    sp.add_argument("--json", action="store_true")
+
     sp = cmd("lint", "check consistency; --fix repairs what is safe to repair", cmd_lint)
     sp.add_argument("--fix", action="store_true")
     sp.add_argument("--json", action="store_true")
@@ -1804,7 +1935,7 @@ def main(argv: list[str] | None = None) -> int:
         tracker = Tracker.open(getattr(args, "tracker", None) or os.environ.get("BILINEAR_TRACKER"))
         # Reads need no lock: every write is an atomic replace. `lint` only
         # writes with --fix.
-        if not args.writes or (args.command == "lint" and not args.fix):
+        if not args.writes or (args.command == "lint" and not args.fix) or (args.command == "label" and not args.name):
             return args.func(tracker, args)
         with TrackerLock(tracker.dir):
             return args.func(tracker, args)

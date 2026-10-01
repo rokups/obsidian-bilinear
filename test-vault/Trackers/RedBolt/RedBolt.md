@@ -5,6 +5,7 @@ next: 10
 states: [backlog, todo, in-progress, in-review, done, canceled]
 closed-states: [done, canceled]
 labels: [bug, build, ui]
+label-colors: [bug=red]
 ---
 
 Sample tracker for trying the plugin and the CLI side by side.

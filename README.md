@@ -3,15 +3,17 @@
 A Linear-style issue tracker for Obsidian, stored as plain Markdown notes, with
 a Python CLI that works on the same files.
 
-A tracker is a folder: one index note that lists the issues in order, one note
-per issue with its properties in frontmatter, and an `archive/` subfolder.
-Everything is hand-editable; both tools preserve what they do not understand.
+A tracker is a folder: one index note that lists the issues in order, and one
+note per issue with its properties in frontmatter, kept in `issues/` while the
+issue is open and in `archive/` once it is archived. Everything is
+hand-editable; both tools preserve what they do not understand.
 
 ```
 Trackers/RedBolt/
   RedBolt.md        index note: config, `## Issues`, `## Archive`
-  RB-9.md
-  RB-13.md
+  issues/
+    RB-9.md
+    RB-13.md
   archive/
     RB-4.md
 ```
@@ -61,7 +63,7 @@ bilinear lint --fix
 
 | Command | Purpose |
 |---|---|
-| `init <folder> --prefix RB` | Create the folder, index note and `archive/` |
+| `init <folder> --prefix RB` | Create the folder, index note, `issues/` and `archive/` |
 | `new "Title" [--status ..] [--priority ..] [--label ..] [--assignee ..] [--due ..] [--parent ..] [--top]` | Create an issue; prints the ID |
 | `list [--status ..] [--label ..] [--assignee ..] [--priority ..] [--archived] [--all]` | List in index order |
 | `show <ID>` | Print properties and body |
@@ -72,12 +74,19 @@ bilinear lint --fix
 | `unarchive <ID>...` | Restore |
 | `rm <ID> [--force]` | Remove the line; move the note to the vault's `.trash/` |
 | `adopt <ID>` | Add an index line for an orphan note |
+| `label [name] [--color COLOR]` | List the labels, or add one and set its colour (`none` clears it) |
 | `lint [--fix]` | Check and optionally repair consistency |
 
 - The tracker is taken from `--tracker PATH` (folder or index note), then
   `BILINEAR_TRACKER`, then a search upward from the working directory.
 - The comment author is `--author`, then `BILINEAR_USER`, then `$USER`.
-- `--json` on `list`, `show`, `new` and `lint`.
+- `--json` on `list`, `show`, `new`, `label` and `lint`.
+- Label colours are `red`, `orange`, `yellow`, `green`, `cyan`, `blue`,
+  `purple`, `pink`, `gray`, or a hex value such as `#7c5cff`. They are stored
+  in the index note as `label-colors: [bug=red, ...]`.
+- A tracker made before `issues/` existed, with open notes directly in the
+  tracker folder, keeps working as it is; `bilinear lint --fix` moves the
+  notes into `issues/`.
 - Filters accept repeated flags or comma-separated values.
 - `rm` finds the vault by searching upward for `.obsidian/`. Without one it
   refuses unless `--force` is given, which deletes the note.
@@ -123,6 +132,8 @@ or by sync, show up live.
 - Drag to reorder when the sort order is "manual"; this rewrites the index.
 - Filter by text, status, priority, label and assignee; saved views, kept in
   a `bilinear-views` code block in the index note.
+- Coloured labels. Every label gets a colour from its name; right-click a
+  label on a row, or in the labels picker, to choose another.
 - Sub-issue progress on parent rows, and a "blocked" marker.
 - Bulk edit on a multi-selection.
 - "Note missing" rows with recreate and remove actions.

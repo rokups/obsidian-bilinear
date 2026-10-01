@@ -2,8 +2,7 @@
 
 import { Index } from "../format/index-note";
 import { recordFromFrontmatter, type IssueRecord } from "../format/record";
-import { notePath } from "../ops/tracker";
-import type { Tracker } from "../ops/io";
+import { pathIn, searchOrder } from "../ops/tracker";
 import type { TrackerConfig } from "./query";
 import { readViews, type SavedView } from "./views";
 
@@ -25,21 +24,33 @@ export interface Snapshot {
 export type NoteLookup = (path: string) => Record<string, unknown> | null | undefined;
 
 export function emptySnapshot(): Snapshot {
-  return { config: { prefix: null, next: null, states: [], closedStates: [], labels: [] }, issues: [], archived: [], views: [], problems: [] };
+  return {
+    config: { prefix: null, next: null, states: [], closedStates: [], labels: [], labelColors: {} },
+    issues: [],
+    archived: [],
+    views: [],
+    problems: [],
+  };
 }
 
 export function buildSnapshot(indexText: string, dir: string, lookup: NoteLookup): Snapshot {
   const idx = new Index(indexText);
   const snap = emptySnapshot();
-  snap.config = { prefix: idx.prefix, next: idx.next, states: idx.states, closedStates: idx.closedStates, labels: idx.labels };
+  snap.config = {
+    prefix: idx.prefix,
+    next: idx.next,
+    states: idx.states,
+    closedStates: idx.closedStates,
+    labels: idx.labels,
+    labelColors: idx.labelColors,
+  };
   snap.problems = idx.doc.broken ? idx.doc.problems() : idx.keyProblems();
   snap.views = readViews(indexText);
-  const t = { dir } as Tracker;
   for (const item of idx.unique()) {
     let rec: IssueRecord | null = null;
-    // The location matching the line's section first, then the other.
-    for (const archived of [item.archived, !item.archived]) {
-      const path = notePath(t, item.id, archived);
+    // Where the line's section says, then the other folder, then the tracker folder.
+    for (const where of searchOrder(item.archived)) {
+      const path = pathIn({ dir }, item.id, where);
       const fm = lookup(path);
       if (fm !== undefined) {
         rec = recordFromFrontmatter(item, fm, path);

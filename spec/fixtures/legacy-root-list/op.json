@@ -1,0 +1,25 @@
+{
+  "op": "list",
+  "args": {},
+  "expect": {
+    "issues": [
+      {
+        "id": "RB-13",
+        "missing": false,
+        "status": "in-progress"
+      },
+      {
+        "id": "RB-9",
+        "missing": false
+      },
+      {
+        "id": "RB-11",
+        "missing": false
+      },
+      {
+        "id": "RB-4",
+        "archived": true
+      }
+    ]
+  }
+}

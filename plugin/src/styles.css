@@ -157,6 +157,25 @@ button.bl-filter-chip {
   cursor: pointer;
 }
 
+/* A label takes its colour from --bl-label, set inline per label. */
+.bl-chip.bl-label {
+  --bl-label: var(--text-faint);
+  gap: var(--size-2-3);
+  padding-left: var(--size-2-3);
+  color: var(--text-normal);
+  border-color: color-mix(in srgb, var(--bl-label) 45%, transparent);
+  background: color-mix(in srgb, var(--bl-label) 14%, transparent);
+}
+
+.bl-dot {
+  flex: none;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bl-label, var(--text-faint));
+}
+
 .bl-chip.is-missing,
 .bl-chip.is-blocked {
   color: var(--text-error);

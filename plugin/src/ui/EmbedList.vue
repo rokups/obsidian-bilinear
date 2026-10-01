@@ -3,6 +3,7 @@ import { computed } from "vue";
 import type { IssueRecord } from "../format/record";
 import { applyFilter, type Filter } from "../store/query";
 import type { Snapshot } from "../store/snapshot";
+import LabelChip from "./LabelChip.vue";
 import PriorityIcon from "./PriorityIcon.vue";
 import StatusIcon from "./StatusIcon.vue";
 
@@ -34,7 +35,7 @@ const shown = computed(() => (props.limit > 0 ? matching.value.slice(0, props.li
         <StatusIcon :status="issue.status" :states="snap.config.states" :closed-states="snap.config.closedStates" />
         <span class="bl-title">{{ issue.title || issue.id }}</span>
         <span class="bl-spacer"></span>
-        <span v-for="label in issue.labels" :key="label" class="bl-chip bl-label">{{ label }}</span>
+        <LabelChip v-for="label in issue.labels" :key="label" :label="label" :colors="snap.config.labelColors" />
         <span v-if="issue.due" class="bl-due">{{ issue.due }}</span>
         <span v-if="issue.assignee" class="bl-chip">{{ issue.assignee }}</span>
       </div>

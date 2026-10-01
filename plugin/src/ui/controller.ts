@@ -1,11 +1,12 @@
 // View state and actions shared by the tracker components.
 
 import { computed, reactive, ref, toRaw, watch, type InjectionKey, type Ref, type ShallowRef } from "vue";
-import { PRIORITIES, todayIso } from "../format/ids";
+import { COLOR_NAMES, PRIORITIES, todayIso } from "../format/ids";
 import type { IssueRecord } from "../format/record";
 import type { Tracker } from "../ops/io";
-import { archiveClosed, archiveIssues, commentIssue, deleteIssue, moveIssue, recreateNote, setProps, unarchiveIssues, type PropEdits } from "../ops/issues";
+import { archiveClosed, archiveIssues, commentIssue, deleteIssue, moveIssue, recreateNote, setLabel, setProps, unarchiveIssues, type PropEdits } from "../ops/issues";
 import { applyFilter, childProgress, groupIssues, groupProperty, sortIssues, type Filter, type GroupKey, type ViewSpec } from "../store/query";
+import { labelColorName } from "../store/labels";
 import type { Snapshot } from "../store/snapshot";
 import type { SavedView } from "../store/views";
 import type { Host } from "./host";
@@ -216,6 +217,22 @@ export function createController(store: StoreLike, host: Host, initial: ViewSpec
     else if (value) void edit(p.ids, { [p.kind]: value });
   }
 
+  /** Menu for choosing a label's colour; the choice is stored in the index note. */
+  function labelMenu(event: MouseEvent, label: string): void {
+    const colors = config.value.labelColors;
+    const current = colors[label];
+    const auto = labelColorName(label, {});
+    host.showMenu(event, [
+      { title: `Automatic (${auto})`, checked: current === undefined, action: () => void run((t) => setLabel(t, label, null)) },
+      { separator: true },
+      ...COLOR_NAMES.map((name) => ({
+        title: name[0].toUpperCase() + name.slice(1),
+        checked: current === name,
+        action: () => void run((t) => setLabel(t, label, name)),
+      })),
+    ]);
+  }
+
   // -- structural operations
 
   function archive(ids: string[]): Promise<void> {
@@ -365,7 +382,7 @@ export function createController(store: StoreLike, host: Host, initial: ViewSpec
     snapshot, config, all, byId, visible, groupBy, groups, order, progress, canReorder, assignees, labels,
     priorities: PRIORITIES as readonly string[],
     isCursor, setCursor, moveCursor, toggleSelect, selectRange, clearSelection, targets, cursorIssue, reveal,
-    edit, openPicker, closePicker, allHaveLabel, pick,
+    edit, openPicker, closePicker, allHaveLabel, pick, labelMenu,
     archive, unarchive, archiveAllClosed, remove, recreate, comment, nudge,
     dragStart, dragEnd, drop,
     toggleFilter, clearFilter, applySpec, applyView, saveView, deleteView,

@@ -1,0 +1,13 @@
+{
+  "op": "lint",
+  "args": {
+    "fix": true
+  },
+  "expect": {
+    "problems": [
+      "label-color-invalid:-",
+      "label-color-invalid:-",
+      "label-color-invalid:-"
+    ]
+  }
+}

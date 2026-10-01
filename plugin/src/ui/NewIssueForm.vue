@@ -54,18 +54,23 @@ function submit(open: boolean): void {
   );
 }
 
-onMounted(() => titleInput.value?.focus());
+// The title comes first in the form so that typing starts there; the modal
+// moves focus to its first control once it has opened, hence the second call.
+onMounted(() => {
+  titleInput.value?.focus();
+  window.setTimeout(() => titleInput.value?.focus());
+});
 </script>
 
 <template>
   <form class="bl-form" @submit.prevent="submit(false)" @keydown.ctrl.enter.prevent="submit(true)" @keydown.meta.enter.prevent="submit(true)">
-    <label v-if="trackers.length > 1" class="bl-field">Tracker
-      <select v-model="form.tracker" class="dropdown">
-        <option v-for="t in trackers" :key="t.indexPath" :value="t.indexPath">{{ t.name }}</option>
-      </select>
-    </label>
     <input ref="titleInput" v-model="form.title" class="bl-form-title" type="text" placeholder="Issue title" aria-label="Issue title" />
     <div class="bl-form-row">
+      <label v-if="trackers.length > 1" class="bl-field">Tracker
+        <select v-model="form.tracker" class="dropdown">
+          <option v-for="t in trackers" :key="t.indexPath" :value="t.indexPath">{{ t.name }}</option>
+        </select>
+      </label>
       <label class="bl-field">Status
         <select v-model="form.status" class="dropdown">
           <option v-for="s in current?.states ?? []" :key="s" :value="s">{{ s }}</option>

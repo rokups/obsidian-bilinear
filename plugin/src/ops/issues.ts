@@ -1,12 +1,12 @@
 // The operations of spec/FORMAT.md section 2. In each, the index write comes
 // last, so an interrupted operation leaves at worst a stray note.
 
-import { ARCHIVE, ARCHIVE_DIR, ID_RE, ISSUES, PREFIX_RE, PRIORITIES, cleanTitle, idNumber, linkId, makeLink, validDate } from "../format/ids";
+import { ARCHIVE, COLOR_NAMES, ID_RE, ISSUES, ISSUES_DIR, ARCHIVE_DIR, LOCATIONS, PREFIX_RE, PRIORITIES, cleanTitle, idNumber, linkId, makeLink, normalizeColor, validDate } from "../format/ids";
 import { newIndexText, type Index, type Where } from "../format/index-note";
 import { addComment, newNoteText } from "../format/issue-note";
 import { Doc, type Value } from "../format/yaml";
 import { OpError, joinPath, type Tracker, type TrackerIO } from "./io";
-import { indexNotes, issueRecord, locate, moveNote, noteIds, notePath, readIndex, requireItem, resolveNote, updateIndex } from "./tracker";
+import { folderOf, found, indexNotes, issueRecord, moveNote, noteIds, notePath, pathIn, readIndex, requireItem, resolveNote, updateIndex } from "./tracker";
 
 export interface NewIssue {
   title: string;
@@ -49,12 +49,13 @@ function checkProps(idx: Index, props: PropEdits, selfId: string | null): void {
   }
 }
 
-/** Create the tracker folder, its index note and archive/. Returns the index path. */
+/** Create the tracker folder, its index note, issues/ and archive/. Returns the index path. */
 export async function createTracker(io: TrackerIO, folder: string, prefix: string): Promise<string> {
   if (!PREFIX_RE.test(prefix)) throw new OpError("the prefix must be of the form [A-Z][A-Z0-9]*");
   if (!folder) throw new OpError("a tracker needs its own folder");
   if ((await indexNotes(io, folder)).length) throw new OpError(`${folder} already contains a tracker`);
   await io.mkdir(folder);
+  await io.mkdir(joinPath(folder, ISSUES_DIR));
   await io.mkdir(joinPath(folder, ARCHIVE_DIR));
   const indexPath = joinPath(folder, `${folder.slice(folder.lastIndexOf("/") + 1)}.md`);
   if (!(await io.createExclusive(indexPath, newIndexText(prefix)))) {
@@ -82,14 +83,16 @@ export async function createIssue(t: Tracker, args: NewIssue, today: string): Pr
 
   const prefix = idx.prefix!;
   let highest = idx.highest();
-  for (const archived of [false, true]) {
-    for (const id of await noteIds(t, archived)) highest = Math.max(highest, idNumber(id, prefix) ?? 0);
+  for (const where of LOCATIONS) {
+    for (const id of await noteIds(t, where)) highest = Math.max(highest, idNumber(id, prefix) ?? 0);
   }
   let n = Math.max(idx.next!, highest + 1);
+  await t.io.mkdir(folderOf(t.dir, "issues"));
   let id: string;
   for (;;) {
     id = `${prefix}-${n}`;
-    if (!(await t.io.exists(notePath(t, id, true))) && (await t.io.createExclusive(notePath(t, id, false), text))) break;
+    const taken = (await t.io.exists(pathIn(t, id, "archive"))) || (await t.io.exists(pathIn(t, id, "root")));
+    if (!taken && (await t.io.createExclusive(notePath(t, id, false), text))) break;
     n += 1;
   }
 
@@ -186,10 +189,7 @@ export async function archiveClosed(t: Tracker): Promise<string[]> {
 export async function deleteIssue(t: Tracker, id: string): Promise<void> {
   const idx = await readIndex(t);
   requireItem(idx, id);
-  for (const archived of [false, true]) {
-    const p = notePath(t, id, archived);
-    if (await t.io.exists(p)) await t.io.trash(p);
-  }
+  for (const where of await found(t, id)) await t.io.trash(pathIn(t, id, where));
   await updateIndex(t, (i) => i.remove(id));
 }
 
@@ -207,17 +207,20 @@ export async function adoptIssue(t: Tracker, id: string): Promise<void> {
   const idx = await readIndex(t);
   if (!ID_RE.test(id)) throw new OpError(`'${id}' is not an issue ID`);
   if (idx.find(id)) throw new OpError(`${id} is already in the index`);
-  const [main, arch] = await locate(t, id);
-  if (!main && !arch) throw new OpError(`${id}: no such note in the tracker folder or ${ARCHIVE_DIR}/`);
-  const section = main ? ISSUES : ARCHIVE;
+  const here = await found(t, id);
+  if (!here.length) throw new OpError(`${id}: no such note in ${ISSUES_DIR}/, ${ARCHIVE_DIR}/ or the tracker folder`);
+  const archived = here[0] === "archive";
+  const section = archived ? ARCHIVE : ISSUES;
   const number = idNumber(id, idx.prefix);
+  // A note lying in the tracker folder goes to issues/ as it is adopted.
+  await moveNote(t, id, archived);
   await updateIndex(
     t,
     (i) => {
       if (!i.find(id)) i.add(id, "", section);
       if (number !== null && (i.next ?? 1) <= number) i.setNext(number + 1);
     },
-    { extra: [[id, !main]] },
+    { extra: [[id, archived]] },
   );
 }
 
@@ -227,8 +230,27 @@ export async function recreateNote(t: Tracker, id: string, today: string): Promi
   const item = requireItem(idx, id);
   if ((await resolveNote(t, id, item.archived)) !== null) throw new OpError(`${id}: the note exists`);
   const path = notePath(t, id, item.archived);
-  if (item.archived) await t.io.mkdir(joinPath(t.dir, ARCHIVE_DIR));
+  await t.io.mkdir(folderOf(t.dir, item.archived ? "archive" : "issues"));
   const text = newNoteText({ title: item.title || id, status: idx.states[0], priority: "none", created: today });
   if (!(await t.io.createExclusive(path, text))) throw new OpError(`${id}: the note exists`);
   return path;
+}
+
+/**
+ * Make a label known to the tracker and, if `color` is given, set its colour
+ * (a name from COLOR_NAMES, #rgb or #rrggbb) or clear it (null).
+ */
+export async function setLabel(t: Tracker, name: string, color?: string | null): Promise<void> {
+  await readIndex(t);
+  const label = cleanTitle(name);
+  if (!label) throw new OpError("label name must not be empty");
+  let normalized: string | null = null;
+  if (typeof color === "string") {
+    normalized = normalizeColor(color);
+    if (normalized === null) throw new OpError(`unknown colour '${color}' (one of: ${COLOR_NAMES.join(", ")}, #rgb, #rrggbb)`);
+  }
+  await updateIndex(t, (i) => {
+    i.addLabel(label);
+    if (color !== undefined) i.setLabelColor(label, normalized);
+  });
 }

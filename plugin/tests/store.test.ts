@@ -44,10 +44,17 @@ describe("snapshot from the metadata cache", () => {
   });
 
   it("reads the tracker config and reports an unusable index", () => {
-    const snap = buildSnapshot("---\nbilinear: tracker\nprefix: rb\nnext: 3\nstates: [a, b]\nclosed-states: [b]\n---\n", "T", () => undefined);
-    expect(snap.config).toEqual({ prefix: null, next: 3, states: ["a", "b"], closedStates: ["b"], labels: [] });
+    const snap = buildSnapshot("---\nbilinear: tracker\nprefix: rb\nnext: 3\nstates: [a, b]\nclosed-states: [b]\nlabel-colors: [x=Red, bad, y=#abc]\n---\n", "T", () => undefined);
+    expect(snap.config).toEqual({ prefix: null, next: 3, states: ["a", "b"], closedStates: ["b"], labels: [], labelColors: { x: "red", y: "#abc" } });
     expect(snap.problems).toHaveLength(1);
     expect(buildSnapshot("---\nbilinear: tracker\n", "T", () => undefined).problems).toEqual(["frontmatter is not terminated"]);
+  });
+
+  it("looks in issues/, then archive/, then the tracker folder", () => {
+    const index = "---\nbilinear: tracker\nprefix: RB\nnext: 4\nstates: [todo]\n---\n## Issues\n- [[RB-1]] a\n- [[RB-2]] b\n- [[RB-3]] c\n\n## Archive\n- [[RB-4]] d\n";
+    const notes = new Set(["T/issues/RB-1.md", "T/archive/RB-1.md", "T/RB-1.md", "T/archive/RB-2.md", "T/RB-2.md", "T/RB-3.md", "T/issues/RB-4.md", "T/RB-4.md"]);
+    const snap = buildSnapshot(index, "T", (p) => (notes.has(p) ? {} : undefined));
+    expect([...snap.issues, ...snap.archived].map((i) => i.path)).toEqual(["T/issues/RB-1.md", "T/archive/RB-2.md", "T/RB-3.md", "T/issues/RB-4.md"]);
   });
 
   it("coerces typed YAML values to text", () => {
@@ -64,7 +71,7 @@ function issue(id: string, over: Partial<IssueRecord> = {}): IssueRecord {
   };
 }
 
-const config: TrackerConfig = { prefix: "RB", next: 9, states: ["backlog", "todo", "done"], closedStates: ["done"], labels: ["bug", "ui"] };
+const config: TrackerConfig = { prefix: "RB", next: 9, states: ["backlog", "todo", "done"], closedStates: ["done"], labels: ["bug", "ui"], labelColors: {} };
 
 describe("query", () => {
   const issues = [
@@ -167,5 +174,19 @@ describe("saved views", () => {
 
   it("appends the block when there is no issues section", () => {
     expect(writeViews("---\nbilinear: tracker\n---\nNotes", [view]).startsWith("---\nbilinear: tracker\n---\nNotes\n\n```bilinear-views\n")).toBe(true);
+  });
+});
+
+describe("label colours", () => {
+  it("uses the colour from the index, or a stable one picked by name", async () => {
+    const { labelColorName, labelCssColor } = await import("../src/store/labels");
+    expect(labelColorName("bug", { bug: "red" })).toBe("red");
+    expect(labelCssColor("bug", { bug: "red" })).toBe("var(--color-red)");
+    expect(labelCssColor("bug", { bug: "#0af" })).toBe("#0af");
+    expect(labelCssColor("bug", { bug: "gray" })).toBe("var(--text-faint)");
+    const auto = labelColorName("bug", {});
+    expect(["red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink"]).toContain(auto);
+    expect(labelColorName("bug", { other: "red" })).toBe(auto);
+    expect(new Set(["bug", "build", "ui", "perf", "docs", "infra"].map((l) => labelColorName(l, {}))).size).toBeGreaterThan(2);
   });
 });

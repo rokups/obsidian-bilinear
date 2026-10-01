@@ -3,9 +3,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { IssueRecord } from "../src/format/record";
 import type { Tracker } from "../src/ops/io";
-import { adoptIssue, archiveClosed, archiveIssues, commentIssue, createIssue, deleteIssue, moveIssue, setProps, unarchiveIssues } from "../src/ops/issues";
+import { adoptIssue, archiveClosed, archiveIssues, commentIssue, createIssue, deleteIssue, moveIssue, setLabel, setProps, unarchiveIssues } from "../src/ops/issues";
 import { lint } from "../src/ops/lint";
-import { indexNotes, listIssues } from "../src/ops/tracker";
+import { indexNotes, listIssues, readIndex } from "../src/ops/tracker";
 import { MemoryIO } from "./memory-io";
 
 export const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "spec", "fixtures");
@@ -16,7 +16,7 @@ export interface Op {
   args: Record<string, any>;
   today?: string;
   author?: string;
-  expect?: { id?: string; problems?: string[]; issues?: Array<Record<string, unknown>> };
+  expect?: { id?: string; problems?: string[]; issues?: Array<Record<string, unknown>>; labels?: Array<{ name: string; color: string | null }> };
 }
 
 export interface Case {
@@ -48,6 +48,7 @@ export interface Result {
   id?: string;
   problems?: string[];
   issues?: Array<Record<string, unknown>>;
+  labels?: Array<{ name: string; color: string | null }>;
 }
 
 /** Apply one fixture operation with the plugin's ops. */
@@ -79,6 +80,15 @@ export async function apply(t: Tracker, op: Op): Promise<Result> {
     case "adopt":
       await adoptIssue(t, a.id);
       return {};
+    case "label":
+      await setLabel(t, a.name, "color" in a ? a.color : undefined);
+      return {};
+    case "labels": {
+      const idx = await readIndex(t);
+      const colors = idx.labelColors;
+      const names = [...idx.labels, ...Object.keys(colors).filter((n) => !idx.labels.includes(n))];
+      return { labels: names.map((name) => ({ name, color: colors[name] ?? null })) };
+    }
     case "lint":
       return { problems: (await lint(t, !!a.fix)).map((p) => `${p.code}:${p.id ?? "-"}`).sort() };
     case "list":

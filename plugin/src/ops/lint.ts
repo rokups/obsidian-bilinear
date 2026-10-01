@@ -1,10 +1,10 @@
 // Consistency checks of spec/FORMAT.md section 3.
 
-import { ARCHIVE, ARCHIVE_DIR, ISSUES, PRIORITIES, cleanTitle, idNumber, linkId, validDate } from "../format/ids";
+import { ARCHIVE, ISSUES, LOCATIONS, PRIORITIES, cleanTitle, idNumber, linkId, validDate } from "../format/ids";
 import type { Index, Item } from "../format/index-note";
 import { Doc } from "../format/yaml";
 import type { Tracker } from "./io";
-import { indexNotes, locate, moveNote, noteIds, readIndexRaw, resolveNote, updateIndex } from "./tracker";
+import { describe, found, indexNotes, moveNote, noteIds, pathIn, place, readIndexRaw, resolveNote, updateIndex } from "./tracker";
 
 export interface Problem {
   severity: "error" | "warning";
@@ -58,6 +58,7 @@ export async function lint(t: Tracker, fix: boolean): Promise<Problem[]> {
   const idx = await readIndexRaw(t);
   for (const p of idx.doc.problems()) add("error", "index-yaml", null, p);
   for (const p of idx.keyProblems()) add("error", "index-key", null, p);
+  for (const p of idx.labelColorProblems()) add("warning", "label-color-invalid", null, p);
   for (const other of await indexNotes(t.io, t.dir)) {
     if (other !== t.indexPath) add("error", "multiple-trackers", null, `${other.slice(other.lastIndexOf("/") + 1)} is also marked as a tracker index`);
   }
@@ -77,16 +78,16 @@ export async function lint(t: Tracker, fix: boolean): Promise<Problem[]> {
     seen.set(it.id, it);
     if (!it.canonical) add("warning", "line-format", it.id, "index line is not in the form '- [[ID]] title'", true);
     if (prefix && idNumber(it.id, prefix) === null) add("warning", "prefix-mismatch", it.id, `ID does not use the tracker prefix ${prefix}`);
-    const [main, arch] = await locate(t, it.id);
-    if (!main && !arch) {
+    const here = await found(t, it.id);
+    if (!here.length) {
       add("error", "note-missing", it.id, "note missing");
       continue;
     }
-    if (main && arch) {
-      add("error", "note-duplicate", it.id, `note exists in both the tracker folder and ${ARCHIVE_DIR}/`);
-    } else if (arch !== it.archived) {
-      const where = it.archived ? `## ${ARCHIVE}` : `## ${ISSUES}`;
-      add("warning", "wrong-location", it.id, `listed under ${where} but the note is in the other folder`, true);
+    if (here.length > 1) {
+      add("error", "note-duplicate", it.id, `note exists in more than one place (${describe(here)})`);
+    } else if (here[0] !== place(it.archived)) {
+      const section = it.archived ? `## ${ARCHIVE}` : `## ${ISSUES}`;
+      add("warning", "wrong-location", it.id, `listed under ${section} but the note is in ${describe(here[0])}, not ${describe(place(it.archived))}`, true);
       moves.push([it.id, it.archived]);
     }
     const path = (await resolveNote(t, it.id, it.archived))!;
@@ -97,14 +98,14 @@ export async function lint(t: Tracker, fix: boolean): Promise<Problem[]> {
   }
 
   let highest = idx.highest();
-  for (const archived of [false, true]) {
-    for (const id of await noteIds(t, archived)) {
+  for (const where of LOCATIONS) {
+    for (const id of await noteIds(t, where)) {
       const number = idNumber(id, prefix);
       if (number === null) continue;
       highest = Math.max(highest, number);
       if (!seen.has(id)) {
-        const where = archived ? `${ARCHIVE_DIR}/${id}.md` : `${id}.md`;
-        add("warning", "orphan", id, `${where} has no index line (use 'adopt' to add it)`);
+        const path = pathIn({ dir: "" }, id, where);
+        add("warning", "orphan", id, `${path} has no index line (use 'adopt' to add it)`);
       }
     }
   }

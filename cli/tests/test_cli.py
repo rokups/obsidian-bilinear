@@ -45,8 +45,9 @@ class CliCase(unittest.TestCase):
         return out
 
     def entries(self):
-        """Names in the tracker folder, apart from the lock file used on Windows."""
-        return sorted(p.name for p in self.dir.iterdir() if p.name != bilinear.LOCK_FILE)
+        """Files under the tracker folder, apart from the lock file used on Windows."""
+        return sorted(p.relative_to(self.dir).as_posix() for p in self.dir.rglob("*")
+                      if p.is_file() and p.name != bilinear.LOCK_FILE)
 
     def ids(self, *argv):
         return [i["id"] for i in json.loads(self.ok("list", "--json", *argv))]
@@ -54,6 +55,7 @@ class CliCase(unittest.TestCase):
 
 class InitTest(CliCase):
     def test_layout(self):
+        self.assertTrue((self.dir / "issues").is_dir())
         self.assertTrue((self.dir / "archive").is_dir())
         text = self.index.read_text()
         self.assertTrue(text.startswith("---\nbilinear: tracker\nprefix: RB\nnext: 1\n"))
@@ -94,7 +96,7 @@ class AllocationTest(CliCase):
 
     def test_skips_numbers_seen_in_index_folder_and_archive(self):
         self.ok("new", "A")
-        (self.dir / "RB-7.md").write_text("---\ntitle: stray\n---\n")
+        (self.dir / "issues" / "RB-7.md").write_text("---\ntitle: stray\n---\n")
         self.assertEqual("RB-8\n", self.ok("new", "B"))
         (self.dir / "archive" / "RB-12.md").write_text("---\ntitle: stray\n---\n")
         self.assertEqual("RB-13\n", self.ok("new", "C"))
@@ -102,7 +104,7 @@ class AllocationTest(CliCase):
         self.index.write_text(text.replace("- [[RB-13]] C", "- [[RB-13]] C\n- [[RB-30]] line without a note"))
         self.assertEqual("RB-31\n", self.ok("new", "D"))
         self.assertIn("next: 32\n", self.index.read_text())
-        self.assertEqual("---\ntitle: stray\n---\n", (self.dir / "RB-7.md").read_text())
+        self.assertEqual("---\ntitle: stray\n---\n", (self.dir / "issues" / "RB-7.md").read_text())
 
     def test_exclusive_create_retries_on_collision(self):
         real_ids = bilinear.Tracker.note_ids
@@ -112,18 +114,28 @@ class AllocationTest(CliCase):
             found = real_ids(tracker, archived)
             if not calls:  # another writer takes RB-1 and RB-2 after we looked
                 calls.append(1)
-                (self.dir / "RB-1.md").write_text("theirs")
+                (self.dir / "issues" / "RB-1.md").write_text("theirs")
                 (self.dir / "archive" / "RB-2.md").write_text("theirs")
             return found
 
         bilinear.Tracker.note_ids = racing
         self.addCleanup(setattr, bilinear.Tracker, "note_ids", real_ids)
         self.assertEqual("RB-3\n", self.ok("new", "Mine"))
-        self.assertEqual("theirs", (self.dir / "RB-1.md").read_text())
+        self.assertEqual("theirs", (self.dir / "issues" / "RB-1.md").read_text())
         self.assertIn("next: 4\n", self.index.read_text())
 
+    def test_numbers_in_the_tracker_folder_itself_count(self):
+        (self.dir / "RB-40.md").write_text("---\ntitle: old layout\n---\n")
+        self.assertEqual("RB-41\n", self.ok("new", "A"))
+        self.assertTrue((self.dir / "issues" / "RB-41.md").is_file())
+
+    def test_issues_folder_is_created_on_demand(self):
+        (self.dir / "issues").rmdir()
+        self.assertEqual("RB-1\n", self.ok("new", "A"))
+        self.assertTrue((self.dir / "issues" / "RB-1.md").is_file())
+
     def test_other_prefixes_do_not_count(self):
-        (self.dir / "XY-50.md").write_text("---\ntitle: other\n---\n")
+        (self.dir / "issues" / "XY-50.md").write_text("---\ntitle: other\n---\n")
         self.assertEqual("RB-1\n", self.ok("new", "A"))
 
 
@@ -146,7 +158,7 @@ class ConflictTest(CliCase):
 
     def test_gives_up_with_exit_code_3(self):
         self.ok("new", "A")
-        before = (self.dir / "RB-1.md").read_text()
+        before = (self.dir / "issues" / "RB-1.md").read_text()
         count = []
 
         def hook(path):
@@ -159,12 +171,12 @@ class ConflictTest(CliCase):
         self.assertEqual(3, code)
         self.assertEqual(3, len(count))
         self.assertIn("kept changing", err)
-        self.assertEqual(before + "xxx", (self.dir / "RB-1.md").read_text())
+        self.assertEqual(before + "xxx", (self.dir / "issues" / "RB-1.md").read_text())
 
     def test_no_temp_files_left_behind(self):
         self.ok("new", "A")
         self.ok("set", "RB-1", "status=todo")
-        self.assertEqual(["RB-1.md", "RedBolt.md", "archive"], self.entries())
+        self.assertEqual(["RedBolt.md", "issues/RB-1.md"], self.entries())
 
 
 class LockTest(CliCase):
@@ -185,7 +197,7 @@ class LockTest(CliCase):
                     self.assertEqual(3, code)
                     self.assertIn("locked by another bilinear process", err)
             self.assertEqual(before, self.index.read_bytes())
-            self.assertEqual(["RB-1.md", "RedBolt.md", "archive"], self.entries())
+            self.assertEqual(["RedBolt.md", "issues/RB-1.md"], self.entries())
         self.assertEqual("RB-2\n", self.ok("new", "B"))
 
     def test_readers_do_not_wait(self):
@@ -210,7 +222,7 @@ class LockTest(CliCase):
     @unittest.skipIf(bilinear.fcntl is None, "the folder itself is only locked on POSIX")
     def test_no_lock_file_is_left_in_the_vault(self):
         self.ok("new", "B")
-        self.assertEqual(["RB-1.md", "RB-2.md", "RedBolt.md", "archive"], self.entries())
+        self.assertEqual(["RedBolt.md", "issues/RB-1.md", "issues/RB-2.md"], self.entries())
 
     def test_concurrent_processes_lose_nothing(self):
         import subprocess
@@ -233,12 +245,87 @@ class LockTest(CliCase):
         self.assertEqual(total + 1, len(issues))
         self.assertEqual(total + 1, len({i["id"] for i in issues}))
         self.assertEqual(sorted(f"w{n}-{i}" for n in range(procs) for i in range(per)), sorted(i["title"] for i in issues[1:]))
-        note = (self.dir / "RB-1.md").read_text()
+        note = (self.dir / "issues" / "RB-1.md").read_text()
         self.assertEqual(total, note.count("- 2026-10-01 w: w"))
         self.assertEqual(total, sum(1 for line in note.splitlines() if line.startswith("k")))
         self.assertIn(f"next: {total + 2}\n", self.index.read_text())
         self.assertEqual((0, "no problems found\n"), self.run_cli("lint")[:2])
-        self.assertEqual(total + 3, len(self.entries()))
+        self.assertEqual(total + 2, len(self.entries()))
+
+
+class LegacyLayoutTest(CliCase):
+    """Trackers made before issues/ existed keep their open notes in the tracker folder."""
+
+    def setUp(self):
+        super().setUp()
+        self.ok("new", "A")
+        self.ok("new", "B", "--status", "done")
+        for name in ("RB-1.md", "RB-2.md"):
+            (self.dir / "issues" / name).rename(self.dir / name)
+        (self.dir / "issues").rmdir()
+
+    def test_everything_works_in_place(self):
+        self.assertEqual(["RB-1", "RB-2"], self.ids())
+        self.assertFalse(json.loads(self.ok("list", "--json"))[0]["missing"])
+        self.ok("set", "RB-1", "status=todo")
+        self.ok("comment", "RB-1", "still here")
+        self.assertIn("status: todo", (self.dir / "RB-1.md").read_text())
+        self.assertEqual(["RB-1.md", "RB-2.md", "RedBolt.md"], self.entries())
+
+    def test_lint_fix_moves_notes_into_issues(self):
+        code, out, _ = self.run_cli("lint")
+        self.assertEqual(2, code)
+        self.assertEqual(2, out.count("[wrong-location]"))
+        self.assertIn("the note is in the tracker folder, not issues/", out)
+        self.assertEqual(0, self.run_cli("lint", "--fix")[0])
+        self.assertEqual(["RedBolt.md", "issues/RB-1.md", "issues/RB-2.md"], self.entries())
+        self.assertEqual((0, "no problems found\n"), self.run_cli("lint")[:2])
+
+    def test_archive_unarchive_and_new_use_the_new_layout(self):
+        self.ok("archive", "--closed")
+        self.ok("unarchive", "RB-2")
+        self.assertEqual("RB-3\n", self.ok("new", "C"))
+        self.assertEqual(["RB-1.md", "RedBolt.md", "issues/RB-2.md", "issues/RB-3.md"], self.entries())
+
+    def test_rm_and_duplicates(self):
+        (self.dir / "archive" / "RB-1.md").write_text("copy")
+        code, out, _ = self.run_cli("lint")
+        self.assertIn("note exists in more than one place (archive/, the tracker folder) [note-duplicate]", out)
+        self.assertEqual(1, self.run_cli("archive", "RB-1")[0])
+        self.ok("rm", "RB-1")
+        self.assertEqual(["RB-2.md", "RedBolt.md"], self.entries())
+        self.assertEqual(["RB-1 2.md", "RB-1.md"], sorted(p.name for p in (self.vault / ".trash").iterdir()))
+
+
+class LabelTest(CliCase):
+    def test_add_colour_list_and_clear(self):
+        self.assertEqual("", self.ok("label"))
+        self.ok("label", "bug", "--color", "RED")
+        self.ok("label", "ui")
+        self.ok("label", "perf", "--color", "#0af")
+        text = self.index.read_text()
+        self.assertIn("labels: [bug, ui, perf]\n", text)
+        self.assertIn("label-colors: [bug=red, perf=#0af]\n", text)
+        self.assertEqual("bug   red\nui\nperf  #0af\n", self.ok("label"))
+        self.assertEqual([{"name": "bug", "color": "red"}, {"name": "ui", "color": None}, {"name": "perf", "color": "#0af"}],
+                         json.loads(self.ok("label", "--json")))
+        self.ok("label", "bug", "--color", "none")
+        self.ok("label", "perf", "--color", "auto")
+        self.assertNotIn("label-colors", self.index.read_text())
+        self.assertIn("labels: [bug, ui, perf]\n", self.index.read_text())
+        self.assertEqual((0, "no problems found\n"), self.run_cli("lint")[:2])
+
+    def test_refuses_bad_colours(self):
+        before = self.index.read_bytes()
+        for argv in (["bug", "--color", "mauve"], ["bug", "--color", "#12"], ["  ", "--color", "red"], ["--color", "red"]):
+            with self.subTest(argv=argv):
+                self.assertEqual(1, self.run_cli("label", *argv)[0])
+        self.assertEqual(before, self.index.read_bytes())
+
+    def test_known_labels_stop_the_warning(self):
+        self.assertIn("label 'bug'", self.run_cli("new", "A", "--label", "bug")[2])
+        self.ok("label", "bug", "--color", "red")
+        self.assertEqual("", self.run_cli("new", "B", "--label", "bug")[2])
 
 
 class CommandTest(CliCase):
@@ -255,7 +342,7 @@ class CommandTest(CliCase):
                 self.assertEqual(1, self.run_cli("new", "X", *argv)[0])
         self.assertEqual(1, self.run_cli("new", "  ")[0])
         self.assertEqual(["RB-1", "RB-2", "RB-3"], self.ids())
-        self.assertEqual(["RB-1.md", "RB-2.md", "RB-3.md"], sorted(p.name for p in self.dir.glob("RB-*.md")))
+        self.assertEqual(["RB-1.md", "RB-2.md", "RB-3.md"], sorted(p.name for p in (self.dir / "issues").glob("RB-*.md")))
         code, out, err = self.run_cli("new", "X", "--label", "odd")
         self.assertEqual((0, "RB-4\n"), (code, out))
         self.assertIn("label 'odd'", err)
@@ -263,7 +350,7 @@ class CommandTest(CliCase):
     def test_new_json(self):
         data = json.loads(self.ok("new", "X", "--json"))
         self.assertEqual("RB-4", data["id"])
-        self.assertEqual(str(self.dir / "RB-4.md"), data["path"])
+        self.assertEqual(str(self.dir / "issues" / "RB-4.md"), data["path"])
 
     def test_list_filters(self):
         self.assertEqual(["RB-2"], self.ids("--status", "done"))
@@ -308,17 +395,17 @@ class CommandTest(CliCase):
         self.assertIsNone(data["assignee"])
 
     def test_set_validates_and_leaves_note_alone(self):
-        before = (self.dir / "RB-1.md").read_text()
+        before = (self.dir / "issues" / "RB-1.md").read_text()
         for assignment in ("status=nope", "priority=p0", "due=soon", "parent=RB-1", "parent=RB-99",
                            "blocked-by=RB-1", "title=", "status=", "nonsense"):
             with self.subTest(assignment=assignment):
                 self.assertEqual(1, self.run_cli("set", "RB-1", "assignee=x", assignment)[0])
-                self.assertEqual(before, (self.dir / "RB-1.md").read_text())
+                self.assertEqual(before, (self.dir / "issues" / "RB-1.md").read_text())
 
     def test_retitle_updates_index_line(self):
         self.ok("set", "RB-2", "title=Beta:  two")
         self.assertIn("- [[RB-2]] Beta: two\n", self.index.read_text())
-        self.assertIn('title: "Beta: two"\n', (self.dir / "RB-2.md").read_text())
+        self.assertIn('title: "Beta: two"\n', (self.dir / "issues" / "RB-2.md").read_text())
 
     def test_comment_author_sources(self):
         self.ok("comment", "RB-1", "from user")
@@ -326,7 +413,7 @@ class CommandTest(CliCase):
         self.ok("comment", "RB-1", "from env")
         self.ok("--author", "flag", "comment", "RB-1", "from flag")
         self.ok("comment", "RB-1", "from flag after", "--author", "late")
-        text = (self.dir / "RB-1.md").read_text()
+        text = (self.dir / "issues" / "RB-1.md").read_text()
         self.assertTrue(text.endswith(
             "\n## Comments\n- 2026-10-01 rk: from user\n- 2026-10-01 env: from env\n"
             "- 2026-10-01 flag: from flag\n- 2026-10-01 late: from flag after\n"))
@@ -350,12 +437,12 @@ class CommandTest(CliCase):
     def test_archive_and_unarchive(self):
         self.assertEqual("RB-2\n", self.ok("archive", "--closed"))
         self.assertTrue((self.dir / "archive" / "RB-2.md").is_file())
-        self.assertFalse((self.dir / "RB-2.md").exists())
+        self.assertFalse((self.dir / "issues" / "RB-2.md").exists())
         self.assertEqual("", self.ok("archive", "--closed"))
         self.assertEqual("", self.ok("archive", "RB-2"))
         self.assertEqual("RB-2\n", self.ok("unarchive", "RB-2"))
         self.assertEqual(["RB-1", "RB-3", "RB-2"], self.ids())
-        self.assertTrue((self.dir / "RB-2.md").is_file())
+        self.assertTrue((self.dir / "issues" / "RB-2.md").is_file())
         self.assertEqual(1, self.run_cli("archive")[0])
         self.assertEqual(1, self.run_cli("archive", "RB-1", "--closed")[0])
         self.assertEqual(1, self.run_cli("archive", "RB-1", "RB-99")[0])
@@ -365,7 +452,7 @@ class CommandTest(CliCase):
         self.ok("rm", "RB-2")
         self.assertEqual(["RB-1", "RB-3"], self.ids("--all"))
         self.assertTrue((self.vault / ".trash" / "RB-2.md").is_file())
-        (self.dir / "RB-2.md").write_text("---\ntitle: again\nstatus: todo\n---\n")
+        (self.dir / "issues" / "RB-2.md").write_text("---\ntitle: again\nstatus: todo\n---\n")
         self.ok("adopt", "RB-2")
         self.ok("rm", "RB-2")
         self.assertTrue((self.vault / ".trash" / "RB-2 2.md").is_file())
@@ -375,22 +462,22 @@ class CommandTest(CliCase):
         code, _, err = self.run_cli("rm", "RB-2")
         self.assertEqual(1, code)
         self.assertIn("--force", err)
-        self.assertTrue((self.dir / "RB-2.md").is_file())
+        self.assertTrue((self.dir / "issues" / "RB-2.md").is_file())
         self.assertEqual(["RB-1", "RB-2", "RB-3"], self.ids())
         self.ok("rm", "RB-2", "--force")
-        self.assertFalse((self.dir / "RB-2.md").exists())
+        self.assertFalse((self.dir / "issues" / "RB-2.md").exists())
         self.assertFalse((self.vault / ".trash").exists())
 
     def test_rm_line_without_note_needs_no_vault(self):
         (self.vault / ".obsidian").rmdir()
-        (self.dir / "RB-2.md").unlink()
+        (self.dir / "issues" / "RB-2.md").unlink()
         self.ok("rm", "RB-2")
         self.assertEqual(["RB-1", "RB-3"], self.ids())
 
     def test_adopt(self):
         self.assertEqual(1, self.run_cli("adopt", "RB-1")[0])
         self.assertEqual(1, self.run_cli("adopt", "RB-40")[0])
-        (self.dir / "RB-40.md").write_text("---\ntitle: Found\nstatus: todo\n---\n")
+        (self.dir / "issues" / "RB-40.md").write_text("---\ntitle: Found\nstatus: todo\n---\n")
         self.ok("adopt", "RB-40")
         text = self.index.read_text()
         self.assertIn("- [[RB-3]] Gamma\n- [[RB-40]] Found\n", text)
@@ -398,7 +485,7 @@ class CommandTest(CliCase):
 
     def test_lint_exit_codes_and_json(self):
         self.assertEqual(0, self.run_cli("lint")[0])
-        (self.dir / "RB-2.md").unlink()
+        (self.dir / "issues" / "RB-2.md").unlink()
         code, out, _ = self.run_cli("lint")
         self.assertEqual(2, code)
         self.assertIn("error: RB-2: note missing [note-missing]\n", out)

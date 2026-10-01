@@ -3,6 +3,7 @@ import { computed, inject } from "vue";
 import type { IssueRecord } from "../format/record";
 import { todayIso } from "../format/ids";
 import { CTRL } from "./controller";
+import LabelChip from "./LabelChip.vue";
 
 // The right-hand details shared by list rows and board cards.
 const props = defineProps<{ issue: IssueRecord }>();
@@ -34,7 +35,10 @@ const initials = computed(() => (props.issue.assignee ?? "").trim().slice(0, 2).
     {{ progress.done }}/{{ progress.total }}
   </span>
   <span v-if="issue.parent" class="bl-chip is-parent" :title="`Sub-issue of ${issue.parent}`">{{ issue.parent }}</span>
-  <span v-for="label in issue.labels" :key="label" class="bl-chip bl-label">{{ label }}</span>
+  <LabelChip
+    v-for="label in issue.labels" :key="label" :label="label" :colors="c.config.value.labelColors"
+    title="Right-click to change the colour" @contextmenu.prevent.stop="c.labelMenu($event, label)"
+  />
   <span v-if="issue.due" class="bl-due" :class="{ 'is-overdue': overdue }" :title="overdue ? 'Overdue' : 'Due date'">{{ issue.due }}</span>
   <button
     v-if="!issue.missing" class="bl-avatar clickable-icon" :class="{ 'is-empty': !issue.assignee }"

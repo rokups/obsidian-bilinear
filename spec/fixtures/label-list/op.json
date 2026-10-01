@@ -1,0 +1,20 @@
+{
+  "op": "labels",
+  "args": {},
+  "expect": {
+    "labels": [
+      {
+        "name": "bug",
+        "color": "red"
+      },
+      {
+        "name": "build",
+        "color": "blue"
+      },
+      {
+        "name": "ui",
+        "color": "#0af"
+      }
+    ]
+  }
+}

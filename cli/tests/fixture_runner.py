@@ -64,6 +64,13 @@ def argv_for(op: dict) -> list[str]:
         return ["--author", op.get("author", "rk"), "comment", a["id"], a["text"]]
     if kind == "adopt":
         return ["adopt", a["id"]]
+    if kind == "label":
+        argv = ["label", a["name"]]
+        if "color" in a:
+            argv += ["--color", a["color"] if a["color"] is not None else "none"]
+        return argv
+    if kind == "labels":
+        return ["label", "--json"]
     if kind == "lint":
         return ["lint", "--json"] + (["--fix"] if a.get("fix") else [])
     if kind == "list":
@@ -94,6 +101,8 @@ def run(case: Path, workdir: Path) -> tuple[Path, dict]:
     elif op["op"] == "lint":
         data = json.loads(text)
         result["problems"] = sorted(f"{p['code']}:{p['id'] or '-'}" for p in data["problems"])
+    elif op["op"] == "labels":
+        result["labels"] = json.loads(text)
     elif op["op"] == "list":
         result["issues"] = json.loads(text)
     return tracker, result
