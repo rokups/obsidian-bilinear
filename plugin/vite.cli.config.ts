@@ -1,3 +1,4 @@
+import { chmodSync } from "node:fs";
 import { builtinModules } from "node:module";
 import { defineConfig } from "vite";
 
@@ -6,6 +7,8 @@ import { defineConfig } from "vite";
  * plugin, bundled into the one file that `npx obsidian-bilinear` runs.
  */
 export default defineConfig({
+  // The file is run as a command, by `npx <the checkout's cli folder>` too: a build leaves it executable.
+  plugins: [{ name: "executable", writeBundle: (options) => chmodSync(`${options.dir}/bilinear.js`, 0o755) }],
   build: {
     lib: { entry: "../cli/src/bin.ts", formats: ["es"], fileName: () => "bilinear.js" },
     outDir: "../cli/dist",
