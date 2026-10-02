@@ -236,7 +236,9 @@ git tag 0.2.0 && git push origin 0.2.0
 
 The release workflow tests and builds the plugin and the CLI, publishes a
 GitHub release with the files attached, and publishes the CLI to npm as
-`obsidian-bilinear` if the repository has an `NPM_TOKEN` secret.
+`obsidian-bilinear`. The publish uses npm's trusted publishing, so there is no
+token to keep: on npmjs.com the package's settings name this repository and
+`release.yml` as its trusted publisher.
 
 ## Testing
 

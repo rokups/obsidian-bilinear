@@ -3,8 +3,10 @@ name: Release
 # Pushing a tag that is exactly the plugin version (0.2.0, no "v") builds the
 # plugin and the CLI and publishes a GitHub release with main.js,
 # manifest.json, styles.css and bilinear.js attached. Obsidian and BRAT
-# install from the first three. With an NPM_TOKEN secret the CLI is also
-# published to npm, where `npx obsidian-bilinear` finds it.
+# install from the first three. The CLI is also published to npm, where
+# `npx obsidian-bilinear` finds it. That uses npm's trusted publishing: npm
+# accepts the publish because it comes from this workflow in this repository
+# (set under the package's settings on npmjs.com), so there is no token.
 on:
   push:
     tags:
@@ -12,12 +14,11 @@ on:
 
 permissions:
   contents: write
+  id-token: write # lets npm verify that the publish comes from this workflow
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - name: Check that the tag matches every version number
@@ -45,8 +46,8 @@ jobs:
           plugin/dist/main.js plugin/dist/manifest.json plugin/dist/styles.css cli/dist/bilinear.js
           --title "$GITHUB_REF_NAME" --generate-notes
       - name: Publish the CLI to npm
-        if: env.NPM_TOKEN != ''
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        # Trusted publishing needs npm 11.5.1 or later; Node 22 ships an older one.
+        run: |
+          npm install -g npm@latest
+          npm publish --access public
         working-directory: cli
