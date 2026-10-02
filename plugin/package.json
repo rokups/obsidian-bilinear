@@ -1,6 +1,6 @@
 {
   "name": "bilinear",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Linear-style issue tracker for Obsidian, stored as plain Markdown notes",
   "license": "GPL-2.0-only",
