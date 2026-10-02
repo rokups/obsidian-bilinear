@@ -7,10 +7,18 @@ name: Release
 # `npx obsidian-bilinear` finds it. That uses npm's trusted publishing: npm
 # accepts the publish because it comes from this workflow in this repository
 # (set under the package's settings on npmjs.com), so there is no token.
+#
+# A release that stopped half way can be finished by running the workflow by
+# hand with the tag: steps that are already done are skipped.
 on:
   push:
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The version tag to release, e.g. 0.2.0
+        required: true
 
 permissions:
   contents: write
@@ -19,10 +27,14 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
       - name: Check that the tag matches every version number
-        run: node scripts/check_version.mjs "$GITHUB_REF_NAME"
+        run: node scripts/check_version.mjs "$TAG"
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: plugin/package.json
@@ -42,12 +54,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release create "$GITHUB_REF_NAME"
+          gh release view "$TAG" > /dev/null 2>&1 ||
+          gh release create "$TAG" --verify-tag
           plugin/dist/main.js plugin/dist/manifest.json plugin/dist/styles.css cli/dist/bilinear.js
-          --title "$GITHUB_REF_NAME" --generate-notes
+          --title "$TAG" --generate-notes
       - name: Publish the CLI to npm
         # Trusted publishing needs npm 11.5.1 or later; Node 22 ships an older one.
         run: |
           npm install -g npm@latest
-          npm publish --access public
+          if npm view "obsidian-bilinear@$TAG" version > /dev/null 2>&1; then
+            echo "obsidian-bilinear $TAG is already on npm"
+          else
+            npm publish --access public
+          fi
         working-directory: cli

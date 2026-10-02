@@ -262,7 +262,9 @@ The release workflow tests and builds the plugin and the CLI, publishes a
 GitHub release with the files attached, and publishes the CLI to npm as
 `obsidian-bilinear`. The publish uses npm's trusted publishing, so there is no
 token to keep: on npmjs.com the package's settings name this repository and
-`release.yml` as its trusted publisher.
+`release.yml` as its trusted publisher. If a release stops half way, run the
+workflow again by hand for the same tag (`gh workflow run release.yml -f
+tag=0.2.0`); what is already published is skipped.
 
 ## Testing
 
