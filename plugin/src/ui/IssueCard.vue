@@ -16,9 +16,11 @@ const hint = computed(() => {
   return h && h.group === props.group && h.id === props.issue.id ? h.pos : null;
 });
 
+/** A click anywhere opens the issue; with Shift or Ctrl it selects instead. */
 function onClick(e: MouseEvent): void {
   if (e.shiftKey) c.selectRange(props.issue.id, props.group);
   else if (e.ctrlKey || e.metaKey) c.toggleSelect(props.issue.id);
+  else return open(false);
   c.setCursor(props.issue.id, props.group);
 }
 
@@ -68,7 +70,7 @@ function onDrop(e: DragEvent): void {
       <button v-if="c.groupBy.value !== 'status'" class="bl-cell clickable-icon" :title="`Status: ${issue.status ?? 'none'}`" :aria-label="`Status: ${issue.status ?? 'none'}`" :disabled="issue.missing" @click.stop="c.openPicker('status', [issue.id])">
         <StatusIcon :status="issue.status" :config="c.config.value" />
       </button>
-      <span class="bl-title" @click.stop="open(false)">{{ issue.title || issue.id }}</span>
+      <span class="bl-title">{{ issue.title || issue.id }}</span>
     </div>
     <div v-if="issue.missing" class="bl-card-meta">
       <span class="bl-chip is-missing">note missing</span>

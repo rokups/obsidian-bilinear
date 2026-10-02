@@ -337,6 +337,16 @@ button.bl-filter-chip {
   background: var(--background-modifier-hover);
 }
 
+.bl-row,
+.bl-card {
+  cursor: pointer;
+}
+
+.bl-row.is-missing,
+.bl-card.is-missing {
+  cursor: default;
+}
+
 .bl-row.is-selected,
 .bl-card.is-selected {
   background: var(--background-modifier-active-hover);

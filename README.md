@@ -202,8 +202,9 @@ it elsewhere, copy the three files in `plugin/dist` to
 Notes with `bilinear: tracker` open in the tracker view instead of the Markdown
 view. "Open as Markdown" in the view header (or the toggle command) switches
 back, and the Markdown view of an index note has an "Open as tracker" button.
-Opening an issue shows its note in a side split, where properties are edited
-with Obsidian's own Properties UI. Changes made outside the plugin, by the CLI
+Clicking anywhere on an issue's row or card opens its note in a side split,
+where properties are edited with Obsidian's own Properties UI; with Shift or
+Ctrl the click selects instead. Changes made outside the plugin, by the CLI
 or by sync, show up live.
 
 - List layout grouped by status, priority, assignee or label; board layout
