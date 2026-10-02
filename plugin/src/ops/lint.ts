@@ -1,8 +1,10 @@
 // Consistency checks of spec/FORMAT.md section 3.
 
-import { ARCHIVE, ISSUES, LOCATIONS, PRIORITIES, cleanTitle, idNumber, linkId, validDate } from "../format/ids";
+import { ARCHIVE, ISSUES, LINK_LIST_KEYS, LOCATIONS, PRIORITIES, cleanTitle, idNumber, linkId, validDate } from "../format/ids";
 import type { Index, Item } from "../format/index-note";
+import { recordFromDoc, type IssueRecord } from "../format/record";
 import { Doc } from "../format/yaml";
+import { reaches } from "../store/query";
 import type { Tracker } from "./io";
 import { describe, found, indexNotes, locked, moveNote, noteIds, pathIn, place, readIndexRaw, resolveNote, updateIndex } from "./tracker";
 
@@ -37,10 +39,7 @@ function checkNote(idx: Index, id: string, doc: Doc, add: Add): void {
     const value = doc.getStr(key);
     if (value !== null && !validDate(value)) add("error", `${key}-invalid`, id, `${key} '${value}' is not a YYYY-MM-DD date`);
   }
-  const refs: Array<[string, string]> = [
-    ...doc.getList("parent").map((v): [string, string] => ["parent", v]),
-    ...doc.getList("blocked-by").map((v): [string, string] => ["blocked-by", v]),
-  ];
+  const refs = LINK_LIST_KEYS.flatMap((key) => doc.getList(key).map((v): [string, string] => [key, v]));
   for (const [key, value] of refs) {
     const target = linkId(value);
     if (target === null || target === id) add("error", `${key}-invalid`, id, `${key} '${value}' is not a link to another issue`);
@@ -70,6 +69,7 @@ export function lint(t: Tracker, fix: boolean): Promise<Problem[]> {
 
     const prefix = idx.prefix;
     const seen = new Map<string, Item>();
+    const records: IssueRecord[] = [];
     const moves: Array<[string, boolean]> = [];
     for (const it of idx.items) {
       if (seen.has(it.id)) {
@@ -82,6 +82,7 @@ export function lint(t: Tracker, fix: boolean): Promise<Problem[]> {
       const here = await found(t, it.id);
       if (!here.length) {
         add("error", "note-missing", it.id, "note missing");
+        records.push(recordFromDoc(it, null, null));
         continue;
       }
       if (here.length > 1) {
@@ -94,8 +95,15 @@ export function lint(t: Tracker, fix: boolean): Promise<Problem[]> {
       const path = (await resolveNote(t, it.id, it.archived))!;
       const doc = new Doc((await t.io.read(path)) ?? "");
       checkNote(idx, it.id, doc, add);
+      records.push(recordFromDoc(it, doc, path));
       const title = cleanTitle(doc.getStr("title"));
       if (title && title !== it.title) add("warning", "title-mismatch", it.id, "index line title differs from the title property", true);
+    }
+
+    // A link to itself is `blocked-by-invalid` already, not a cycle as well.
+    const others = records.map((r) => ({ ...r, blockedBy: r.blockedBy.filter((b) => b !== r.id) }));
+    for (const r of others) {
+      if (reaches(others, r.id, r.id)) add("error", "blocked-by-cycle", r.id, "blocked-by leads back to the issue itself");
     }
 
     let highest = idx.highest();

@@ -1,0 +1,29 @@
+{
+  "op": "list",
+  "args": {},
+  "expect": {
+    "issues": [
+      {
+        "id": "BL-13",
+        "progress": null
+      },
+      {
+        "id": "BL-9",
+        "links": [],
+        "progress": {
+          "done": 0,
+          "total": 1,
+          "issues": [
+            "BL-13"
+          ]
+        }
+      },
+      {
+        "id": "BL-11"
+      },
+      {
+        "id": "BL-4"
+      }
+    ]
+  }
+}

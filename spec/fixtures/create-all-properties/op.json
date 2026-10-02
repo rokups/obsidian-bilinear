@@ -9,8 +9,7 @@
       "ui"
     ],
     "assignee": "rk",
-    "due": "2026-10-10",
-    "parent": "BL-9"
+    "due": "2026-10-10"
   },
   "today": "2026-10-01",
   "expect": {

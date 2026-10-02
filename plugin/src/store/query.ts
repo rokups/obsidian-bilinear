@@ -173,31 +173,20 @@ export function groupIssues(issues: IssueRecord[], groupBy: GroupKey, config: Tr
 export interface Progress {
   done: number;
   total: number;
-  /** The linked issues counted, sub-issues first. */
+  /** The blockers counted, in the order named. */
   issues: string[];
 }
 
 /**
- * Progress of each issue, from the state of the issues linked to it: its
- * sub-issues (those naming it as `parent`) and the issues its description
- * links to. Progress is how many of them are in a closed state; issues with
- * none are not in the map. `all` includes archived issues.
+ * Progress of each issue, from the state of the issues it is `blocked-by`
+ * (each counted once; descriptions and `related-to` do not count): how many of them are in a closed state. Issues with no blockers
+ * are not in the map. `all` includes archived issues.
  */
 export function linkedProgress(all: IssueRecord[], closedStates: string[]): Map<string, Progress> {
   const byId = new Map(all.map((i) => [i.id, i]));
-  const children = new Map<string, string[]>();
-  for (const i of all) {
-    if (!i.parent || i.parent === i.id || !byId.has(i.parent)) continue;
-    const list = children.get(i.parent);
-    if (list) list.push(i.id);
-    else children.set(i.parent, [i.id]);
-  }
   const out = new Map<string, Progress>();
   for (const i of all) {
-    const issues: string[] = [];
-    for (const other of [...(children.get(i.id) ?? []), ...i.links]) {
-      if (byId.has(other) && other !== i.id && !issues.includes(other)) issues.push(other);
-    }
+    const issues = [...new Set(i.blockedBy)].filter((id) => id !== i.id && byId.has(id));
     if (!issues.length) continue;
     const done = issues.filter((id) => {
       const status = byId.get(id)!.status;
@@ -206,6 +195,63 @@ export function linkedProgress(all: IssueRecord[], closedStates: string[]): Map<
     out.set(i.id, { done, total: issues.length, issues });
   }
   return out;
+}
+
+export interface Relations {
+  /** The issues that name this one in `blocked-by`, in index order. */
+  blocks: string[];
+  /** The issues related to this one, whichever of the two names the other. */
+  related: string[];
+  /** The issues this one names in `blocked-by`, in the order named. */
+  blockedBy: string[];
+  /** Some issue it is blocked by is not in a closed state. */
+  blocked: boolean;
+}
+
+/**
+ * Blocking and related issues of each issue; every issue in `all` is in the
+ * map. IDs that name no issue are ignored, and so is an issue naming itself.
+ * An issue is blocked while any issue blocking it is open, or its note is
+ * missing; whether the blocker is archived does not matter.
+ */
+export function issueRelations(all: IssueRecord[], closedStates: string[]): Map<string, Relations> {
+  const byId = new Map(all.map((i) => [i.id, i]));
+  const out = new Map<string, Relations>();
+  for (const i of all) {
+    const blockedBy = [...new Set(i.blockedBy)].filter((id) => id !== i.id && byId.has(id));
+    const blocked = blockedBy.some((id) => {
+      const status = byId.get(id)!.status;
+      return status === null || !closedStates.includes(status);
+    });
+    out.set(i.id, { blocks: [], related: [], blockedBy, blocked });
+  }
+  for (const i of all) {
+    for (const other of all) {
+      if (other.id === i.id) continue;
+      if (other.blockedBy.includes(i.id)) out.get(i.id)!.blocks.push(other.id);
+      if (i.relatedTo.includes(other.id) || other.relatedTo.includes(i.id)) out.get(i.id)!.related.push(other.id);
+    }
+  }
+  return out;
+}
+
+/**
+ * Whether following `blocked-by` from issue `from` reaches `to` in one or
+ * more steps. Unknown IDs are dead ends; existing cycles end the walk.
+ */
+export function reaches(all: IssueRecord[], from: string, to: string): boolean {
+  const byId = new Map(all.map((i) => [i.id, i]));
+  const next = (id: string): string[] => byId.get(id)?.blockedBy ?? [];
+  const seen = new Set<string>();
+  const stack = [...next(from)];
+  while (stack.length) {
+    const id = stack.pop()!;
+    if (id === to) return true;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    stack.push(...next(id));
+  }
+  return false;
 }
 
 /** The property a grouping stands for, if dropping into a group can set it. */

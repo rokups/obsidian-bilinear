@@ -688,8 +688,9 @@ describe("for LLM agents", () => {
     expect(text).toContain("is the name of the agent you are");
     expect(text).toContain("An issue that needs the user to act is assigned to the user");
     expect(text).toContain("## Relations between issues");
+    expect(text).toContain("The triage state is only for decisions of high importance about the\n  architecture");
     expect(text).toContain("Before you put an issue in the triage state, search the tracker");
-    for (const relation of ["Part of larger work", "Has to wait for another issue", "Made up of other issues that are not its sub-issues", "Related in another way"]) {
+    for (const relation of ["Has to wait for another issue", "Made up of other issues", "Related in another way"]) {
       expect(text, relation).toContain(`- **${relation}**`);
     }
     expect(text).toContain("`set <ID> blocked-by+=<other ID>`");
@@ -731,7 +732,9 @@ describe("for LLM agents", () => {
     expect(text.endsWith("<!-- bilinear:end -->\n")).toBe(true);
     expect(text).toContain("becomes a\nfollow-up issue before you close the task");
     expect(text).toContain('(`new "Title" --status triage`)');
-    expect(text).toContain("Do not work on an issue that is in `triage`.");
+    expect(text).toContain("Do not work on an issue\nthat is in `triage`.");
+    expect(text).toContain("A follow-up is created like any issue, in the backlog");
+    expect(text).toContain("Only a\nfollow-up that needs a decision of high importance about the architecture");
     expect(text).toContain("Before you create an issue in `triage`, search the tracker for the issues\nthat have to do with it");
     expect(text).toContain("Assign an issue for `triage` to the user (`--assignee <the user's name>`),");
     expect(text).toContain("write it so that the user can accept it\nwith as few edits as possible.");
@@ -893,12 +896,12 @@ describe("commands", () => {
   beforeEach(async () => {
     s().edit(s().index, "labels: []", "labels: [bug, ui]");
     await s().ok("new", "Alpha", "--priority", "high", "--label", "bug", "--assignee", "rk");
-    await s().ok("new", "Beta", "--status", "done", "--parent", "BL-1");
+    await s().ok("new", "Beta", "--status", "done");
     await s().ok("new", "Gamma", "--label", "ui,bug", "--due", "2026-10-10");
   });
 
   it("new validates", async () => {
-    for (const argv of [["--status", "nope"], ["--priority", "p0"], ["--due", "tomorrow"], ["--parent", "BL-99"]]) {
+    for (const argv of [["--status", "nope"], ["--priority", "p0"], ["--due", "tomorrow"], ["--blocked-by", "BL-99"]]) {
       expect(await s().code("new", "X", ...argv), argv.join(" ")).toBe(1);
     }
     expect(await s().code("new", "  ")).toBe(1);
@@ -938,6 +941,7 @@ describe("commands", () => {
   });
 
   it("list prints aligned columns", async () => {
+    await s().ok("set", "BL-1", "blocked-by=BL-2");
     expect(await s().ok("list")).toBe("BL-1  backlog  high  Alpha  [1/1]  @rk  #bug\nBL-2  done     none  Beta\nBL-3  backlog  none  Gamma  #ui #bug\n");
     await s().ok("archive", "BL-2");
     fs.unlinkSync(s().note("BL-3"));
@@ -946,16 +950,21 @@ describe("commands", () => {
 
   it("list --json has the documented keys in order", async () => {
     const first = JSON.parse(await s().ok("list", "--json"))[0];
-    expect(Object.keys(first)).toEqual(["id", "title", "status", "priority", "labels", "assignee", "due", "parent", "blocked-by", "created", "links", "progress", "archived", "missing"]);
+    expect(Object.keys(first)).toEqual(["id", "title", "status", "priority", "labels", "assignee", "due", "blocked-by", "related", "blocks", "blocked", "created", "links", "progress", "archived", "missing"]);
     expect(first).toMatchObject({ id: "BL-1", title: "Alpha", status: "backlog", priority: "high", labels: ["bug"], assignee: "rk", due: null, created: "2026-10-01" });
   });
 
-  it("progress follows the linked issues", async () => {
+  it("progress follows the blockers, not description links", async () => {
     fs.appendFileSync(s().note("BL-3"), "\nDepends on [[BL-1]] and [[BL-2]].\n\n## Comments\n- 2026-10-01 rk: unlike [[BL-9]]\n");
-    const byId = Object.fromEntries((JSON.parse(await s().ok("list", "--json")) as Array<{ id: string }>).map((i) => [i.id, i])) as Record<string, any>;
+    const progress = async () => Object.fromEntries((JSON.parse(await s().ok("list", "--json")) as Array<{ id: string }>).map((i) => [i.id, i])) as Record<string, any>;
+    const first = await progress();
+    expect(first["BL-3"].links).toEqual(["BL-1", "BL-2"]);
+    expect([first["BL-1"].progress, first["BL-2"].progress, first["BL-3"].progress]).toEqual([null, null, null]);
+    await s().ok("set", "BL-1", "blocked-by=BL-2");
+    await s().ok("set", "BL-3", "blocked-by=BL-1, BL-2");
+    const byId = await progress();
     expect(byId["BL-1"].progress).toEqual({ done: 1, total: 1, issues: ["BL-2"] });
     expect(byId["BL-2"].progress).toBeNull();
-    expect(byId["BL-3"].links).toEqual(["BL-1", "BL-2"]);
     expect(byId["BL-3"].progress).toEqual({ done: 1, total: 2, issues: ["BL-1", "BL-2"] });
     expect(await s().ok("show", "BL-3")).toContain("progress:    1/2  (BL-1 backlog, BL-2 done)\n");
     await s().ok("set", "BL-1", "status=canceled");
@@ -964,13 +973,111 @@ describe("commands", () => {
     expect((await show("BL-3")).progress).toEqual({ done: 2, total: 2, issues: ["BL-1", "BL-2"] });
   });
 
+  describe("relations", () => {
+    // BL-1 backlog blocked by BL-2 (done) and BL-3 (backlog); BL-2 related to BL-1; BL-3 related to BL-2.
+    const relate = async () => {
+      await s().ok("set", "BL-1", "blocked-by=BL-2, BL-3");
+      await s().ok("set", "BL-2", "related-to=BL-1");
+      await s().ok("set", "BL-3", "related-to=BL-2");
+    };
+    const ids = async (...argv: string[]) => (JSON.parse(await s().ok("list", "--json", ...argv)) as Array<{ id: string }>).map((i) => i.id);
+
+    it("set related-to-= ends a relation that only the other note names", async () => {
+      await relate();
+      await s().ok("set", "BL-1", "related-to-=BL-2");
+      expect(s().read(s().note("BL-2"))).not.toContain("related-to");
+      expect(await ids("--related-to", "BL-1")).toEqual([]);
+      await s().ok("set", "BL-2", "related-to-=BL-3, BL-99");
+      expect(s().read(s().note("BL-3"))).not.toContain("related-to");
+    });
+
+    it("set compares links by the issue they name, and takes links as filters", async () => {
+      s().edit(s().note("BL-1"), "created:", 'blocked-by: ["[[issues/BL-2|Two]]"]\ncreated:');
+      await s().ok("set", "BL-1", "blocked-by+=BL-2");
+      expect(s().read(s().note("BL-1")).match(/BL-2/g)).toHaveLength(1);
+      expect(await ids("--blocked-by", "[[BL-2]]")).toEqual(["BL-1"]);
+      await s().ok("set", "BL-1", "blocked-by-=BL-2");
+      expect(s().read(s().note("BL-1"))).not.toContain("blocked-by");
+      expect(await s().code("list", "--blocked-by", "nope")).toBe(1);
+    });
+
+    it("set warns once about a label the tracker does not list", async () => {
+      const r = await s().run("set", "BL-1", "labels+=newlabel");
+      expect(r.err.split("\n").filter((line) => line)).toEqual(["bilinear: warning: label 'newlabel' is not in the tracker's labels"]);
+    });
+
+    it("show prints what the issue blocks and what is related, with states", async () => {
+      await relate();
+      expect(await s().ok("show", "BL-3")).toContain("related-to:  [[BL-2]]\nblocks:      BL-1 backlog\nrelated:     BL-2 done\n");
+      expect(await s().ok("show", "BL-2")).toContain("blocks:      BL-1 backlog\nrelated:     BL-1 backlog, BL-3 backlog\n");
+      const plain = await s().ok("show", "BL-1");
+      expect(plain).toContain("progress:    1/2  (BL-2 done, BL-3 backlog)\nrelated:     BL-2 done\n");
+      expect(plain).not.toContain("blocks:");
+      expect(plain).not.toContain("blocked:");
+      fs.unlinkSync(s().note("BL-2"));
+      expect(await s().ok("show", "BL-3")).toContain("blocks:      BL-1 backlog\nrelated:     BL-2 note missing\n");
+      expect(await s().ok("show", "BL-2")).toBe("BL-2  Beta\n(note missing)\n");
+    });
+
+    it("show prints neither line without relations", async () => {
+      const text = await s().ok("show", "BL-1");
+      expect(text).not.toMatch(/blocks:|related:/);
+    });
+
+    it("json has related, blocks and blocked, and show keeps the stored related-to", async () => {
+      await relate();
+      const list = JSON.parse(await s().ok("list", "--json")) as Array<Record<string, any>>;
+      expect(list.map((i) => [i.id, i.related, i.blocks, i.blocked])).toEqual([
+        ["BL-1", ["BL-2"], [], true],
+        ["BL-2", ["BL-1", "BL-3"], ["BL-1"], false],
+        ["BL-3", ["BL-2"], ["BL-1"], false],
+      ]);
+      const data = await show("BL-2");
+      expect([data.related, data.blocks, data.blocked]).toEqual([["BL-1", "BL-3"], ["BL-1"], false]);
+      expect(data.properties["related-to"]).toEqual(["[[BL-1]]"]);
+      expect(Object.keys(data).slice(7, 11)).toEqual(["blocked-by", "related", "blocks", "blocked"]);
+    });
+
+    it("list --blocked keeps the issues with an open blocker", async () => {
+      await relate();
+      expect(await ids("--blocked")).toEqual(["BL-1"]);
+      expect(await ids("--blocked", "--status", "done")).toEqual([]);
+      expect(await ids("--blocked", "--status", "backlog")).toEqual(["BL-1"]);
+      expect(await s().ok("list", "--blocked")).toMatch(/^BL-1 /);
+      await s().ok("set", "BL-3", "status=done");
+      expect(await ids("--blocked")).toEqual([]);
+    });
+
+    it("list --blocked-by and --related-to keep the issues naming the ID", async () => {
+      await relate();
+      expect(await ids("--blocked-by", "BL-3")).toEqual(["BL-1"]);
+      expect(await ids("--blocked-by", "BL-1")).toEqual([]);
+      expect(await ids("--blocked-by", "BL-2", "--status", "done")).toEqual([]);
+      expect(await ids("--related-to", "BL-2")).toEqual(["BL-1", "BL-3"]);
+      expect(await ids("--related-to", "BL-1")).toEqual(["BL-2"]);
+      expect(await ids("--related-to", "BL-2", "--status", "done")).toEqual([]);
+      expect(await ids("--related-to", "BL-2", "--blocked")).toEqual(["BL-1"]);
+      expect(await ids("--related-to", "BL-2", "--blocked-by", "BL-3")).toEqual(["BL-1"]);
+    });
+
+    it("list rejects an ID that is not an issue", async () => {
+      for (const flag of ["--blocked-by", "--related-to"]) {
+        for (const id of ["BL-99", "nope"]) {
+          const r = await s().run("list", flag, id);
+          expect(r.code, `${flag} ${id}`).toBe(1);
+          expect(r.out).toBe("");
+          expect(r.err).toContain(`${id}: no such issue`);
+        }
+      }
+    });
+  });
+
   it("show", async () => {
-    expect(await s().ok("show", "BL-2")).toBe("BL-2  Beta\nstatus:      done\npriority:    none\nparent:      [[BL-1]]\ncreated:     2026-10-01\n");
+    expect(await s().ok("show", "BL-2")).toBe("BL-2  Beta\nstatus:      done\npriority:    none\ncreated:     2026-10-01\n");
     fs.appendFileSync(s().note("BL-2"), "\nThe body.\n\n");
     expect(await s().ok("show", "BL-2")).toContain("created:     2026-10-01\n\nThe body.\n");
     const data = await show("BL-2");
-    expect(data.parent).toBe("BL-1");
-    expect(data.properties.parent).toBe("[[BL-1]]");
+    expect(data.properties).toEqual({ title: "Beta", status: "done", priority: "none", created: "2026-10-01" });
     expect(data.path).toBe(s().note("BL-2"));
     expect(data.body).toBe("\nThe body.\n\n");
     expect(await s().code("show", "BL-99")).toBe(1);
@@ -1000,14 +1107,33 @@ describe("commands", () => {
 
   it("set adds a blocker next to one that no longer exists", async () => {
     await s().ok("set", "BL-1", "blocked-by=BL-2");
-    await s().ok("rm", "BL-2");
+    fs.writeFileSync(s().note("BL-1"), s().read(s().note("BL-1")).replace("[[BL-2]]", "[[BL-99]]"));
     await s().ok("set", "BL-1", "blocked-by+=BL-3");
-    expect((await show("BL-1")).properties["blocked-by"]).toEqual(["[[BL-2]]", "[[BL-3]]"]);
+    expect((await show("BL-1")).properties["blocked-by"]).toEqual(["[[BL-99]]", "[[BL-3]]"]);
+  });
+
+  it("rm clears the blockers that named the issue", async () => {
+    await s().ok("set", "BL-1", "blocked-by=BL-2");
+    await s().ok("rm", "BL-2");
+    expect((await show("BL-1")).properties["blocked-by"]).toBeUndefined();
+  });
+
+  it("parent is an ordinary custom key", async () => {
+    await s().ok("set", "BL-1", "parent=BL-99");
+    expect(s().read(s().note("BL-1"))).toContain("\nparent: BL-99\n");
+    await s().ok("set", "BL-1", "assignee=x");
+    expect(s().read(s().note("BL-1"))).toContain("\nparent: BL-99\n");
+    expect(await s().ok("show", "BL-1")).toContain("parent:      BL-99\n");
+    const data = await show("BL-1");
+    expect(data.properties.parent).toBe("BL-99");
+    expect(Object.keys(data)).not.toContain("parent");
+    expect(await s().ok("lint")).not.toMatch(/parent/);
+    expect(await s().code("lint")).toBe(0);
   });
 
   it("set validates and leaves the note alone", async () => {
     const before = s().read(s().note("BL-1"));
-    for (const assignment of ["status=nope", "priority=p0", "due=soon", "parent=BL-1", "parent=BL-99", "blocked-by=BL-1", "blocked-by+=nope", "title=", "status=", "nonsense"]) {
+    for (const assignment of ["status=nope", "priority=p0", "due=soon", "blocked-by=BL-1", "blocked-by+=nope", "title=", "status=", "nonsense"]) {
       expect(await s().code("set", "BL-1", "assignee=x", assignment), assignment).toBe(1);
       expect(s().read(s().note("BL-1"))).toBe(before);
     }

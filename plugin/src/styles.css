@@ -182,8 +182,8 @@ button.bl-filter-chip {
   border-color: var(--text-error);
 }
 
-.bl-chip.is-parent {
-  font-family: var(--font-monospace);
+.bl-chip.is-relation {
+  color: var(--text-muted);
 }
 
 .bl-progress svg {
@@ -804,8 +804,7 @@ input.bl-prompt-input {
 
 @container (max-width: 520px) {
   .bl-row .bl-label,
-  .bl-row .bl-due,
-  .bl-row .is-parent {
+  .bl-row .bl-due {
     display: none;
   }
 }

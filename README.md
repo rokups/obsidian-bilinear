@@ -79,8 +79,8 @@ bilinear lint --fix
 | Command | Purpose |
 |---|---|
 | `init <folder> --prefix BL` | Create the folder, index note, `issues/` and `archive/` |
-| `new "Title" [--description ..] [--status ..] [--priority ..] [--label ..] [--assignee ..] [--due ..] [--parent ..] [--blocked-by ..] [--top]` | Create an issue; prints the ID |
-| `list [--status ..] [--label ..] [--assignee ..] [--priority ..] [--archived] [--all]` | List in index order |
+| `new "Title" [--description ..] [--status ..] [--priority ..] [--label ..] [--assignee ..] [--due ..] [--blocked-by ..] [--related-to ..] [--top]` | Create an issue; prints the ID |
+| `list [--status ..] [--label ..] [--assignee ..] [--priority ..] [--blocked] [--blocked-by ID] [--related-to ID] [--archived] [--all]` | List in index order |
 | `show <ID>` | Print properties and body |
 | `set <ID> key=value ...` | Change properties, including `title`. `key=` removes a key; `labels+=x` and `labels-=x` edit lists |
 | `comment <ID> "text"` | Append a comment |
@@ -98,8 +98,19 @@ bilinear lint --fix
   `BILINEAR_TRACKER`, then a search upward from the working directory.
 - The comment author is `--author`, then `BILINEAR_USER`, then `$USER`.
 - `--json` on `list`, `show`, `new`, `label`, `state` and `lint`.
-- `list` shows progress as `[1/2]` and `show` names the linked issues and
-  their states; in JSON it is `progress: {done, total, issues}`.
+- `list` shows progress as `[1/2]` and `show` names the blockers and their
+  states; in JSON it is `progress: {done, total, issues}`.
+- `blocked-by` and `related-to` take issue IDs, for `new` and for `set`
+  (`related-to+=BL-7`). `show` also prints `blocks:` (the issues blocked by
+  this one) and `related:` (issues related either way, so naming one side is
+  enough), each with states, when there are any.
+- `list --blocked` keeps the issues with a blocker that is not closed or has
+  no note; `--blocked-by ID` those naming `ID` as a blocker; `--related-to ID`
+  those related to `ID`. They combine with each other and with the other
+  filters; an unknown `ID` is an error.
+- JSON issues have `blocked-by` (as stored), `related`, `blocks` (lists of
+  IDs) and `blocked` (true or false); `show --json` has the stored
+  `related-to` under `properties`.
 - Colours are `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `purple`,
   `pink`, `gray`, or a hex value such as `#7c5cff`.
 - A tracker has a triage state, `triage` in a new tracker: issues in it wait
@@ -179,9 +190,10 @@ the command says that nothing was excluded.
   is found and decided, review, and closing with what was done and how it
   was checked. An issue that needs you to act, such as one that waits for
   your answer, is assigned to you. It requires the relations between
-  issues to be recorded and kept true: parents and sub-issues, what blocks
-  what, the issues a description links to, and comments that name related
-  issues. It also describes the commands, the properties and the exit codes.
+  issues to be recorded and kept true: what blocks what, with large work
+  split into issues that the issue for the whole is blocked by, and which
+  issues are related. It also describes the commands, the properties and
+  the exit codes.
 - The instructions say only where: they name one tracker and refer to the
   skill. In a project the tracker is named by its path from the root of the
   repository if it is inside the repository or one level above it, and by its
@@ -191,15 +203,17 @@ the command says that nothing was excluded.
   again replaces that block and leaves the rest of the file alone.
 - `--followups` adds a rule to the section: whatever a task skips, puts off
   or does only in part becomes a follow-up issue before the task is closed.
-  A follow-up the agent is not sure is wanted is created in the tracker's
-  triage state, where it waits for you to accept or reject it.
+  It is an ordinary issue in the backlog, unless it needs a decision of high
+  importance about the architecture: only then is it created in the
+  tracker's triage state, where it waits for you to accept or reject it.
+- The skill keeps the triage state for such decisions too. What is of lower
+  importance, or has an obvious best course, goes to the backlog.
 - Before the agent puts an issue in the triage state it searches the tracker
   for related issues, adds the issue only if none covers it, and links it to
   the ones it found. The issue is assigned to you and written to need as few
-  edits from you as possible. Where there is more than one
-  way to do the work, the description gives each as an option: delete the
-  ones you discard, leave the one you accept, and move the issue to the
-  backlog.
+  edits from you as possible. Where there is more than one way to do the
+  work, the description gives each as an option: delete the ones you
+  discard, leave the one you accept, and move the issue to the backlog.
 
 The CLI moves notes with a plain file move. Bare `[[BL-4]]` links survive;
 path-style links in other notes are only rewritten when the plugin does the
@@ -257,10 +271,11 @@ or by sync, show up live.
   toolbar (also a command): pick an icon and a colour for each state, and a
   colour for each label. Right-clicking a label on a row, or in the labels
   picker, is a shortcut to its colour.
-- Progress on every issue that has linked issues: its sub-issues, plus any
-  issues its description links to, so a checklist of `[[BL-3]]` links in a
-  note becomes a progress ring that follows those issues' states. Hover it for
-  the list. A "blocked" marker shows while a `blocked-by` issue is open.
+- Progress on every issue that is `blocked-by` others: a progress ring that
+  follows those issues' states. Hover it for the list. A "blocked" marker
+  shows while a `blocked-by` issue is open, and markers count the issues it
+  blocks and the ones it is related to. "Set blockers…" and "Set related…"
+  in an issue's menu change them.
 - Bulk edit on a multi-selection.
 - "Note missing" rows with recreate and remove actions.
 
@@ -269,7 +284,7 @@ view, archive closed issues, lint tracker, customize states and labels, add
 comment to this issue.
 
 The new issue dialog takes the whole issue: title, status, priority, assignee,
-due date, labels, parent, blockers and a Markdown description, so the note
+due date, labels, blockers and a Markdown description, so the note
 need not be opened afterwards. "Create and open" opens it all the same.
 
 Settings: the author name for comments, and the default folder for new

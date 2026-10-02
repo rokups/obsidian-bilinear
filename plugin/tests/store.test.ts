@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 import { Doc } from "../src/format/yaml";
 import type { IssueRecord } from "../src/format/record";
-import { applyFilter, defaultSpec, linkedProgress, emptyFilter, groupIssues, normalizeSpec, sortIssues, type TrackerConfig } from "../src/store/query";
+import { applyFilter, defaultSpec, issueRelations, linkedProgress, emptyFilter, groupIssues, normalizeSpec, reaches, sortIssues, type TrackerConfig } from "../src/store/query";
 import { buildSnapshot } from "../src/store/snapshot";
 import { readViews, writeViews, type SavedView } from "../src/store/views";
 import { bodyLinks } from "../src/format/issue-note";
@@ -69,8 +69,8 @@ describe("snapshot from the metadata cache", () => {
 
 function issue(id: string, over: Partial<IssueRecord> = {}): IssueRecord {
   return {
-    id, title: id, status: "todo", priority: "none", labels: [], assignee: null, due: null, parent: null,
-    blockedBy: [], created: null, links: [], archived: false, missing: false, path: `T/${id}.md`, ...over,
+    id, title: id, status: "todo", priority: "none", labels: [], assignee: null, due: null,
+    blockedBy: [], relatedTo: [], created: null, links: [], archived: false, missing: false, path: `T/${id}.md`, ...over,
   };
 }
 
@@ -80,8 +80,8 @@ describe("query", () => {
   const issues = [
     issue("BL-1", { title: "Cache layer", priority: "high", assignee: "rk", labels: ["bug"], due: "2026-11-01", created: "2026-09-01" }),
     issue("BL-2", { title: "cold start", status: "done", priority: "urgent", labels: ["ui", "perf"], created: "2026-09-03" }),
-    issue("BL-3", { title: "Board", status: "backlog", assignee: "ana", due: "2026-10-05", parent: "BL-1" }),
-    issue("BL-4", { title: "Missing", status: null, missing: true, path: null, parent: "BL-1" }),
+    issue("BL-3", { title: "Board", status: "backlog", assignee: "ana", due: "2026-10-05" }),
+    issue("BL-4", { title: "Missing", status: null, missing: true, path: null }),
   ];
   const ids = (list: IssueRecord[]) => list.map((i) => i.id);
 
@@ -127,18 +127,18 @@ describe("query", () => {
     expect(groupIssues(issues, "none", config)).toHaveLength(1);
   });
 
-  it("derives progress from sub-issues and linked issues, open or archived", () => {
+  it("derives progress from the blockers, open or archived, and not from description links", () => {
     const all = [
       ...issues,
-      issue("BL-5", { parent: "BL-1", status: "done", archived: true }),
-      issue("BL-6", { links: ["BL-2", "BL-3", "BL-6", "BL-99", "BL-2"] }),
-      issue("BL-7", { parent: "BL-7", links: ["BL-4"] }),
+      issue("BL-5", { status: "done", archived: true }),
+      issue("BL-6", { blockedBy: ["BL-2", "BL-3", "BL-6", "BL-99", "BL-2", "BL-5"] }),
+      issue("BL-7", { links: ["BL-4", "BL-2"] }),
+      issue("BL-8", { blockedBy: ["BL-4"], links: ["BL-2"], relatedTo: ["BL-2"] }),
     ];
     expect(linkedProgress(all, config.closedStates)).toEqual(
       new Map([
-        ["BL-1", { done: 1, total: 3, issues: ["BL-3", "BL-4", "BL-5"] }],
-        ["BL-6", { done: 1, total: 2, issues: ["BL-2", "BL-3"] }],
-        ["BL-7", { done: 0, total: 1, issues: ["BL-4"] }],
+        ["BL-6", { done: 2, total: 3, issues: ["BL-2", "BL-3", "BL-5"] }],
+        ["BL-8", { done: 0, total: 1, issues: ["BL-4"] }],
       ]),
     );
   });
@@ -147,6 +147,94 @@ describe("query", () => {
     expect(normalizeSpec(null)).toEqual(defaultSpec());
     expect(normalizeSpec({ layout: "grid", groupBy: "label", sortBy: 7, filter: { text: "x", status: ["a", 1], labels: "no" } })).toEqual({
       layout: "list", groupBy: "label", sortBy: "manual", filter: { text: "x", status: ["a"], priority: [], labels: [], assignee: [] },
+    });
+  });
+});
+
+describe("relations", () => {
+  const closed = config.closedStates;
+  const all = [
+    issue("BL-1", { blockedBy: ["BL-2", "BL-3", "BL-3", "BL-1", "BL-99"], relatedTo: ["BL-4", "BL-1", "BL-99", "BL-5"] }),
+    issue("BL-2", { status: "done" }),
+    issue("BL-3", { blockedBy: ["BL-2"], relatedTo: ["BL-4"] }),
+    issue("BL-4", { relatedTo: ["BL-1", "BL-3"] }),
+    issue("BL-5", { status: "done", archived: true, blockedBy: ["BL-6", "BL-2"] }),
+    issue("BL-6", { status: null, missing: true, path: null, blockedBy: ["BL-99"], relatedTo: ["BL-99"] }),
+    issue("BL-7", { blockedBy: ["BL-5"] }),
+  ];
+  const rel = issueRelations(all, closed);
+
+  it("has an entry for every issue", () => {
+    expect([...rel.keys()]).toEqual(all.map((i) => i.id));
+  });
+
+  it("lists the blockers in the stored order, once each, without itself or unknown issues", () => {
+    expect(rel.get("BL-1")!.blockedBy).toEqual(["BL-2", "BL-3"]);
+    expect(rel.get("BL-6")!.blockedBy).toEqual([]);
+    expect(rel.get("BL-2")!.blockedBy).toEqual([]);
+  });
+
+  it("derives the issues an issue blocks, in index order", () => {
+    expect(rel.get("BL-2")!.blocks).toEqual(["BL-1", "BL-3", "BL-5"]);
+    expect(rel.get("BL-3")!.blocks).toEqual(["BL-1"]);
+    expect(rel.get("BL-1")!.blocks).toEqual([]);
+    expect(rel.get("BL-5")!.blocks).toEqual(["BL-7"]);
+  });
+
+  it("relates issues from either side, or both, once", () => {
+    expect(rel.get("BL-1")!.related).toEqual(["BL-4", "BL-5"]);
+    expect(rel.get("BL-4")!.related).toEqual(["BL-1", "BL-3"]);
+    expect(rel.get("BL-3")!.related).toEqual(["BL-4"]);
+    expect(rel.get("BL-5")!.related).toEqual(["BL-1"]);
+    expect(rel.get("BL-6")!.related).toEqual([]);
+    expect(rel.get("BL-2")!.related).toEqual([]);
+  });
+
+  it("is blocked by an open blocker, and not by a closed one", () => {
+    expect(rel.get("BL-1")!.blocked).toBe(true);
+    expect(rel.get("BL-3")!.blocked).toBe(false);
+    expect(rel.get("BL-2")!.blocked).toBe(false);
+  });
+
+  it("counts a blocker whose note is missing as open, and ignores whether a blocker is archived", () => {
+    expect(rel.get("BL-5")!.blocked).toBe(true);
+    expect(rel.get("BL-7")!.blocked).toBe(false);
+    expect(issueRelations([issue("BL-1", { blockedBy: ["BL-2"] }), issue("BL-2", { status: "done", archived: true })], closed).get("BL-1")!.blocked).toBe(false);
+  });
+
+  it("is not blocked by unknown issues or by itself", () => {
+    expect(rel.get("BL-6")!.blocked).toBe(false);
+    expect(issueRelations([issue("BL-1", { blockedBy: ["BL-1", "BL-9"] })], closed).get("BL-1")).toEqual({ blocks: [], related: [], blockedBy: [], blocked: false });
+  });
+
+  describe("reaches", () => {
+    const chain = [
+      issue("BL-1", { blockedBy: ["BL-2"] }),
+      issue("BL-2", { blockedBy: ["BL-3", "BL-9"] }),
+      issue("BL-3", { blockedBy: ["BL-4"] }),
+      issue("BL-4"),
+      issue("BL-5", { blockedBy: ["BL-99"] }),
+    ];
+
+    it("follows a chain in one or more steps", () => {
+      expect(reaches(chain, "BL-1", "BL-2")).toBe(true);
+      expect(reaches(chain, "BL-1", "BL-4")).toBe(true);
+      expect(reaches(chain, "BL-4", "BL-1")).toBe(false);
+      expect(reaches(chain, "BL-1", "BL-5")).toBe(false);
+      expect(reaches(chain, "BL-1", "BL-1")).toBe(false);
+    });
+
+    it("treats unknown issues as dead ends", () => {
+      expect(reaches(chain, "BL-77", "BL-1")).toBe(false);
+      expect(reaches(chain, "BL-5", "BL-1")).toBe(false);
+      expect(reaches(chain, "BL-2", "BL-9")).toBe(true);
+    });
+
+    it("ends on an existing cycle, and finds a cycle through the issue itself", () => {
+      const loop = [issue("BL-1", { blockedBy: ["BL-2"] }), issue("BL-2", { blockedBy: ["BL-3"] }), issue("BL-3", { blockedBy: ["BL-2"] })];
+      expect(reaches(loop, "BL-1", "BL-4")).toBe(false);
+      expect(reaches(loop, "BL-2", "BL-2")).toBe(true);
+      expect(reaches(loop, "BL-1", "BL-1")).toBe(false);
     });
   });
 });

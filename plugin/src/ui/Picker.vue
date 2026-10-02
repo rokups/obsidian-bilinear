@@ -5,9 +5,9 @@ import LabelChip from "./LabelChip.vue";
 import PriorityIcon from "./PriorityIcon.vue";
 import StatusIcon from "./StatusIcon.vue";
 
-// A small command-palette style chooser for status, priority, labels and
-// assignee. Labels are toggled and the picker stays open; the others close
-// on choice. Labels and assignee accept new values typed into the input.
+// A small command-palette style chooser for status, priority, labels,
+// assignee, blockers and related issues. Labels, blockers and related issues
+// are toggled and the picker stays open; the others close on choice. Labels and assignee accept new values typed into the input.
 const props = defineProps<{ state: PickerState }>();
 const c = inject(CTRL)!;
 
@@ -18,6 +18,8 @@ interface Option {
   create?: boolean;
 }
 
+/** Pickers that toggle values and stay open. */
+const toggles = computed(() => ["labels", "blocked-by", "related-to"].includes(props.state.kind));
 const query = ref("");
 const active = ref(0);
 const input = ref<HTMLInputElement | null>(null);
@@ -31,7 +33,9 @@ function shared<T>(get: (i: (typeof targets.value)[number]) => T): T | undefined
 }
 
 const title = computed(() => {
-  const what = { status: "Set status", priority: "Set priority", labels: "Set labels", assignee: "Assign" }[props.state.kind];
+  const what = {
+    status: "Set status", priority: "Set priority", labels: "Set labels", assignee: "Assign", "blocked-by": "Blocked by", "related-to": "Related to",
+  }[props.state.kind];
   return props.state.ids.length === 1 ? `${what}: ${props.state.ids[0]}` : `${what}: ${props.state.ids.length} issues`;
 });
 
@@ -46,6 +50,10 @@ const options = computed<Option[]>(() => {
     all = [...c.priorities].reverse().map((p) => ({ value: p, label: p === "none" ? "No priority" : p, checked: p === cur }));
   } else if (kind === "labels") {
     all = c.labels.value.map((l) => ({ value: l, label: l, checked: c.allHaveLabel(props.state.ids, l) }));
+  } else if (kind === "blocked-by" || kind === "related-to") {
+    all = c.all.value
+      .filter((i) => !props.state.ids.includes(i.id))
+      .map((i) => ({ value: i.id, label: `${i.id} ${i.title}`, checked: c.allHaveRelation(kind, props.state.ids, i.id) }));
   } else {
     const cur = shared((i) => i.assignee);
     all = [{ value: null, label: "Unassigned", checked: cur === null }, ...c.assignees.value.map((a) => ({ value: a, label: a, checked: a === cur }))];
@@ -74,7 +82,7 @@ watch(query, () => {
 function choose(o: Option | undefined): void {
   if (!o) return;
   c.pick(o.value);
-  if (props.state.kind === "labels") query.value = "";
+  if (toggles.value) query.value = "";
 }
 
 function onContext(e: MouseEvent, o: Option): void {
@@ -94,7 +102,7 @@ function onKey(e: KeyboardEvent): void {
 
 onMounted(() => {
   const at = options.value.findIndex((o) => o.checked);
-  if (props.state.kind !== "labels" && at >= 0) active.value = at;
+  if (!toggles.value && at >= 0) active.value = at;
   input.value?.focus();
 });
 </script>
@@ -112,6 +120,7 @@ onMounted(() => {
         >
           <StatusIcon v-if="state.kind === 'status'" :status="o.value" :config="c.config.value" />
           <PriorityIcon v-else-if="state.kind === 'priority'" :priority="o.value ?? 'none'" />
+          <StatusIcon v-else-if="o.value !== null && (state.kind === 'blocked-by' || state.kind === 'related-to')" :status="c.byId.value.get(o.value)?.status ?? null" :config="c.config.value" />
           <LabelChip v-else-if="state.kind === 'labels' && o.value !== null" :label="o.value" :colors="c.config.value.labelColors" dot-only />
           <span class="bl-option-label">{{ o.label }}</span>
           <span v-if="o.checked" class="bl-option-check">✓</span>

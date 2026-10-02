@@ -4,6 +4,7 @@ import { ARCHIVE_DIR, ID_RE, ISSUES_DIR, LOCATIONS, cleanTitle, type Location } 
 import { Index, type Item } from "../format/index-note";
 import { recordFromDoc, type IssueRecord } from "../format/record";
 import { Doc } from "../format/yaml";
+import { issueRelations, linkedProgress, type Progress, type Relations } from "../store/query";
 import { OpError, joinPath, type Tracker } from "./io";
 
 export function place(archived: boolean): Location {
@@ -150,6 +151,13 @@ export function listIssues(t: Tracker): Promise<IssueRecord[]> {
     for (const it of idx.unique()) out.push(await issueRecord(t, it));
     return out;
   });
+}
+
+/** A record for every issue, open and archived, and the progress and relations of each. To be called holding the lock. */
+export async function allRecords(t: Tracker, idx: Index): Promise<{ records: IssueRecord[]; progress: Map<string, Progress>; relations: Map<string, Relations> }> {
+  const records: IssueRecord[] = [];
+  for (const it of idx.unique()) records.push(await issueRecord(t, it));
+  return { records, progress: linkedProgress(records, idx.closedStates), relations: issueRelations(records, idx.closedStates) };
 }
 
 /** Top-level notes of a folder that carry `bilinear: tracker`, folder-named note first. */

@@ -14,7 +14,6 @@
         ],
         "assignee": null,
         "due": "2026-10-10",
-        "parent": "BL-9",
         "blocked-by": [
           "BL-11",
           "BL-4"
@@ -28,8 +27,7 @@
         "labels": [
           "ui",
           "build"
-        ],
-        "parent": "BL-11"
+        ]
       },
       {
         "id": "BL-11",

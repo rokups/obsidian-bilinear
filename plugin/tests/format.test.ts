@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { cleanTitle, formatLine, idNumber, linkId, linkTarget, validDate } from "../src/format/ids";
 import { Index, newIndexText } from "../src/format/index-note";
 import { addComment, newNoteText, parseComments } from "../src/format/issue-note";
+import { recordFromDoc, recordFromFrontmatter } from "../src/format/record";
 import { Doc, FrontmatterError, formatScalar, parseFlowList, parseScalar } from "../src/format/yaml";
 
 describe("scalars", () => {
@@ -74,7 +75,7 @@ tags: [a, b]
 empty:
 # a comment
 
-parent: "[[BL-9]]"
+see: "[[BL-9]]"
 ---
 Body
 `;
@@ -87,8 +88,8 @@ describe("frontmatter document", () => {
     expect(d.get("tags")).toEqual(["a", "b"]);
     expect(d.get("empty")).toBeNull();
     expect(d.getList("empty")).toEqual([]);
-    expect(d.getStr("parent")).toBe("[[BL-9]]");
-    expect(d.keys()).toEqual(["title", "status", "labels", "tags", "empty", "parent"]);
+    expect(d.getStr("see")).toBe("[[BL-9]]");
+    expect(d.keys()).toEqual(["title", "status", "labels", "tags", "empty", "see"]);
     expect(d.body).toBe("Body\n");
     expect(d.problems()).toEqual([]);
     expect(d.text()).toBe(NOTE);
@@ -142,7 +143,7 @@ describe("frontmatter document", () => {
     d.set("labels", null);
     d.set("assignee", "rk");
     expect(d.text()).not.toContain("build");
-    expect(d.text().endsWith('parent: "[[BL-9]]"\nassignee: rk\n---\nBody\n')).toBe(true);
+    expect(d.text().endsWith('see: "[[BL-9]]"\nassignee: rk\n---\nBody\n')).toBe(true);
   });
 
   it("keeps CRLF, a missing final newline and a BOM", () => {
@@ -217,9 +218,30 @@ describe("index note", () => {
 
 describe("issue note", () => {
   it("writes properties in the documented order and omits empty ones", () => {
-    expect(newNoteText({ created: "2026-10-01", title: "T", labels: [], assignee: null, status: "todo", parent: "[[BL-1]]" })).toBe(
-      '---\ntitle: T\nstatus: todo\nparent: "[[BL-1]]"\ncreated: 2026-10-01\n---\n',
+    expect(newNoteText({ created: "2026-10-01", title: "T", labels: [], assignee: null, status: "todo", priority: "high" })).toBe(
+      '---\ntitle: T\nstatus: todo\npriority: high\ncreated: 2026-10-01\n---\n',
     );
+  });
+
+  it("writes related-to after blocked-by", () => {
+    expect(newNoteText({ created: "2026-10-01", title: "T", "related-to": ["[[BL-2]]"], "blocked-by": ["[[BL-1]]"] })).toBe(
+      '---\ntitle: T\nblocked-by: ["[[BL-1]]"]\nrelated-to: ["[[BL-2]]"]\ncreated: 2026-10-01\n---\n',
+    );
+  });
+
+  it("reads related-to like blocked-by", () => {
+    const item = { id: "BL-1", title: "T", archived: false } as Parameters<typeof recordFromDoc>[0];
+    const quoted = recordFromDoc(item, new Doc('---\nblocked-by: ["[[BL-2]]"]\nrelated-to: ["[[BL-3]]", BL-4, "[[Some note]]", "[[x/BL-5|five]]"]\n---\n'), "BL-1.md");
+    expect(quoted.relatedTo).toEqual(["BL-3", "BL-4", "BL-5"]);
+    expect(quoted.blockedBy).toEqual(["BL-2"]);
+    const list = recordFromDoc(item, new Doc("---\nrelated-to:\n  - BL-2\n  - \"[[BL-3]]\"\n---\n"), "BL-1.md");
+    expect(list.relatedTo).toEqual(["BL-2", "BL-3"]);
+    expect(recordFromDoc(item, new Doc("---\ntitle: T\n---\n"), "BL-1.md").relatedTo).toEqual([]);
+    expect(recordFromDoc(item, null, null).relatedTo).toEqual([]);
+    // Obsidian's cache turns an unquoted [[BL-2]] into a nested list.
+    expect(recordFromFrontmatter(item, { "related-to": [[["BL-2"]], "BL-3", "[[BL-4]]", ""] }, "BL-1.md").relatedTo).toEqual(["BL-2", "BL-3", "BL-4"]);
+    expect(recordFromFrontmatter(item, { "related-to": "[[BL-2]]" }, "BL-1.md").relatedTo).toEqual(["BL-2"]);
+    expect(recordFromFrontmatter(item, {}, "BL-1.md").relatedTo).toEqual([]);
   });
 
   it("appends and reads comments", () => {

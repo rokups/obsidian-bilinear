@@ -12,27 +12,35 @@ const c = inject(CTRL)!;
 const progress = computed(() => c.progress.value.get(props.issue.id));
 const closed = computed(() => props.issue.status !== null && c.config.value.closedStates.includes(props.issue.status));
 const overdue = computed(() => !!props.issue.due && !closed.value && props.issue.due < todayIso());
-/** Blockers that are still open. */
-const blockers = computed(() =>
-  props.issue.blockedBy.filter((id) => {
-    const b = c.byId.value.get(id);
-    return !b || b.status === null || !c.config.value.closedStates.includes(b.status);
-  }),
-);
-const progressTitle = computed(() => {
-  const p = progress.value;
-  if (!p) return "";
-  const lines = p.issues.map((id) => {
+const relations = computed(() => c.relations.value.get(props.issue.id));
+/** One line per issue, as `ID  status  title`. */
+const lines = (ids: string[]) =>
+  ids.map((id) => {
     const i = c.byId.value.get(id);
     return `${id}  ${i?.status ?? "note missing"}  ${i?.title ?? ""}`.trimEnd();
   });
-  return `${p.done} of ${p.total} linked issues closed\n${lines.join("\n")}`;
+/** Blockers that are still open; a missing note counts as open. */
+const openBlockers = computed(() =>
+  (relations.value?.blockedBy ?? []).filter((id) => {
+    const status = c.byId.value.get(id)?.status ?? null;
+    return status === null || !c.config.value.closedStates.includes(status);
+  }),
+);
+const blockedTitle = computed(() => `Blocked by\n${lines(openBlockers.value).join("\n")}`);
+const blocksTitle = computed(() => `Blocks\n${lines(relations.value?.blocks ?? []).join("\n")}`);
+const relatedTitle = computed(() => `Related to\n${lines(relations.value?.related ?? []).join("\n")}`);
+const progressTitle = computed(() => {
+  const p = progress.value;
+  if (!p) return "";
+  return `${p.done} of ${p.total} blockers closed\n${lines(p.issues).join("\n")}`;
 });
 const initials = computed(() => (props.issue.assignee ?? "").trim().slice(0, 2).toUpperCase());
 </script>
 
 <template>
-  <span v-if="blockers.length" class="bl-chip is-blocked" :title="`Blocked by ${blockers.join(', ')}`">blocked</span>
+  <span v-if="relations?.blocked" class="bl-chip is-blocked" :title="blockedTitle">blocked</span>
+  <span v-if="relations?.blocks.length" class="bl-chip is-relation" :title="blocksTitle">blocks {{ relations.blocks.length }}</span>
+  <span v-if="relations?.related.length" class="bl-chip is-relation" :title="relatedTitle">related {{ relations.related.length }}</span>
   <span v-if="progress" class="bl-chip bl-progress" :class="{ 'is-complete': progress.done === progress.total }" :title="progressTitle">
     <svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true">
       <circle cx="7" cy="7" r="5" class="bl-ring" />
@@ -43,7 +51,6 @@ const initials = computed(() => (props.issue.assignee ?? "").trim().slice(0, 2).
     </svg>
     {{ progress.done }}/{{ progress.total }}
   </span>
-  <span v-if="issue.parent" class="bl-chip is-parent" :title="`Sub-issue of ${issue.parent}`">{{ issue.parent }}</span>
   <LabelChip
     v-for="label in issue.labels" :key="label" :label="label" :colors="c.config.value.labelColors"
     title="Right-click to change the colour" @contextmenu.prevent.stop="c.labelMenu($event, label)"

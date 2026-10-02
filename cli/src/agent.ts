@@ -36,7 +36,8 @@ after you finish. This is required, and it does not wait to be asked for.
    title that says what is to be done and a description of what is known:
    what was asked, the constraints, how to tell that it is done. Do not start work
    that has no issue. One issue is one piece of work that can be finished on
-   its own; larger work is a parent issue with sub-issues (\`--parent <ID>\`).
+   its own; larger work is split into issues of their own, which the issue
+   for the whole is blocked by (\`--blocked-by <ID>\`).
 2. **On choosing what to work on**, move the issue out of the backlog, before
    anything is started. As soon as you intend to work on an issue, set it to
    the state for work that is up next: the one between the state new issues
@@ -56,9 +57,9 @@ after you finish. This is required, and it does not wait to be asked for.
    another is done, say so with \`set <ID> blocked-by+=<other ID>\`; if it
    waits for the user, comment with what you need from them and assign the
    issue to them (\`set <ID> assignee=<the user's name>\`), and take it back
-   once they have answered. Work that turns up along
-   the way and is not part of this issue gets an issue of its own, which the
-   comment names as \`[[ID]]\`.
+   once they have answered. Work that turns up along the way and is not
+   part of this issue gets an issue of its own, related to this one
+   (\`new "Title" --related-to <ID>\`), which the comment names as \`[[ID]]\`.
 5. **When the work waits for review**, move the issue to the tracker's review
    state if it has one.
 6. **On finishing**, comment what was done and how it was checked, then set
@@ -101,35 +102,34 @@ issue and whenever you learn of one, and keep it true as the work changes. A
 relation that is only in your head, or only in the prose of a comment where
 a property is meant for it, is lost to whoever reads the tracker next.
 
-- **Part of larger work**: a sub-issue names its parent, with
-  \`new "Title" --parent <ID>\` or \`set <ID> parent=<ID>\`. Split work that
-  is too large to finish in one go into sub-issues of one parent, rather
-  than into issues that do not know of each other. A parent is closed as
-  done only when all of its sub-issues are closed.
 - **Has to wait for another issue**: \`set <ID> blocked-by+=<other ID>\`, or
   \`--blocked-by <ID>\` with \`new\`. When issues have to be done in an order,
   say so this way, each one blocked by the one before it. Do not start an
   issue while one that blocks it is open: work on the blocker first.
   Remove the entry (\`blocked-by-=<other ID>\`) if it turns out not to hold;
   one whose blocker is closed may stay.
-- **Made up of other issues that are not its sub-issues**: link them as
-  \`[[ID]]\` in the description. An issue's progress counts its sub-issues
-  and the issues its description links to, so link there only what has to
-  be done for this issue to be done.
+- **Made up of other issues**: split work that is too large to finish in
+  one go into issues of their own, and make the issue for the whole
+  \`blocked-by\` each of them. Its progress counts the issues it is blocked
+  by (closed out of total), so it shows how many are done. \`[[ID]]\` in a
+  description is only a mention and does not count.
 - **Related in another way** (a follow-up, the same cause, a duplicate, one
-  that replaces another): comment on both issues, naming the other as
-  \`[[ID]]\` and saying what the relation is. A duplicate is then closed in
-  the state that means canceled, and what it knew is carried over to the
-  issue that stays.
+  that replaces another): \`set <ID> related-to+=<other ID>\`, or
+  \`--related-to <ID>\` with \`new\`. Setting it on one of the two is
+  enough: the relation shows on both, and \`related-to-=<other ID>\` on
+  either ends it. Say in a comment what the relation is. A duplicate is
+  then closed in the state that means canceled, and what it knew is carried
+  over to the issue that stays.
 
-Before creating an issue, look through the open ones (\`list\`) for the issue
-it belongs under, the ones it has to wait for and the ones that have to wait
-for it, and set these when you create it. Before choosing what to work on,
-read the relations of the issue: \`show <ID>\` names its parent and its
-blockers, and lists its sub-issues and linked issues with their states;
-\`show\` the blockers for theirs. When a relation changes, because work is
-split, moved under another parent or no longer needed, change it in the
-tracker at once.
+Before creating an issue, look through the open ones (\`list\`) for the ones
+it has to wait for and the ones that have to wait for it, and set these when
+you create it. Before choosing what to work on, read the relations of the
+issue: \`show <ID>\` lists the issues it is blocked by, the ones it blocks
+and the ones it is related to, with their states, and \`list --blocked\`
+lists the issues that still wait for another. The CLI refuses a
+\`blocked-by\` that would make issues wait for each other in a circle. When
+a relation changes, because work is split or no longer needed, change it in
+the tracker at once.
 
 ## Running the CLI
 
@@ -146,9 +146,9 @@ command's exact arguments.
 
 ## Commands
 
-- \`list [--status S] [--label L] [--assignee A] [--priority P] [--archived | --all] [--json]\`: issues in the tracker's order. Filters take comma-separated values
-- \`show <ID> [--json]\`: one issue: properties, linked issues, body and comments
-- \`new "Title" [--description TEXT] [--status S] [--priority P] [--label L] [--assignee A] [--due YYYY-MM-DD] [--parent ID] [--blocked-by ID] [--top]\`: create an issue; prints its ID. The description is Markdown and may have several lines
+- \`list [--status S] [--label L] [--assignee A] [--priority P] [--blocked] [--blocked-by ID] [--related-to ID] [--archived | --all] [--json]\`: issues in the tracker's order. Filters take comma-separated values
+- \`show <ID> [--json]\`: one issue: properties, the issues it is blocked by, blocks and is related to, body and comments
+- \`new "Title" [--description TEXT] [--status S] [--priority P] [--label L] [--assignee A] [--due YYYY-MM-DD] [--blocked-by ID] [--related-to ID] [--top]\`: create an issue; prints its ID. The description is Markdown and may have several lines
 - \`set <ID> key=value ...\`: change properties. \`key=\` removes one; \`labels+=x\`, \`labels-=x\` edit a list
 - \`comment <ID> "text" [--author NAME]\`: append a dated comment, signed with NAME
 - \`move <ID> --top | --bottom | --before <ID> | --after <ID>\`: reorder; the order is the priority order the user sees
@@ -159,8 +159,8 @@ command's exact arguments.
 
 Properties: \`title\`, \`status\` (one of the tracker's states), \`priority\`
 (\`none\`, \`low\`, \`medium\`, \`high\`, \`urgent\`), \`labels\`, \`assignee\`, \`due\`,
-\`parent\` (an issue ID; makes a sub-issue), \`blocked-by\` (issue IDs). Any
-other key is kept as a custom property.
+\`blocked-by\` and \`related-to\` (issue IDs). Any other key is kept as a
+custom property.
 
 \`\`\`sh
 bilinear list --status todo,in-progress --json
@@ -184,6 +184,12 @@ bilinear set BL-12 status=done
 - A tracker may have a triage state (\`state\` marks it): issues in it wait for
   the user to accept or reject them. Do not work on them or move them out of
   it. New issues do not start there unless \`--status\` says so.
+- The triage state is only for decisions of high importance about the
+  architecture: ones that shape how the system is built, are costly to undo,
+  and where it is not plain which way is best. Anything of lower importance,
+  and anything whose best course is obvious, is not put there: create it as
+  an ordinary issue in the backlog, with the course you would take in its
+  description. Do not use triage to ask leave for what you can decide.
 - Before you put an issue in the triage state, search the tracker for the
   issues that have to do with it: \`list --all\` shows every issue, the
   closed and the archived ones too, and the notes in the tracker's folder
@@ -230,17 +236,24 @@ export function trackerPath(tracker: string, root: string): string {
   return parts.join("/");
 }
 
-/** What `--followups` adds: nothing a task skips goes unrecorded, and doubtful follow-ups wait for the user. */
+/** What `--followups` adds: nothing a task skips goes unrecorded, and follow-ups that need a decision of high importance about the architecture wait for the user. */
 function followups(triage: string): string {
   return `
 Finish no task with gaps left unrecorded. Whatever the task asked for or
 needed that you skipped, put off, stubbed or did only in part becomes a
-follow-up issue before you close the task, and comments on the task and on
-the follow-up name each other as \`[[ID]]\`. A follow-up that is plainly wanted is created like any issue. One
-you are not sure is wanted is created in the \`${triage}\` state
-(\`new "Title" --status ${triage}\`), with the reason for the doubt in its
-description: it waits there for the user to accept it, by moving it to
-another state, or to reject it. Do not work on an issue that is in \`${triage}\`.
+follow-up issue before you close the task, related to the task
+(\`--related-to <the task's ID>\`), and a comment on the task names it as
+\`[[ID]]\`.
+
+A follow-up is created like any issue, in the backlog, with the course you
+would take in its description: that is so for everything of lower
+importance, and for everything whose best course is obvious. Only a
+follow-up that needs a decision of high importance about the architecture,
+one that shapes how the system is built, is costly to undo, and where it is
+not plain which way is best, is created in the \`${triage}\` state
+(\`new "Title" --status ${triage}\`): it waits there for the user to accept
+it, by moving it to another state, or to reject it. Do not work on an issue
+that is in \`${triage}\`.
 
 Before you create an issue in \`${triage}\`, search the tracker for the issues
 that have to do with it, the closed and the archived ones too, and create it

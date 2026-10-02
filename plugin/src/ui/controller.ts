@@ -4,8 +4,8 @@ import { computed, reactive, ref, toRaw, watch, type InjectionKey, type Ref, typ
 import { COLOR_NAMES, PRIORITIES, todayIso } from "../format/ids";
 import type { IssueRecord } from "../format/record";
 import type { Tracker } from "../ops/io";
-import { archiveClosed, archiveIssues, commentIssue, deleteIssue, moveIssue, recreateNote, setLabel, setProps, unarchiveIssues, type PropEdits } from "../ops/issues";
-import { applyFilter, groupIssues, groupProperty, linkedProgress, sortIssues, type Filter, type GroupKey, type ViewSpec } from "../store/query";
+import { archiveClosed, archiveIssues, commentIssue, deleteIssue, moveIssue, recreateNote, setLabel, setProps, unarchiveIssues, unrelate, type PropEdits } from "../ops/issues";
+import { applyFilter, groupIssues, groupProperty, issueRelations, linkedProgress, sortIssues, type Filter, type GroupKey, type ViewSpec } from "../store/query";
 import { labelColorName } from "../store/labels";
 import type { Snapshot } from "../store/snapshot";
 import type { SavedView } from "../store/views";
@@ -19,7 +19,7 @@ export interface StoreLike {
   saveViews(views: SavedView[]): Promise<void>;
 }
 
-export type PickerKind = "status" | "priority" | "labels" | "assignee";
+export type PickerKind = "status" | "priority" | "labels" | "assignee" | "blocked-by" | "related-to";
 
 export interface PickerState {
   kind: PickerKind;
@@ -73,6 +73,7 @@ export function createController(store: StoreLike, host: Host, initial: ViewSpec
     groups.value.flatMap((g) => (spec.layout === "list" && collapsed.has(g.key) ? [] : g.issues.map((i) => ({ id: i.id, group: g.key })))),
   );
   const progress = computed(() => linkedProgress(all.value, config.value.closedStates));
+  const relations = computed(() => issueRelations(all.value, config.value.closedStates));
   const canReorder = computed(() => spec.sortBy === "manual" && !showArchived.value);
   const assignees = computed(() => [...new Set(all.value.map((i) => i.assignee).filter((a): a is string => !!a))].sort((a, b) => a.localeCompare(b)));
   const labels = computed(() => [...new Set([...config.value.labels, ...all.value.flatMap((i) => i.labels)])]);
@@ -197,9 +198,32 @@ export function createController(store: StoreLike, host: Host, initial: ViewSpec
     return ids.every((id) => byId.value.get(id)?.labels.includes(label));
   }
 
+  /** Whether every picker target has the issue as a blocker, or as a related issue on either note. */
+  function allHaveRelation(kind: "blocked-by" | "related-to", ids: string[], other: string): boolean {
+    return ids.every((id) =>
+      kind === "blocked-by" ? byId.value.get(id)?.blockedBy.includes(other) : relations.value.get(id)?.related.includes(other),
+    );
+  }
+
   function pick(value: string | null): void {
     const p = picker.value;
     if (!p) return;
+    if (p.kind === "blocked-by" || p.kind === "related-to") {
+      if (!value) return;
+      const kind = p.kind;
+      const remove = allHaveRelation(kind, p.ids, value);
+      void run(async (t) => {
+        for (const id of p.ids) {
+          const stored = byId.value.get(id)?.[kind === "blocked-by" ? "blockedBy" : "relatedTo"] ?? [];
+          if (kind === "blocked-by") {
+            if (remove) await setProps(t, id, { "blocked-by": stored.filter((b) => b !== value) });
+            else if (!stored.includes(value)) await setProps(t, id, { "blocked-by": [...stored, value] });
+          } else if (remove) await unrelate(t, id, value);
+          else if (!relations.value.get(id)?.related.includes(value)) await setProps(t, id, { "related-to": [...stored, value] });
+        }
+      });
+      return;
+    }
     if (p.kind === "labels") {
       if (!value) return;
       const remove = allHaveLabel(p.ids, value);
@@ -381,10 +405,10 @@ export function createController(store: StoreLike, host: Host, initial: ViewSpec
 
   return {
     store, host, spec, showArchived, cursor, selected, collapsed, picker, dragging, dropHint, activeView, busy,
-    snapshot, config, all, byId, visible, groupBy, groups, order, progress, canReorder, assignees, labels,
+    snapshot, config, all, byId, visible, groupBy, groups, order, progress, relations, canReorder, assignees, labels,
     priorities: PRIORITIES as readonly string[],
     isCursor, setCursor, moveCursor, toggleSelect, selectRange, clearSelection, targets, cursorIssue, reveal,
-    edit, openPicker, closePicker, allHaveLabel, pick, labelMenu,
+    edit, openPicker, closePicker, allHaveLabel, allHaveRelation, pick, labelMenu,
     archive, unarchive, archiveAllClosed, remove, recreate, comment, nudge,
     dragStart, dragEnd, drop,
     toggleFilter, clearFilter, applySpec, applyView, saveView, deleteView,

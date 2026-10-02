@@ -1,0 +1,80 @@
+{
+  "op": "list",
+  "args": {},
+  "expect": {
+    "issues": [
+      {
+        "id": "BL-1",
+        "related": [
+          "BL-3"
+        ],
+        "blocks": [],
+        "blocked": true,
+        "blocked-by": [
+          "BL-2"
+        ]
+      },
+      {
+        "id": "BL-2",
+        "related": [],
+        "blocks": [
+          "BL-1"
+        ],
+        "blocked": false
+      },
+      {
+        "id": "BL-3",
+        "related": [
+          "BL-1",
+          "BL-5"
+        ],
+        "blocks": [],
+        "blocked": false
+      },
+      {
+        "id": "BL-4",
+        "related": [],
+        "blocks": [],
+        "blocked": true,
+        "blocked-by": [
+          "BL-6",
+          "BL-99"
+        ]
+      },
+      {
+        "id": "BL-5",
+        "related": [
+          "BL-3"
+        ],
+        "blocks": [],
+        "blocked": false
+      },
+      {
+        "id": "BL-6",
+        "related": [],
+        "blocks": [
+          "BL-4"
+        ],
+        "blocked": false,
+        "missing": true
+      },
+      {
+        "id": "BL-7",
+        "related": [],
+        "blocks": [],
+        "blocked": false,
+        "blocked-by": [
+          "BL-8"
+        ]
+      },
+      {
+        "id": "BL-8",
+        "related": [],
+        "blocks": [
+          "BL-7"
+        ],
+        "blocked": false
+      }
+    ]
+  }
+}

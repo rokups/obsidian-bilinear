@@ -3,7 +3,7 @@ import { chomp, hasEol, isBlank, splitLines } from "./lines";
 import { findSections } from "./markdown";
 import { Doc, type Value } from "./yaml";
 
-export const NOTE_KEY_ORDER = ["title", "status", "priority", "labels", "assignee", "due", "parent", "blocked-by", "created"];
+export const NOTE_KEY_ORDER = ["title", "status", "priority", "labels", "assignee", "due", "blocked-by", "related-to", "created"];
 
 /** A new note: the properties in the documented order, then the description, if there is one, as the body. */
 export function newNoteText(props: Record<string, Value | undefined>, description = ""): string {

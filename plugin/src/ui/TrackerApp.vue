@@ -77,6 +77,8 @@ function onMenu(e: MouseEvent, issue: IssueRecord): void {
     entries.push({ title: "Set priority…", icon: "signal", action: () => c.openPicker("priority", ids) });
     entries.push({ title: "Set labels…", icon: "tag", action: () => c.openPicker("labels", ids) });
     entries.push({ title: "Set assignee…", icon: "user", action: () => c.openPicker("assignee", ids) });
+    entries.push({ title: "Set blockers…", icon: "octagon-x", action: () => c.openPicker("blocked-by", ids) });
+    entries.push({ title: "Set related…", icon: "link", action: () => c.openPicker("related-to", ids) });
     entries.push({ separator: true });
     if (issue.archived) entries.push({ title: `Unarchive${many}`, icon: "archive-restore", action: () => void c.unarchive(ids) });
     else entries.push({ title: `Archive${many}`, icon: "archive", action: () => void c.archive(ids) });

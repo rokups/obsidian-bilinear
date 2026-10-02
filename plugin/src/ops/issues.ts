@@ -2,12 +2,13 @@
 // last, so an interrupted operation leaves at worst a stray note. Each holds
 // the tracker's lock from start to finish (section 3.2); none calls another.
 
-import { ARCHIVE, ARCHIVE_DIR, COLOR_NAMES, ID_RE, ISSUES, ISSUES_DIR, LOCATIONS, PREFIX_RE, PRIORITIES, STATE_SHAPES, cleanTitle, idNumber, linkId, makeLink, normalizeColor, normalizeIcon, validDate } from "../format/ids";
+import { ARCHIVE, ARCHIVE_DIR, COLOR_NAMES, ID_RE, ISSUES, ISSUES_DIR, LINK_LIST_KEYS, LOCATIONS, PREFIX_RE, PRIORITIES, STATE_SHAPES, cleanTitle, idNumber, linkId, makeLink, normalizeColor, normalizeIcon, validDate } from "../format/ids";
 import { newIndexText, type Index, type Where } from "../format/index-note";
 import { addComment, newNoteText } from "../format/issue-note";
 import { Doc, type Value } from "../format/yaml";
+import { reaches } from "../store/query";
 import { OpError, joinPath, type Tracker, type TrackerIO } from "./io";
-import { folderOf, found, indexNotes, issueRecord, locked, moveNote, noteIds, notePath, pathIn, readIndex, requireItem, resolveNote, updateIndex } from "./tracker";
+import { allRecords, folderOf, found, indexNotes, issueRecord, locked, moveNote, noteIds, notePath, pathIn, readIndex, requireItem, resolveNote, updateIndex } from "./tracker";
 
 export interface NewIssue {
   title: string;
@@ -16,16 +17,16 @@ export interface NewIssue {
   labels?: string[];
   assignee?: string;
   due?: string;
-  /** Parent issue ID. */
-  parent?: string;
   /** IDs of the issues this one waits for. */
   blockedBy?: string[];
+  /** IDs of the issues this one is related to. */
+  relatedTo?: string[];
   /** The body of the note, as Markdown. */
   description?: string;
   top?: boolean;
 }
 
-/** Property edits. null or [] removes a key; `parent` and `blocked-by` take IDs. */
+/** Property edits. null or [] removes a key; `blocked-by` and `related-to` take IDs, and a string for a list is a list of one. */
 export type PropEdits = Record<string, Value>;
 
 /** Check values about to be written. Labels the tracker does not list only warn. */
@@ -48,9 +49,10 @@ function checkProps(idx: Index, props: PropEdits, selfId: string | null, warn?: 
   for (const label of Array.isArray(labels) ? labels : typeof labels === "string" ? [labels] : []) {
     if (!idx.labels.includes(label)) warn?.(`warning: label '${label}' is not in the tracker's labels`);
   }
-  const blocked = props["blocked-by"];
-  const links = Array.isArray(blocked) ? [...blocked] : typeof blocked === "string" ? [blocked] : [];
-  if (str("parent") !== null) links.push(str("parent")!);
+  const links = LINK_LIST_KEYS.flatMap((key) => {
+    const value = props[key];
+    return Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+  });
   for (const link of links) {
     const target = linkId(link);
     if (target === null) throw new OpError(`'${link}' is not an issue ID`);
@@ -85,13 +87,13 @@ export function createIssue(t: Tracker, args: NewIssue, today: string): Promise<
       labels: args.labels ?? [],
       assignee: args.assignee || null,
       due: args.due || null,
-      parent: args.parent || null,
       "blocked-by": args.blockedBy ?? [],
+      "related-to": args.relatedTo ?? [],
       created: today,
     };
     checkProps(idx, props, null, t.warn);
-    if (props["parent"]) props["parent"] = makeLink(linkId(props["parent"] as string)!);
-    props["blocked-by"] = (args.blockedBy ?? []).map((v) => makeLink(linkId(v)!));
+    for (const key of LINK_LIST_KEYS) props[key] = (props[key] as string[]).map((v) => makeLink(linkId(v)!));
+    // No cycle check: nothing can link to an issue that does not exist yet.
     const text = newNoteText(props, args.description);
 
     const prefix = idx.prefix!;
@@ -121,9 +123,29 @@ export function createIssue(t: Tracker, args: NewIssue, today: string): Promise<
   });
 }
 
+/** Drop `other` from the `related-to` of `id`'s note, if the note names it. A missing note is skipped. */
+async function dropRelated(t: Tracker, idx: Index, id: string, other: string): Promise<void> {
+  const item = idx.find(id);
+  if (!item) return;
+  const path = await resolveNote(t, id, item.archived);
+  if (path === null) return;
+  const names = (text: string) => new Doc(text).getList("related-to").some((v) => linkId(v) === other);
+  const before = await t.io.read(path);
+  if (before === null || !names(before)) return;
+  await t.io.process(path, (text) => {
+    const doc = new Doc(text);
+    const keep = doc.getList("related-to").filter((v) => linkId(v) !== other);
+    if (keep.length === doc.getList("related-to").length) return text;
+    doc.set("related-to", keep.length ? keep : null);
+    return doc.text();
+  });
+}
+
 /**
  * Change properties of an issue. The edits may be given as a function of the
- * note as it is, for edits that depend on it (adding to a list).
+ * note as it is, for edits that depend on it (adding to a list). `blocked-by` may
+ * not be changed to close a cycle. Removing an issue from
+ * `related-to` removes this one from its `related-to` too.
  */
 export function setProps(t: Tracker, id: string, edits: PropEdits | ((doc: Doc) => PropEdits)): Promise<void> {
   return locked(t, async () => {
@@ -131,16 +153,21 @@ export function setProps(t: Tracker, id: string, edits: PropEdits | ((doc: Doc) 
     const item = requireItem(idx, id);
     const path = await resolveNote(t, id, item.archived);
     if (path === null) throw new OpError(`${id}: note missing`);
-    let title: string | null = null;
-    await t.io.process(path, (text) => {
+    const first = await t.io.read(path);
+    if (first === null) throw new OpError(`${id}: note missing`);
+
+    // What the edits make of a note's text; run on the text as read, to check
+    // before anything is written, and on the text as it is when writing.
+    const plan = (text: string, warn?: (message: string) => void) => {
       const doc = new Doc(text);
       const props: PropEdits = { ...(typeof edits === "function" ? edits(doc) : edits) };
       if (typeof props["title"] === "string") props["title"] = cleanTitle(props["title"]);
       for (const [key, value] of Object.entries(props)) {
         if (value === "" && key !== "title" && key !== "status") props[key] = null;
       }
-      const blocked = props["blocked-by"];
-      if (typeof blocked === "string") props["blocked-by"] = [blocked];
+      for (const key of LINK_LIST_KEYS) {
+        if (typeof props[key] === "string") props[key] = [props[key] as string];
+      }
       // Of the lists, only what this edit adds is checked: a link to an
       // issue that has since been deleted must not stand in the way.
       const added = (key: string, same: (a: string, b: string) => boolean): PropEdits => {
@@ -150,19 +177,53 @@ export function setProps(t: Tracker, id: string, edits: PropEdits | ((doc: Doc) 
         return { [key]: value.filter((v) => !had.some((h) => same(h, v))) };
       };
       const sameLink = (a: string, b: string) => linkId(a) !== null && linkId(a) === linkId(b);
-      checkProps(idx, { ...props, ...added("labels", (a, b) => a === b), ...added("blocked-by", sameLink) }, id, t.warn);
-      if (typeof props["parent"] === "string") props["parent"] = makeLink(linkId(props["parent"])!);
-      if (Array.isArray(props["blocked-by"])) props["blocked-by"] = props["blocked-by"].map((v) => makeLink(linkId(v)!));
+      const addedLinks = Object.assign({}, ...LINK_LIST_KEYS.map((key) => added(key, sameLink)));
+      checkProps(idx, { ...props, ...added("labels", (a, b) => a === b), ...addedLinks }, id, warn);
+      const newBlockers: string[] = ((addedLinks["blocked-by"] as string[] | undefined) ?? []).map((v) => linkId(v)!);
+      for (const key of LINK_LIST_KEYS) {
+        if (Array.isArray(props[key])) props[key] = props[key].map((v) => makeLink(linkId(v)!));
+      }
+      const kept = ((props["related-to"] as string[] | null | undefined) ?? []).map(linkId);
+      const unrelated = "related-to" in props
+        ? doc.getList("related-to").map(linkId).filter((v): v is string => v !== null && !kept.includes(v))
+        : [];
+      return { doc, props, newBlockers, unrelated };
+    };
+
+    const planned = plan(first, t.warn);
+    if (planned.newBlockers.length) {
+      const { records } = await allRecords(t, idx);
+      for (const b of planned.newBlockers) {
+        if (reaches(records, b, id)) throw new OpError(`${id}: would block itself through ${b}`);
+      }
+    }
+
+    let title: string | null = null;
+    let unrelated: string[] = [];
+    await t.io.process(path, (text) => {
+      const { doc, props, unrelated: gone } = plan(text);
       for (const [key, value] of Object.entries(props)) {
         doc.set(key, Array.isArray(value) && value.length === 0 ? null : value);
       }
       title = typeof props["title"] === "string" ? props["title"] : null;
+      unrelated = gone;
       return doc.text();
     });
+    for (const other of unrelated) await dropRelated(t, idx, other, id);
     if (title !== null) {
       // Retitle: the note first, then the index line.
       await updateIndex(t, () => {}, { known: new Map([[id, title]]) });
     }
+  });
+}
+
+/** Make two issues no longer related: each note's `related-to` stops naming the other. The other may be an issue that is gone. */
+export function unrelate(t: Tracker, id: string, other: string): Promise<void> {
+  return locked(t, async () => {
+    const idx = await readIndex(t);
+    requireItem(idx, id);
+    await dropRelated(t, idx, id, other);
+    await dropRelated(t, idx, other, id);
   });
 }
 
@@ -219,12 +280,32 @@ export function archiveClosed(t: Tracker): Promise<string[]> {
   });
 }
 
-/** Trash the note (wherever it is) and remove the index line. */
+/**
+ * Delete an issue: first clear `blocked-by` and `related-to`
+ * entries naming it from the other notes (those that do not are not
+ * touched; `[[ID]]` mentions in descriptions stay), then trash the note
+ * (wherever it is) and remove the index line.
+ */
 export function deleteIssue(t: Tracker, id: string): Promise<void> {
   return locked(t, async () => {
     const idx = await readIndex(t);
     requireItem(idx, id);
+    const { records } = await allRecords(t, idx);
+    // The note goes first: if this stops halfway, lint reports what is left.
     for (const where of await found(t, id)) await t.io.trash(pathIn(t, id, where));
+    for (const r of records) {
+      if (r.id === id || r.path === null) continue;
+      if (!r.blockedBy.includes(id) && !r.relatedTo.includes(id)) continue;
+      await t.io.process(r.path, (text) => {
+        const doc = new Doc(text);
+        for (const key of LINK_LIST_KEYS) {
+          const list = doc.getList(key);
+          const rest = list.filter((v) => linkId(v) !== id);
+          if (rest.length !== list.length) doc.set(key, rest.length ? rest : null);
+        }
+        return doc.text();
+      });
+    }
     await updateIndex(t, (i) => i.remove(id));
   });
 }

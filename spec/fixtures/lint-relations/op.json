@@ -1,0 +1,15 @@
+{
+  "op": "lint",
+  "args": {
+    "fix": true
+  },
+  "expect": {
+    "problems": [
+      "blocked-by-cycle:BL-11",
+      "blocked-by-cycle:BL-13",
+      "blocked-by-cycle:BL-9",
+      "related-to-invalid:BL-4",
+      "related-to-unknown:BL-13"
+    ]
+  }
+}

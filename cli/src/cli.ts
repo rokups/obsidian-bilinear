@@ -9,16 +9,15 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
-import { COLOR_NAMES, LIST_KEYS, STATE_SHAPES, linkId, makeLink, todayIso } from "../../plugin/src/format/ids";
-import type { Index } from "../../plugin/src/format/index-note";
+import { COLOR_NAMES, LINK_LIST_KEYS, LIST_KEYS, STATE_SHAPES, linkId, makeLink, todayIso } from "../../plugin/src/format/ids";
 import type { IssueRecord } from "../../plugin/src/format/record";
 import { Doc, type Value } from "../../plugin/src/format/yaml";
 import { OpError, type Tracker } from "../../plugin/src/ops/io";
-import { adoptIssue, archiveClosed, archiveIssues, commentIssue, createIssue, createTracker, deleteIssue, moveIssue, setLabel, setProps, setStateStyle, setTriageState, unarchiveIssues, type PropEdits } from "../../plugin/src/ops/issues";
+import { adoptIssue, archiveClosed, archiveIssues, commentIssue, createIssue, createTracker, deleteIssue, moveIssue, setLabel, setProps, setStateStyle, setTriageState, unarchiveIssues, unrelate, type PropEdits } from "../../plugin/src/ops/issues";
 import { lint } from "../../plugin/src/ops/lint";
 import { LOCK_TIMES, LockTimeout } from "../../plugin/src/ops/lock-file";
-import { indexNotes, issueRecord, locked, notePath, readIndex, requireItem, resolveNote } from "../../plugin/src/ops/tracker";
-import { linkedProgress, type Progress } from "../../plugin/src/store/query";
+import { allRecords, indexNotes, locked, notePath, readIndex, requireItem, resolveNote } from "../../plugin/src/ops/tracker";
+import type { Progress, Relations } from "../../plugin/src/store/query";
 import { version } from "../package.json";
 import { SKILL, SetupError, exclude, excludePatterns, instructions, isTracked, plan, realPath, repositoryRoot, trackerPath, withInstructions, writeFile } from "./agent";
 import { ConflictError, NodeIO, slashed } from "./node-io";
@@ -83,7 +82,7 @@ function csv(values: string[]): string[] {
 }
 
 /** A record with the key names and order of the CLI's JSON. */
-function toJson(r: IssueRecord, progress: Progress | null): Record<string, unknown> {
+function toJson(r: IssueRecord, progress: Progress | null, rel: Relations | undefined): Record<string, unknown> {
   return {
     id: r.id,
     title: r.title,
@@ -92,21 +91,16 @@ function toJson(r: IssueRecord, progress: Progress | null): Record<string, unkno
     labels: r.labels,
     assignee: r.assignee,
     due: r.due,
-    parent: r.parent,
     "blocked-by": r.blockedBy,
+    related: rel?.related ?? [],
+    blocks: rel?.blocks ?? [],
+    blocked: rel?.blocked ?? false,
     created: r.created,
     links: r.links,
     progress,
     archived: r.archived,
     missing: r.missing,
   };
-}
-
-/** A record for every issue, open and archived, and the progress of each. To be called holding the lock. */
-async function allRecords(t: Tracker, idx: Index): Promise<{ records: IssueRecord[]; progress: Map<string, Progress> }> {
-  const records: IssueRecord[] = [];
-  for (const it of idx.unique()) records.push(await issueRecord(t, it));
-  return { records, progress: linkedProgress(records, idx.closedStates) };
 }
 
 /** "none" and "auto" clear a colour or an icon; no flag leaves it alone. */
@@ -134,7 +128,7 @@ const COMMANDS: Record<string, Command> = {
   },
 
   new: {
-    args: "<title> [--status S] [--priority P] [--label L]... [--assignee A] [--due YYYY-MM-DD] [--parent ID] [--blocked-by ID]... [--description TEXT] [--top] [--json]",
+    args: "<title> [--status S] [--priority P] [--label L]... [--assignee A] [--due YYYY-MM-DD] [--blocked-by ID]... [--related-to ID]... [--description TEXT] [--top] [--json]",
     help: "create an issue and print its ID",
     options: {
       status: { type: "string" },
@@ -142,8 +136,8 @@ const COMMANDS: Record<string, Command> = {
       label: { type: "string", multiple: true },
       assignee: { type: "string" },
       due: { type: "string" },
-      parent: { type: "string" },
       "blocked-by": { type: "string", multiple: true },
+      "related-to": { type: "string", multiple: true },
       description: { type: "string" },
       top: { type: "boolean" },
       json: { type: "boolean" },
@@ -160,8 +154,8 @@ const COMMANDS: Record<string, Command> = {
           labels: csv(list(values["label"])),
           assignee: str(values["assignee"]),
           due: str(values["due"]),
-          parent: str(values["parent"]),
           blockedBy: csv(list(values["blocked-by"])),
+          relatedTo: csv(list(values["related-to"])),
           description: str(values["description"]),
           top: values["top"] === true,
         },
@@ -173,13 +167,16 @@ const COMMANDS: Record<string, Command> = {
   },
 
   list: {
-    args: "[--status S]... [--label L]... [--assignee A]... [--priority P]... [--archived | --all] [--json]",
+    args: "[--status S]... [--label L]... [--assignee A]... [--priority P]... [--blocked] [--blocked-by ID] [--related-to ID] [--archived | --all] [--json]",
     help: "list issues in index order",
     options: {
       status: { type: "string", multiple: true },
       label: { type: "string", multiple: true },
       assignee: { type: "string", multiple: true },
       priority: { type: "string", multiple: true },
+      blocked: { type: "boolean" },
+      "blocked-by": { type: "string" },
+      "related-to": { type: "string" },
       archived: { type: "boolean" },
       all: { type: "boolean" },
       json: { type: "boolean" },
@@ -188,7 +185,17 @@ const COMMANDS: Record<string, Command> = {
     reads: () => true,
     async run({ values, out, tracker }) {
       const t = await tracker();
-      const { records, progress } = await locked(t, async () => allRecords(t, await readIndex(t)));
+      const issue = (key: string): string | undefined => {
+        const given = str(values[key]);
+        return given === undefined ? undefined : (linkId(given) ?? given);
+      };
+      const blockedBy = issue("blocked-by");
+      const relatedTo = issue("related-to");
+      const { records, progress, relations } = await locked(t, async () => {
+        const idx = await readIndex(t);
+        for (const id of [blockedBy, relatedTo]) if (id !== undefined) requireItem(idx, id);
+        return allRecords(t, idx);
+      });
       const statuses = csv(list(values["status"]));
       const labels = csv(list(values["label"]));
       const assignees = csv(list(values["assignee"]));
@@ -200,10 +207,13 @@ const COMMANDS: Record<string, Command> = {
           (!statuses.length || (r.status !== null && statuses.includes(r.status))) &&
           (!labels.length || labels.some((l) => r.labels.includes(l))) &&
           (!assignees.length || (r.assignee !== null && assignees.includes(r.assignee))) &&
-          (!priorities.length || priorities.includes(r.priority)),
+          (!priorities.length || priorities.includes(r.priority)) &&
+          (values["blocked"] !== true || relations.get(r.id)?.blocked === true) &&
+          (blockedBy === undefined || r.blockedBy.includes(blockedBy)) &&
+          (relatedTo === undefined || relations.get(r.id)?.related.includes(relatedTo) === true),
       );
       if (values["json"]) {
-        out(json(shown.map((r) => toJson(r, progress.get(r.id) ?? null))));
+        out(json(shown.map((r) => toJson(r, progress.get(r.id) ?? null, relations.get(r.id)))));
         return EXIT_OK;
       }
       const wId = width(shown.map((r) => r.id));
@@ -232,7 +242,7 @@ const COMMANDS: Record<string, Command> = {
     async run({ values, positionals, out, tracker }) {
       const t = await tracker();
       const id = positionals[0];
-      const { records, progress, doc, path } = await locked(t, async () => {
+      const { records, progress, relations, doc, path } = await locked(t, async () => {
         const idx = await readIndex(t);
         const item = requireItem(idx, id);
         const path = await resolveNote(t, id, item.archived);
@@ -244,7 +254,7 @@ const COMMANDS: Record<string, Command> = {
       if (values["json"]) {
         const properties: Record<string, Value> = {};
         for (const key of doc?.keys() ?? []) properties[key] = doc!.get(key);
-        out(json({ ...toJson(rec, p), path: path === null ? null : native(path), properties, body: doc?.body ?? "" }));
+        out(json({ ...toJson(rec, p, relations.get(id)), path: path === null ? null : native(path), properties, body: doc?.body ?? "" }));
         return EXIT_OK;
       }
       out(`${rec.id}  ${rec.title}`);
@@ -262,6 +272,10 @@ const COMMANDS: Record<string, Command> = {
         const linked = p.issues.map((other) => `${other} ${records.find((r) => r.id === other)?.status ?? "note missing"}`).join(", ");
         out(`${pad("progress:", 12)} ${p.done}/${p.total}  (${linked})`);
       }
+      const states = (ids: string[]) => ids.map((other) => `${other} ${records.find((r) => r.id === other)?.status ?? "note missing"}`).join(", ");
+      const rel = relations.get(id);
+      if (rel?.blocks.length) out(`${pad("blocks:", 12)} ${states(rel.blocks)}`);
+      if (rel?.related.length) out(`${pad("related:", 12)} ${states(rel.related)}`);
       const body = doc.body.replace(/^[\r\n]+|[\r\n]+$/g, "");
       if (body) out(`\n${body}`);
       return EXIT_OK;
@@ -279,7 +293,8 @@ const COMMANDS: Record<string, Command> = {
         if (!m) throw new OpError(`'${a}' is not of the form key=value`);
         return { key: m[1], op: m[2], raw: m[3].trim() };
       });
-      await setProps(await tracker(), id, (doc) => {
+      const t = await tracker();
+      await setProps(t, id, (doc) => {
         const props: PropEdits = {};
         const current = (key: string): Value => (key in props ? props[key] : doc.get(key));
         for (const { key, op, raw } of edits) {
@@ -287,9 +302,8 @@ const COMMANDS: Record<string, Command> = {
             props[key] = raw;
             continue;
           }
-          if (key === "parent") throw new OpError("parent takes one issue: parent=ID");
           let given = csv([raw]);
-          if (key === "blocked-by") {
+          if (LINK_LIST_KEYS.includes(key)) {
             given = given.map((v) => {
               const target = linkId(v);
               if (target === null) throw new OpError(`'${v}' is not an issue ID`);
@@ -297,13 +311,20 @@ const COMMANDS: Record<string, Command> = {
             });
           }
           const now = current(key);
+          // Links are the same when they name the same issue, however they are written.
+          const same = LINK_LIST_KEYS.includes(key) ? (a: string, b: string) => linkId(a) === linkId(b) : (a: string, b: string) => a === b;
           let value = op === "=" ? given : now === null ? [] : Array.isArray(now) ? [...now] : [now];
-          if (op === "+=") value.push(...given.filter((v) => !value.includes(v)));
-          if (op === "-=") value = value.filter((v) => !given.includes(v));
+          if (op === "+=") value.push(...given.filter((v) => !value.some((h) => same(h, v))));
+          if (op === "-=") value = value.filter((v) => !given.some((g) => same(v, g)));
           props[key] = value;
         }
         return props;
       });
+      // The relation may be in the other issue's note only: end it there too.
+      for (const { key, op, raw } of edits) {
+        if (key !== "related-to" || op !== "-=") continue;
+        for (const other of csv([raw])) await unrelate(t, id, linkId(other)!);
+      }
       return EXIT_OK;
     },
   },
@@ -563,10 +584,10 @@ function help(name?: string): string {
         "instructions file is kept; run again to refresh the section. The tracker is named by its path\n" +
         "from the root of the repository if it is inside the repository or one level above it, else by\n" +
         "its absolute path, as it is when <dir> is in no repository, and always in a home folder.\n" +
-        "\n--followups adds the rule that whatever a task skips becomes a follow-up issue, and that a\n" +
-        "follow-up the agent is not sure is wanted waits in the tracker's triage state for the user to\n" +
-        "accept or reject, assigned to the user and written with the ways to do it as options, which\n" +
-        "the user deletes down to one.\n";
+        "\n--followups adds the rule that whatever a task skips becomes a follow-up issue in the backlog,\n" +
+        "and that only one that needs a decision of high importance about the architecture waits in\n" +
+        "the tracker's triage state for the user to accept or reject, assigned to the user and written\n" +
+        "with the ways to do it as options, which the user deletes down to one.\n";
     }
     return text;
   }

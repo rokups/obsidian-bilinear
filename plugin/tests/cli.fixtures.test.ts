@@ -14,8 +14,10 @@ function argvFor(op: Op): string[] {
   switch (op.op) {
     case "create": {
       const argv = ["new", a.title];
-      for (const key of ["status", "priority", "assignee", "due", "parent"]) if (a[key]) argv.push(`--${key}`, a[key]);
+      for (const key of ["status", "priority", "assignee", "due"]) if (a[key]) argv.push(`--${key}`, a[key]);
       for (const label of a.labels ?? []) argv.push("--label", label);
+      for (const id of a.blockedBy ?? []) argv.push("--blocked-by", id);
+      for (const id of a.relatedTo ?? []) argv.push("--related-to", id);
       if (a.top) argv.push("--top");
       return argv;
     }

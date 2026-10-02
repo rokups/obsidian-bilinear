@@ -49,7 +49,9 @@ export function parsePair(entry: string, normalize: Normalize): [string, string]
   const value = normalize(entry.slice(at + 1));
   return name && value !== null ? [name, value] : null;
 }
-export const LIST_KEYS = ["labels", "blocked-by"];
+export const LIST_KEYS = ["labels", "blocked-by", "related-to"];
+/** The list properties whose values are links to issues. */
+export const LINK_LIST_KEYS = ["blocked-by", "related-to"];
 
 export const ID_RE = /^([A-Z][A-Z0-9]*)-([0-9]+)$/;
 export const PREFIX_RE = /^[A-Z][A-Z0-9]*$/;

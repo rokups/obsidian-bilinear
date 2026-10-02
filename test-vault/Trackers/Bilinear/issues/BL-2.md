@@ -5,7 +5,6 @@ priority: urgent
 labels: [build, bug]
 assignee: rk
 due: 2026-10-10
-parent: "[[BL-1]]"
 created: 2026-10-01
 ---
 

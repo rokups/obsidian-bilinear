@@ -23,8 +23,8 @@ const form = reactive({
   labels: (props.defaults.labels ?? []).join(", "),
   assignee: props.defaults.assignee ?? "",
   due: props.defaults.due ?? "",
-  parent: props.defaults.parent ?? "",
   blockedBy: (props.defaults.blockedBy ?? []).join(", "),
+  relatedTo: (props.defaults.relatedTo ?? []).join(", "),
   description: props.defaults.description ?? "",
   top: props.defaults.top ?? false,
 });
@@ -53,8 +53,8 @@ function submit(open: boolean): void {
       labels: form.labels.split(",").map((l) => l.trim()).filter(Boolean),
       assignee: form.assignee.trim() || undefined,
       due: form.due || undefined,
-      parent: ids(form.parent)[0],
       blockedBy: ids(form.blockedBy),
+      relatedTo: ids(form.relatedTo),
       description: form.description,
       top: form.top,
     },
@@ -100,11 +100,11 @@ onMounted(() => {
       <label class="bl-field bl-field-wide">Labels
         <input v-model="form.labels" type="text" :placeholder="current?.labels.length ? current.labels.join(', ') : 'comma-separated'" />
       </label>
-      <label class="bl-field">Parent
-        <input v-model="form.parent" type="text" placeholder="issue ID" />
-      </label>
       <label class="bl-field">Blocked by
         <input v-model="form.blockedBy" type="text" placeholder="issue IDs" />
+      </label>
+      <label class="bl-field">Related to
+        <input v-model="form.relatedTo" type="text" placeholder="issue IDs" />
       </label>
     </div>
     <label class="bl-field">Description

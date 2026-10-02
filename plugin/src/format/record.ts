@@ -12,8 +12,8 @@ export interface IssueRecord {
   labels: string[];
   assignee: string | null;
   due: string | null;
-  parent: string | null;
   blockedBy: string[];
+  relatedTo: string[];
   created: string | null;
   /** IDs of the issues the note's description links to. */
   links: string[];
@@ -32,8 +32,8 @@ function emptyRecord(item: Item, path: string | null): IssueRecord {
     labels: [],
     assignee: null,
     due: null,
-    parent: null,
     blockedBy: [],
+    relatedTo: [],
     created: null,
     links: [],
     archived: item.archived,
@@ -52,8 +52,8 @@ export function recordFromDoc(item: Item, doc: Doc | null, path: string | null):
   rec.labels = doc.getList("labels");
   rec.assignee = doc.getStr("assignee");
   rec.due = doc.getStr("due");
-  rec.parent = linkId(doc.getStr("parent"));
   rec.blockedBy = doc.getList("blocked-by").map(linkId).filter((v): v is string => v !== null);
+  rec.relatedTo = doc.getList("related-to").map(linkId).filter((v): v is string => v !== null);
   rec.created = doc.getStr("created");
   rec.links = bodyLinks(doc.body, item.id);
   return rec;
@@ -98,8 +98,8 @@ export function recordFromFrontmatter(
   rec.labels = toList(fm["labels"]);
   rec.assignee = toStr(fm["assignee"]);
   rec.due = toStr(fm["due"]);
-  rec.parent = linkId(toStr(fm["parent"]));
   rec.blockedBy = toList(fm["blocked-by"]).map(linkId).filter((v): v is string => v !== null);
+  rec.relatedTo = toList(fm["related-to"]).map(linkId).filter((v): v is string => v !== null);
   rec.created = toStr(fm["created"]);
   for (const link of links) {
     const target = linkTarget(link);

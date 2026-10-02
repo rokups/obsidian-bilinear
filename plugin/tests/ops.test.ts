@@ -2,7 +2,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { OpError, type Tracker } from "../src/ops/io";
-import { archiveIssues, commentIssue, createIssue, createTracker, deleteIssue, moveIssue, recreateNote, setLabel, setProps, unarchiveIssues } from "../src/ops/issues";
+import { archiveIssues, commentIssue, createIssue, createTracker, deleteIssue, moveIssue, recreateNote, setLabel, setProps, unarchiveIssues, unrelate } from "../src/ops/issues";
 import { lint } from "../src/ops/lint";
 import { listIssues } from "../src/ops/tracker";
 import { parseEmbed } from "../src/view/embed-options";
@@ -107,11 +107,11 @@ describe("the index write is the commit point", () => {
 describe("validation", () => {
   beforeEach(async () => {
     await createIssue(t, { title: "A" }, "2026-10-01");
-    await createIssue(t, { title: "B", parent: "BL-1" }, "2026-10-01");
+    await createIssue(t, { title: "B" }, "2026-10-01");
   });
 
   it("refuses bad values on create and leaves nothing behind", async () => {
-    for (const bad of [{ status: "nope" }, { priority: "p0" }, { due: "soon" }, { parent: "BL-99" }, { title: "  " }]) {
+    for (const bad of [{ status: "nope" }, { priority: "p0" }, { due: "soon" }, { blockedBy: ["BL-99"] }, { title: "  " }]) {
       await expect(createIssue(t, { title: "X", ...bad }, "2026-10-01"), JSON.stringify(bad)).rejects.toThrow(OpError);
     }
     expect(await ids()).toEqual(["BL-1", "BL-2"]);
@@ -121,7 +121,7 @@ describe("validation", () => {
   it("refuses bad edits and leaves the note alone", async () => {
     const before = io.files.get("T/Bilinear/issues/BL-1.md");
     const bad: Array<Record<string, string | string[] | null>> = [
-      { status: "nope" }, { status: null }, { priority: "p0" }, { due: "soon" }, { parent: "BL-1" }, { parent: "BL-99" },
+      { status: "nope" }, { status: null }, { priority: "p0" }, { due: "soon" }, { "blocked-by": ["BL-99"] },
       { "blocked-by": ["BL-1"] }, { title: "" },
     ];
     for (const edits of bad) {
@@ -212,6 +212,105 @@ describe("notes in the tracker folder (the layout before issues/)", () => {
   });
 });
 
+describe("deleting an issue", () => {
+  const path = (n: number) => `T/Bilinear/issues/BL-${n}.md`;
+  const note = (n: number) => io.files.get(path(n))!;
+  const edit = (n: number, fn: (text: string) => string) => io.files.set(path(n), fn(note(n)));
+  const front = (n: number, lines: string) => edit(n, (text) => text.replace("created:", `${lines}\ncreated:`));
+
+  beforeEach(async () => {
+    for (const title of ["A", "B", "C", "D", "E"]) await createIssue(t, { title }, "2026-10-01");
+  });
+
+  it("clears blocked-by and related-to entries naming it, keeping the others", async () => {
+    front(1, 'blocked-by: ["[[BL-5]]", "[[BL-2]]"]');
+    front(2, 'blocked-by: ["[[BL-5]]"]');
+    front(3, 'blocked-by: ["[[BL-4]]", "[[archive/BL-5|e]]", "[[BL-1]]"]\nrelated-to: ["[[BL-5]]", "[[BL-2]]"]');
+    front(4, 'related-to: ["[[BL-5]]"]');
+    await deleteIssue(t, "BL-5");
+    expect(note(1)).toContain('blocked-by: ["[[BL-2]]"]');
+    expect(note(2)).not.toContain("blocked-by");
+    expect(note(3)).toContain('blocked-by: ["[[BL-4]]", "[[BL-1]]"]\nrelated-to: ["[[BL-2]]"]');
+    expect(note(4)).not.toContain("related-to");
+    expect(await ids()).toEqual(["BL-1", "BL-2", "BL-3", "BL-4"]);
+    expect(io.trashed).toEqual([path(5)]);
+    expect(await lint(t, false)).toEqual([]);
+  });
+
+  it("leaves other notes untouched, and mentions in descriptions alone", async () => {
+    front(1, 'blocked-by: ["[[BL-2]]"]');
+    edit(3, (text) => text + "See [[BL-5]].\n");
+    const before = [1, 2, 3, 4].map(note);
+    const processed: string[] = [];
+    io.beforeProcess = (p) => processed.push(p);
+    // Only the index is written.
+    await deleteIssue(t, "BL-5");
+    expect([1, 2, 3, 4].map(note)).toEqual(before);
+    expect(processed).toEqual(["T/Bilinear/Bilinear.md"]);
+    expect(note(3)).toContain("See [[BL-5]].");
+  });
+
+  it("works for an issue nobody references, and for an archived one referencing it", async () => {
+    await deleteIssue(t, "BL-4");
+    expect(await ids()).toEqual(["BL-1", "BL-2", "BL-3", "BL-5"]);
+    front(2, 'blocked-by: ["[[BL-3]]"]');
+    await archiveIssues(t, ["BL-2"]);
+    await deleteIssue(t, "BL-3");
+    expect(io.files.get("T/Bilinear/archive/BL-2.md")).not.toContain("blocked-by");
+  });
+
+  it("skips a referencing issue whose note is missing", async () => {
+    front(1, 'blocked-by: ["[[BL-5]]"]');
+    front(2, 'related-to: ["[[BL-5]]"]');
+    io.files.delete(path(1));
+    await deleteIssue(t, "BL-5");
+    expect(note(2)).not.toContain("related-to");
+    expect(await ids()).toEqual(["BL-1", "BL-2", "BL-3", "BL-4"]);
+  });
+});
+
+describe("lint of relations", () => {
+  const path = (n: number) => `T/Bilinear/issues/BL-${n}.md`;
+  const front = (n: number, lines: string) => io.files.set(path(n), io.files.get(path(n))!.replace("created:", `${lines}\ncreated:`));
+  const codes = async (fix = false) => (await lint(t, fix)).map((p) => `${p.code}:${p.id}:${p.severity}:${p.fixable}`);
+
+  beforeEach(async () => {
+    for (const title of ["A", "B", "C", "D"]) await createIssue(t, { title }, "2026-10-01");
+  });
+
+  it("reports related-to entries that are not links to another issue or name no issue", async () => {
+    front(1, 'related-to: ["x", "[[BL-1]]", "[[BL-99]]", "[[BL-3]]"]');
+    expect(await codes()).toEqual(["related-to-invalid:BL-1:error:false", "related-to-invalid:BL-1:error:false", "related-to-unknown:BL-1:error:false"]);
+    expect((await lint(t, false)).map((p) => p.message)).toEqual([
+      "related-to 'x' is not a link to another issue",
+      "related-to '[[BL-1]]' is not a link to another issue",
+      "related-to BL-99 is not in the index",
+    ]);
+  });
+
+  it("reports blocked-by-cycle once for each issue on a cycle, and not for those leading into it", async () => {
+    front(1, 'blocked-by: ["[[BL-2]]"]');
+    front(2, 'blocked-by: ["[[BL-3]]"]');
+    front(3, 'blocked-by: ["[[BL-1]]"]');
+    front(4, 'blocked-by: ["[[BL-1]]"]');
+    const found = await lint(t, false);
+    expect(found.map((p) => [p.code, p.id])).toEqual([["blocked-by-cycle", "BL-1"], ["blocked-by-cycle", "BL-2"], ["blocked-by-cycle", "BL-3"]]);
+    expect(found[0]).toMatchObject({ severity: "error", fixable: false, message: "blocked-by leads back to the issue itself" });
+  });
+
+  it("does not call a blocked-by link to itself a cycle, and --fix leaves all of these", async () => {
+    front(1, 'blocked-by: ["[[BL-1]]"]');
+    front(2, 'blocked-by: ["[[BL-3]]"]\nrelated-to: ["[[BL-99]]"]');
+    front(3, 'blocked-by: ["[[BL-2]]"]');
+    const before = [1, 2, 3, 4].map((n) => io.files.get(path(n)));
+    const fixed = await lint(t, true);
+    expect(fixed.map((p) => `${p.code}:${p.id}:${p.fixed}`).sort()).toEqual([
+      "blocked-by-cycle:BL-2:false", "blocked-by-cycle:BL-3:false", "blocked-by-invalid:BL-1:false", "related-to-unknown:BL-2:false",
+    ]);
+    expect([1, 2, 3, 4].map((n) => io.files.get(path(n)))).toEqual(before);
+  });
+});
+
 describe("labels", () => {
   it("adds labels and sets, changes and clears colours", async () => {
     await setLabel(t, "bug", "RED");
@@ -245,5 +344,122 @@ describe("embed options", () => {
       limit: 10,
     });
     expect(parseEmbed("")).toMatchObject({ tracker: null, archived: false, limit: 0 });
+  });
+});
+
+describe("relations", () => {
+  const path = (n: number) => `T/Bilinear/issues/BL-${n}.md`;
+  const note = (n: number) => io.files.get(path(n))!;
+  const edit = (n: number, fn: (text: string) => string) => io.files.set(path(n), fn(note(n)));
+
+  beforeEach(async () => {
+    for (const title of ["A", "B", "C", "D"]) await createIssue(t, { title }, "2026-10-01");
+  });
+
+  it("create writes related-to like blocked-by, and nothing for an empty list", async () => {
+    expect(await createIssue(t, { title: "E", relatedTo: ["BL-1", "[[archive/BL-2|b]]"], blockedBy: ["BL-3"] }, "2026-10-01")).toBe("BL-5");
+    expect(note(5)).toContain('blocked-by: ["[[BL-3]]"]\nrelated-to: ["[[BL-1]]", "[[BL-2]]"]\ncreated:');
+    expect(await createIssue(t, { title: "F", relatedTo: [] }, "2026-10-01")).toBe("BL-6");
+    expect(note(6)).not.toContain("related-to");
+    await expect(createIssue(t, { title: "G", relatedTo: ["BL-99"] }, "2026-10-01")).rejects.toThrow(/BL-99: no such issue/);
+    await expect(createIssue(t, { title: "G", relatedTo: ["x"] }, "2026-10-01")).rejects.toThrow(/not an issue ID/);
+    expect(await ids()).toHaveLength(6);
+  });
+
+  it("set takes a string or a list, and an empty value removes the key", async () => {
+    await setProps(t, "BL-1", { "related-to": "BL-2" });
+    expect(note(1)).toContain('related-to: ["[[BL-2]]"]');
+    await setProps(t, "BL-1", { "related-to": ["BL-2", "BL-3"] });
+    expect(note(1)).toContain('related-to: ["[[BL-2]]", "[[BL-3]]"]');
+    expect(note(2)).not.toContain("related-to");
+    await setProps(t, "BL-1", (doc) => ({ "related-to": [...doc.getList("related-to"), "BL-4"] }));
+    expect(note(1)).toContain('related-to: ["[[BL-2]]", "[[BL-3]]", "[[BL-4]]"]');
+    const others = [2, 3, 4].map(note);
+    await setProps(t, "BL-1", { "related-to": null });
+    expect(note(1)).not.toContain("related-to");
+    expect([2, 3, 4].map(note)).toEqual(others);
+  });
+
+  it("refuses itself, unknown issues and non-IDs for related-to", async () => {
+    const before = note(1);
+    for (const value of ["BL-1", ["BL-2", "BL-99"], ["nope"]]) {
+      await expect(setProps(t, "BL-1", { assignee: "x", "related-to": value }), JSON.stringify(value)).rejects.toThrow(OpError);
+      expect(note(1)).toBe(before);
+    }
+  });
+
+  it("an existing dangling link does not stand in the way of another edit", async () => {
+    edit(1, (text) => text.replace("created:", 'blocked-by: ["[[BL-99]]"]\nrelated-to: ["[[BL-98]]", "[[BL-2]]"]\ncreated:'));
+    await setProps(t, "BL-1", { assignee: "rk", "blocked-by": ["BL-99"], "related-to": ["[[BL-98]]", "BL-2", "BL-3"] });
+    expect(note(1)).toContain("assignee: rk");
+    expect(note(1)).toContain('related-to: ["[[BL-98]]", "[[BL-2]]", "[[BL-3]]"]');
+  });
+
+  it("removing a related issue removes this one from its note too", async () => {
+    await setProps(t, "BL-1", { "related-to": ["BL-2", "BL-3"] });
+    edit(2, (text) => text.replace("created:", 'related-to: ["[[archive/BL-1|first]]", "[[BL-3]]"]\ncreated:'));
+    edit(3, (text) => text.replace("created:", 'related-to: ["[[BL-1]]"]\ncreated:'));
+    await setProps(t, "BL-1", { "related-to": ["BL-3"] });
+    expect(note(1)).toContain('related-to: ["[[BL-3]]"]');
+    expect(note(2)).toContain('related-to: ["[[BL-3]]"]');
+    expect(note(3)).toContain('related-to: ["[[BL-1]]"]');
+    await setProps(t, "BL-1", { "related-to": null });
+    expect(note(3)).not.toContain("related-to");
+    expect(note(1)).not.toContain("related-to");
+  });
+
+  it("removing when the other note is missing or unlisted does not throw", async () => {
+    edit(1, (text) => text.replace("created:", 'related-to: ["[[BL-2]]", "[[BL-99]]", "[[BL-3]]"]\ncreated:'));
+    io.files.delete(path(2));
+    await setProps(t, "BL-1", { "related-to": [] });
+    expect(note(1)).not.toContain("related-to");
+    expect(note(3)).not.toContain("related-to");
+  });
+
+  it("unrelate clears whichever side names the other", async () => {
+    edit(1, (text) => text.replace("created:", 'related-to: ["[[BL-2]]", "[[BL-3]]"]\ncreated:'));
+    edit(2, (text) => text.replace("created:", 'related-to: ["[[archive/BL-1|a]]"]\ncreated:'));
+    edit(4, (text) => text.replace("created:", 'related-to: ["[[BL-1]]"]\ncreated:'));
+    await unrelate(t, "BL-1", "BL-2");
+    expect(note(1)).toContain('related-to: ["[[BL-3]]"]');
+    expect(note(2)).not.toContain("related-to");
+    await unrelate(t, "BL-1", "BL-4");
+    expect(note(4)).not.toContain("related-to");
+    expect(note(1)).toContain('related-to: ["[[BL-3]]"]');
+    const before = [1, 2, 3, 4].map(note);
+    await unrelate(t, "BL-2", "BL-3");
+    expect([1, 2, 3, 4].map(note)).toEqual(before);
+    await unrelate(t, "BL-3", "BL-1");
+    expect(note(1)).not.toContain("related-to");
+    io.files.delete(path(3));
+    await unrelate(t, "BL-3", "BL-1");
+  });
+
+  it("unrelate refuses an unknown issue, but not an unknown other", async () => {
+    await unrelate(t, "BL-1", "BL-99");
+    await expect(unrelate(t, "BL-98", "BL-1")).rejects.toThrow("BL-98: no such issue");
+  });
+
+  it("refuses a blocked-by cycle and leaves the note alone", async () => {
+    await setProps(t, "BL-1", { "blocked-by": ["BL-2"] });
+    let before = note(2);
+    await expect(setProps(t, "BL-2", { "blocked-by": "BL-1" })).rejects.toThrow("BL-2: would block itself through BL-1");
+    expect(note(2)).toBe(before);
+    await setProps(t, "BL-2", { "blocked-by": ["BL-3"] });
+    before = note(3);
+    await expect(setProps(t, "BL-3", { assignee: "x", "blocked-by": ["BL-4", "BL-1"] })).rejects.toThrow("BL-3: would block itself through BL-1");
+    expect(note(3)).toBe(before);
+    await setProps(t, "BL-3", { "blocked-by": ["BL-4"] });
+    await expect(setProps(t, "BL-4", { "blocked-by": ["BL-1"] })).rejects.toThrow("BL-4: would block itself through BL-1");
+  });
+
+  it("an edit that adds no edge reads no other note", async () => {
+    await setProps(t, "BL-1", { "blocked-by": ["BL-2"], "related-to": ["BL-4"] });
+    io.files.delete(path(2));
+    const read: string[] = [];
+    const real = io.read.bind(io);
+    io.read = async (p) => (read.push(p), real(p));
+    await setProps(t, "BL-1", { assignee: "rk", "blocked-by": ["BL-2"], "related-to": ["BL-4", "BL-3"] });
+    expect(read.filter((p) => p.includes("/issues/"))).toEqual([path(1)]);
   });
 });

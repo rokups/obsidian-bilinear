@@ -198,7 +198,6 @@ priority: high
 labels: [build, bug]
 assignee: rk
 due: 2026-10-10
-parent: "[[BL-9]]"
 blocked-by: ["[[BL-3]]"]
 created: 2026-10-01
 ---
@@ -217,8 +216,8 @@ Free-form description.
 | `labels` | list | Optional |
 | `assignee` | text | Optional, free text |
 | `due` | date | Optional, `YYYY-MM-DD` |
-| `parent` | link | Optional; wikilink to another issue in the tracker |
-| `blocked-by` | list of links | Optional |
+| `blocked-by` | list of links | Optional; the issues this one waits for |
+| `related-to` | list of links | Optional; symmetric, see Relations |
 | `created` | date | Set on creation |
 
 Unknown properties are preserved. A key with an empty value is the same as an
@@ -235,21 +234,31 @@ one space and the ends are trimmed, both when reading and when writing.
 A new note has the properties above in the order of the table, omitting those
 with no value, and an empty body.
 
-**Linked issues and progress.** An issue's *linked issues* are its sub-issues
-(the issues that name it as `parent`) followed by the issues its description
-links to, each counted once and in that order. Only issues in the index count,
-open or archived; an issue is never linked to itself.
+**Progress.** An issue's progress is counted over the issues it is
+`blocked-by`, each once and in the order named. Only issues in the index
+count, open or archived; an issue is never counted for itself. Links in the
+description and `related-to` do not count.
 
-The description is the note body outside the `## Comments` section. A link is
-a wikilink or an embed, `[[BL-3]]` or `![[BL-3]]`, reduced to an ID the same
-way as an index line link. Links inside fenced code blocks and inline code do
-not count. `blocked-by` is not part of this: a blocker is something to wait
-for, not part of the work.
+An issue's *progress* is the number of those issues whose `status` is one of
+the `closed-states`, out of how many there are. A blocker whose note is
+missing counts as not closed. An issue with no `blocked-by` issues has no
+progress. Progress is derived every time it is shown; nothing is stored.
 
-An issue's *progress* is the number of its linked issues whose `status` is one
-of the `closed-states`, out of the number of linked issues. A linked issue
-whose note is missing counts as not closed. An issue with no linked issues has
-no progress. Progress is derived every time it is shown; nothing is stored.
+**Relations.** `blocked-by` and `related-to` relate issues; everything below
+is derived each time it is shown, and nothing but the two properties is
+stored. An issue *blocks* the issues that name it in `blocked-by`. An issue
+is *blocked* while an issue it is `blocked-by` has a `status` that is not one
+of the `closed-states`, or has no note; whether the blocker is archived does
+not matter. Two issues are *related* when the `related-to` of either names
+the other: one entry is enough, and tools show the relation on both. Links
+that name no issue in the index, and an issue naming itself, are ignored
+here and reported by `lint`. `blocked-by` must not lead back to the issue it
+starts from; `related-to` has no such rule.
+
+The description is the note body outside the `## Comments` section. A link in
+it is a wikilink or an embed, `[[BL-3]]` or `![[BL-3]]`, reduced to an ID the
+same way as an index line link; links inside fenced code blocks and inline
+code do not count. They are listed as `links` and are informational.
 
 **Comments** are list items under `## Comments` in the form
 
@@ -286,7 +295,7 @@ aliases, tags, block scalars (`|`, `>`), inline maps, multi-line values, quoted
 keys, duplicate keys, and a plain scalar containing `: `. Such keys and the
 lines belonging to them are kept as they are and can still be edited around.
 
-An unquoted wikilink (`parent: [[BL-9]]`, or as a list item) is read as the
+An unquoted wikilink (`blocked-by: [[BL-9]]`, or as a list item) is read as the
 link it obviously means and reported by `lint` as a warning; it is quoted the
 next time a tool writes that key.
 
@@ -311,12 +320,13 @@ operation leaves the index correct and at worst a stray note.
 | Operation | Steps, in order |
 |---|---|
 | Create | Allocate ID; create note in `issues/`; add line to `## Issues` and raise `next` |
-| Edit property | Write the issue note only |
+| Edit property | Write the issue note only. An edit that would close a `blocked-by` cycle is refused |
+| Unrelate | Remove the link from the `related-to` of both notes. Removing a `related-to` entry by editing the property does the same |
 | Retitle | Write `title` in the note; rewrite the index line |
 | Reorder | Move the line within `## Issues` |
 | Archive | Move note to `archive/`; move line to the end of `## Archive` |
 | Unarchive | Move note to `issues/`; move line to the end of `## Issues` |
-| Delete | Trash the note, wherever it is; remove the line |
+| Delete | Trash the note, wherever it is; remove the links to it from `blocked-by` and `related-to` of the other notes; remove the line |
 | Comment | Append under `## Comments` in the issue note |
 | Adopt | Move a note lying in the tracker folder to `issues/`; add a line for it; raise `next` if needed |
 | Label | Add the label to `labels` if absent; set or clear its `label-colors` entry |
@@ -337,7 +347,6 @@ index with `next` set to at least `n + 1`.
 
 **Ordering in grouped views.** There is one flat global order. Views grouped by
 status, assignee and so on show each group in its relative index order.
-Sub-issues are expressed by `parent`, not by list indentation.
 
 **Reordering** applies to `## Issues` only. Archived issues keep the order in
 which they were archived.
@@ -390,8 +399,9 @@ of the two, then the tracker folder itself.
 | `priority-invalid` | error | | `priority` not one of the five values |
 | `label-unknown` | warning | | Label not in the index `labels` |
 | `due-invalid`, `created-invalid` | error | | Not a real `YYYY-MM-DD` date |
-| `parent-invalid`, `blocked-by-invalid` | error | | Not a link to an issue, or a link to itself |
-| `parent-unknown`, `blocked-by-unknown` | error | | Linked issue has no index line |
+| `blocked-by-invalid`, `related-to-invalid` | error | | Not a link to an issue, or a link to itself |
+| `blocked-by-unknown`, `related-to-unknown` | error | | Linked issue has no index line |
+| `blocked-by-cycle` | error | | Following `blocked-by` from the issue leads back to it; reported for each issue on the cycle |
 
 One problem is reported per occurrence. A problem's subject is an issue ID, or
 the index note.
@@ -527,8 +537,8 @@ identity.
 
 | `op` | `args` | `expect` |
 |---|---|---|
-| `create` | `title`, optional `status`, `priority`, `labels`, `assignee`, `due`, `parent`, `top` | `id` |
-| `set` | `id`, `props`: key to value; `null` or `[]` removes the key; IDs for `parent` and `blocked-by` | |
+| `create` | `title`, optional `status`, `priority`, `labels`, `assignee`, `due`, `blockedBy` and `relatedTo` (lists of IDs), `top` | `id` |
+| `set` | `id`, `props`: key to value; `null` or `[]` removes the key; IDs for `blocked-by` and `related-to` | |
 | `move` | `id` and one of `before`, `after` (an ID), `top`, `bottom` (`true`) | |
 | `archive` | `ids`, or `closed: true` | |
 | `unarchive` | `ids` | |
@@ -543,7 +553,10 @@ identity.
 | `list` | | `issues`: every issue, open and archived, in index order; each entry lists the fields to compare |
 
 `today` is the date used for `created` and for comments; `author` is the
-comment author. In `list` results `parent` and `blocked-by` are IDs, an absent
+comment author. In `list` results `blocked-by` is a list of IDs, an absent
 text property is `null`, and each issue has `archived` and `missing` flags,
 `links` (the IDs its description links to, known or not) and `progress`:
-`{done, total, issues}` with the linked issues counted, or `null`.
+`{done, total, issues}` with the blockers counted, or `null`. `related` is
+the IDs related to the issue, whichever of the two notes names the other;
+`blocks` is the IDs of the issues that name it in `blocked-by`; `blocked` is
+true when some blocker is known and is not in a closed state or has no note.

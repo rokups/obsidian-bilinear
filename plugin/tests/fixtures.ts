@@ -6,7 +6,7 @@ import type { Tracker } from "../src/ops/io";
 import { adoptIssue, archiveClosed, archiveIssues, commentIssue, createIssue, deleteIssue, moveIssue, setLabel, setProps, setStateStyle, unarchiveIssues } from "../src/ops/issues";
 import { lint } from "../src/ops/lint";
 import { indexNotes, listIssues, readIndex } from "../src/ops/tracker";
-import { linkedProgress, type Progress } from "../src/store/query";
+import { issueRelations, linkedProgress, type Progress, type Relations } from "../src/store/query";
 import { MemoryIO } from "./memory-io";
 
 export const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "spec", "fixtures");
@@ -54,15 +54,16 @@ export async function openTracker(io: MemoryIO, dir = TRACKER_DIR): Promise<Trac
 }
 
 /** A record with the key names the fixtures and the CLI's JSON use. */
-export function toFixtureRecord(r: IssueRecord, progress: Progress | null = null): Record<string, unknown> {
-  const { blockedBy, path: _path, ...rest } = r;
-  return { ...rest, "blocked-by": blockedBy, progress };
+export function toFixtureRecord(r: IssueRecord, progress: Progress | null = null, rel?: Relations): Record<string, unknown> {
+  const { blockedBy, relatedTo: _relatedTo, path: _path, ...rest } = r;
+  return { ...rest, "blocked-by": blockedBy, related: rel?.related ?? [], blocks: rel?.blocks ?? [], blocked: rel?.blocked ?? false, progress };
 }
 
 /** Records in the shape of the CLI's `list --json`, with progress filled in. */
 export function toFixtureRecords(records: IssueRecord[], closedStates: string[]): Array<Record<string, unknown>> {
   const progress = linkedProgress(records, closedStates);
-  return records.map((r) => toFixtureRecord(r, progress.get(r.id) ?? null));
+  const relations = issueRelations(records, closedStates);
+  return records.map((r) => toFixtureRecord(r, progress.get(r.id) ?? null, relations.get(r.id)));
 }
 
 export interface Result {
