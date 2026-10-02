@@ -14,7 +14,7 @@ export default defineConfig({
     target: "node20",
     rollupOptions: {
       external: [...builtinModules, /^node:/],
-      output: { banner: "#!/usr/bin/env node" },
+      output: { banner: "#!/usr/bin/env node\n// SPDX-License-Identifier: GPL-2.0-only" },
     },
   },
 });

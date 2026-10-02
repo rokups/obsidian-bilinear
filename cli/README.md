@@ -19,3 +19,5 @@ npx obsidian-bilinear lint --fix
 or later and has no dependencies. `bilinear --help` lists the commands; the
 [project README](https://github.com/rokups/obsidian-bilinear#cli) describes
 them.
+
+Licensed under the GNU General Public License, version 2 only.

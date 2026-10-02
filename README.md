@@ -284,3 +284,13 @@ Manual checklist, in `test-vault/`:
 
 Cycles, estimates, multi-tracker roll-ups, notifications, and sync with Linear
 or any other external service.
+
+## License
+
+Copyright (C) 2026 rk
+
+Bilinear is free software; you can redistribute it and/or modify it under the
+terms of version 2 of the GNU General Public License as published by the Free
+Software Foundation. It is distributed in the hope that it will be useful, but
+without any warranty; without even the implied warranty of merchantability or
+fitness for a particular purpose. See [LICENSE](LICENSE) for the full text.

@@ -23,5 +23,9 @@
     "url": "git+https://github.com/rokups/obsidian-bilinear.git",
     "directory": "cli"
   },
-  "homepage": "https://github.com/rokups/obsidian-bilinear#cli"
+  "homepage": "https://github.com/rokups/obsidian-bilinear#cli",
+  "license": "GPL-2.0-only",
+  "scripts": {
+    "prepack": "node -e \"require('node:fs').copyFileSync('../LICENSE', 'LICENSE')\""
+  }
 }
