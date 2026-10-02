@@ -34,10 +34,12 @@ after you finish. This is required, and it does not wait to be asked for.
    what was asked, the constraints, how to tell that it is done. Do not start work
    that has no issue. One issue is one piece of work that can be finished on
    its own; larger work is a parent issue with sub-issues (\`--parent <ID>\`).
-2. **On starting**, move the issue to the state that means it is being worked
-   on (\`set <ID> status=<state>\`; \`state\` lists the tracker's states).
-3. **While working**, comment (\`comment <ID> "text"\`) whenever you learn or
-   decide something a later reader needs: the cause you found, the approach
+2. **On starting**, assign the issue to yourself and move it to the state that
+   means it is being worked on: \`set <ID> assignee=<your name> status=<state>\`
+   (\`state\` lists the tracker's states). Do not take an issue that is
+   assigned to someone else unless you are asked to.
+3. **While working**, comment (\`--author <your name> comment <ID> "text"\`)
+   whenever you learn or decide something a later reader needs: the cause you found, the approach
    you chose or gave up, a change of plan. If the issue cannot go on until
    another is done, say so with \`set <ID> blocked-by+=<other ID>\`; if it
    waits for a person, comment with the question. Work that turns up along
@@ -52,7 +54,15 @@ after you finish. This is required, and it does not wait to be asked for.
 6. **On stopping before the work is finished**, comment what is done and what
    is left, so that someone else can carry on from the issue alone. Leave it
    in the working state only if the work is still going on; otherwise move it
-   back to the state for work that has not started.
+   back to the state for work that has not started and give up the
+   assignment (\`assignee=\`).
+
+Your name, for assignments and comments, is the name of the agent you are,
+such as \`claude\` or \`codex\`: never the user's, and the same every time. The
+CLI signs a comment with the name of the user who is logged in unless it is
+told otherwise, so pass \`--author <your name>\` with every \`comment\`, or set
+\`BILINEAR_USER=<your name>\` for the commands you run. Issues you create for
+others to pick up stay unassigned.
 
 The status of an issue says what is true now. Archiving and deleting issues is
 the user's to do: do neither unless asked.
@@ -76,7 +86,7 @@ command's exact arguments.
 - \`show <ID> [--json]\`: one issue: properties, linked issues, body and comments
 - \`new "Title" [--description TEXT] [--status S] [--priority P] [--label L] [--assignee A] [--due YYYY-MM-DD] [--parent ID] [--blocked-by ID] [--top]\`: create an issue; prints its ID. The description is Markdown and may have several lines
 - \`set <ID> key=value ...\`: change properties. \`key=\` removes one; \`labels+=x\`, \`labels-=x\` edit a list
-- \`comment <ID> "text"\`: append a dated comment
+- \`comment <ID> "text" [--author NAME]\`: append a dated comment, signed with NAME
 - \`move <ID> --top | --bottom | --before <ID> | --after <ID>\`: reorder; the order is the priority order the user sees
 - \`archive <ID>... | --closed\`, \`unarchive <ID>...\`: move issues out of and back into the open list
 - \`rm <ID>\`: delete an issue; its note goes to the vault's trash (outside a vault it needs \`--force\`)
@@ -91,8 +101,8 @@ other key is kept as a custom property.
 \`\`\`sh
 bilinear list --status todo,in-progress --json
 bilinear new "Fix flaky cache test" --priority high --label bug
-bilinear set BL-12 status=in-progress assignee=me
-bilinear comment BL-12 "Reproduced: the cache key ignores the locale."
+bilinear set BL-12 assignee=claude status=in-progress
+bilinear --author claude comment BL-12 "Reproduced: the cache key ignores the locale."
 bilinear set BL-12 status=done
 \`\`\`
 

@@ -578,6 +578,9 @@ describe("for LLM agents", () => {
       expect(text, step).toContain(`**${step}**`);
     }
     expect(text).toContain("Do not start work\n   that has no issue.");
+    expect(text).toContain("`set <ID> assignee=<your name> status=<state>`");
+    expect(text).toContain("`--author <your name> comment <ID> \"text\"`");
+    expect(text).toContain("is the name of the agent you are");
     expect(text).not.toContain(s().dir);
     expect(text).not.toContain("Trackers/Bilinear");
   });

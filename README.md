@@ -145,9 +145,10 @@ bilinear --tracker Trackers/Bilinear instructions CLAUDE.md  # into the file nam
 ```
 
 - The skill is the same for every tracker. It requires the agent to track the
-  whole life of each piece of work: an issue before starting, the working
-  state while it is in hand, comments on what is found and decided, review,
-  and closing with what was done and how it was checked. It also describes
+  whole life of each piece of work: an issue before starting, assigned to the
+  agent under its own name and in the working state while it is in hand,
+  comments signed with that name on what is found and decided, review, and
+  closing with what was done and how it was checked. It also describes
   the commands, the properties and the exit codes.
 - The instructions say only where: they name one tracker and refer to the
   skill. The tracker is named by its path from the root of the repository if
