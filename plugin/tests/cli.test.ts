@@ -656,8 +656,8 @@ describe("for LLM agents", () => {
   const block = (path: string, skill: string, triage = "") =>
     `<!-- bilinear:start -->\n${triage === "" ? "" : "<!-- bilinear:followups -->\n"}## Issue tracking\n\nWork on this project is tracked in a Bilinear issue tracker. ${isAbsolute(path) ? "Its path:" : "Its path, from the root of the repository:"}\n\n    ${path}\n\n` +
     `Track every piece of work there, from before it starts until it is finished,\nas the \`bilinear\` skill says. The skill is in\n\`${skill}\`.\n${triage}<!-- bilinear:end -->\n`;
-  const claudeBlock = (path = s().dir) => block(path, ".claude/skills/bilinear/SKILL.md");
-  const codexBlock = (path = s().dir) => block(path, ".agents/skills/bilinear/SKILL.md");
+  const claudeBlock = (path = s().index) => block(path, ".claude/skills/bilinear/SKILL.md");
+  const codexBlock = (path = s().index) => block(path, ".agents/skills/bilinear/SKILL.md");
 
   it("sets a project up for Claude Code, and says what it did", async () => {
     const skill = join(proj(), CLAUDE);
@@ -710,12 +710,12 @@ describe("for LLM agents", () => {
     const claudeSkill = join(home(), CLAUDE);
     const codexSkill = join(home(), AGENTS);
     expect(await setup("~/.claude")).toBe(`created ${claudeSkill}\ncreated ${join(home(), ".claude", "CLAUDE.md")}\n`);
-    expect(s().read(join(home(), ".claude", "CLAUDE.md"))).toBe(block(s().dir, "~/.claude/skills/bilinear/SKILL.md"));
+    expect(s().read(join(home(), ".claude", "CLAUDE.md"))).toBe(block(s().index, "~/.claude/skills/bilinear/SKILL.md"));
     expect(await setup(join(home(), ".claude"), "--claude")).toBe(`unchanged ${claudeSkill}\nunchanged ${join(home(), ".claude", "CLAUDE.md")}\n`);
 
     // Codex reads skills from ~/.agents, not from its own folder.
     expect(await setup("~/.codex")).toBe(`created ${codexSkill}\ncreated ${join(home(), ".codex", "AGENTS.md")}\n`);
-    expect(s().read(join(home(), ".codex", "AGENTS.md"))).toBe(block(s().dir, "~/.agents/skills/bilinear/SKILL.md"));
+    expect(s().read(join(home(), ".codex", "AGENTS.md"))).toBe(block(s().index, "~/.agents/skills/bilinear/SKILL.md"));
     expect(fs.existsSync(join(home(), ".codex", "skills"))).toBe(false);
     expect(await setup("~/.codex", "--codex", "--local")).toBe(`unchanged ${codexSkill}\nunchanged ${join(home(), ".codex", "AGENTS.md")}\n`);
 
@@ -726,14 +726,14 @@ describe("for LLM agents", () => {
   it("names the skill from ~ when HOME ends in a slash", async () => {
     s().env["HOME"] = `${home()}/`;
     await setup("~/.claude");
-    expect(s().read(join(home(), ".claude", "CLAUDE.md"))).toBe(block(s().dir, "~/.claude/skills/bilinear/SKILL.md"));
+    expect(s().read(join(home(), ".claude", "CLAUDE.md"))).toBe(block(s().index, "~/.claude/skills/bilinear/SKILL.md"));
   });
 
   it("follows CLAUDE_CONFIG_DIR and CODEX_HOME", async () => {
     s().env["CLAUDE_CONFIG_DIR"] = join(s().root, "claude");
     s().env["CODEX_HOME"] = join(s().root, "codex");
     expect(await setup(join(s().root, "claude"))).toBe(`created ${join(s().root, "claude", "skills", "bilinear", "SKILL.md")}\ncreated ${join(s().root, "claude", "CLAUDE.md")}\n`);
-    expect(s().read(join(s().root, "claude", "CLAUDE.md"))).toBe(block(s().dir, join(s().root, "claude", "skills", "bilinear", "SKILL.md")));
+    expect(s().read(join(s().root, "claude", "CLAUDE.md"))).toBe(block(s().index, join(s().root, "claude", "skills", "bilinear", "SKILL.md")));
     expect(await setup(join(s().root, "codex"))).toBe(`created ${join(home(), AGENTS)}\ncreated ${join(s().root, "codex", "AGENTS.md")}\n`);
     expect(await s().code("--tracker", s().dir, "agent-setup", join(s().root, "codex"), "--claude")).toBe(1);
   });
@@ -801,18 +801,18 @@ describe("for LLM agents", () => {
     const claude = join(s().vault, "CLAUDE.md");
     fs.writeFileSync(claude, "# Project\n\nSome rules.\n");
     expect(await setup(".", "--claude")).toBe(`created ${join(s().vault, CLAUDE)}\nupdated ${claude}\n`);
-    expect(s().read(claude)).toBe(`# Project\n\nSome rules.\n\n${claudeBlock("Trackers/Bilinear")}`);
+    expect(s().read(claude)).toBe(`# Project\n\nSome rules.\n\n${claudeBlock("Trackers/Bilinear/Bilinear.md")}`);
     expect(await setup(".", "--claude")).toBe(`unchanged ${join(s().vault, CLAUDE)}\nunchanged ${claude}\n`);
 
     // An older block, wherever it is in the file, is replaced; the rest stays.
     fs.writeFileSync(claude, "# Project\n\n<!-- bilinear:start -->\nold text\n<!-- bilinear:end -->\n\n## After\n");
     await setup(".", "--claude");
-    expect(s().read(claude)).toBe(`# Project\n\n${claudeBlock("Trackers/Bilinear")}\n## After\n`);
+    expect(s().read(claude)).toBe(`# Project\n\n${claudeBlock("Trackers/Bilinear/Bilinear.md")}\n## After\n`);
 
     // A file with Windows line ends keeps them.
     fs.writeFileSync(claude, "Rules.\r\n");
     await setup(".", "--claude");
-    expect(s().read(claude)).toBe(`Rules.\r\n\r\n${claudeBlock("Trackers/Bilinear").replace(/\n/g, "\r\n")}`);
+    expect(s().read(claude)).toBe(`Rules.\r\n\r\n${claudeBlock("Trackers/Bilinear/Bilinear.md").replace(/\n/g, "\r\n")}`);
   });
 
   it("adds the rule about follow-ups, naming the tracker's triage state", async () => {
@@ -885,7 +885,7 @@ describe("for LLM agents", () => {
       expect(await update(".")).toBe(`updated ${claudeSkill}\nunchanged ${local}\nupdated ${codexSkill}\nunchanged ${agents}\n`);
       expect(s().read(claudeSkill)).toContain("name: bilinear");
       expect(s().read(plain)).toBe("# Rules\n");
-      expect(s().read(local)).toBe(claudeBlock("Trackers/Bilinear"));
+      expect(s().read(local)).toBe(claudeBlock("Trackers/Bilinear/Bilinear.md"));
     });
 
     it("creates a skill that is missing beside instructions that are there, and refreshes only a skill that is alone", async () => {
@@ -929,7 +929,7 @@ describe("for LLM agents", () => {
     it("keeps the line endings of a file that has CRLF", async () => {
       repo();
       const claude = join(s().vault, "CLAUDE.md");
-      const crlf = `# Rules\n\n${claudeBlock("Trackers/Bilinear")}`.replace(/\n/g, "\r\n");
+      const crlf = `# Rules\n\n${claudeBlock("Trackers/Bilinear/Bilinear.md")}`.replace(/\n/g, "\r\n");
       fs.writeFileSync(claude, crlf.replace("Track every piece", "Track some"));
       expect(await update(".")).toBe(`created ${join(s().vault, CLAUDE)}\nupdated ${claude}\n`);
       expect(s().read(claude)).toBe(crlf);
@@ -961,7 +961,17 @@ describe("for LLM agents", () => {
       s().cwd = other;
       await s().ok("agent-setup", s().vault, "--update");
       expect(s().read(claude)).toBe(before);
-      expect(before).toContain("\n    Trackers/Bilinear\n");
+      expect(before).toContain("\n    Trackers/Bilinear/Bilinear.md\n");
+    });
+
+    it("keeps a section that names the tracker by its folder, as older versions wrote it", async () => {
+      repo();
+      const claude = join(s().vault, "CLAUDE.md");
+      await setup(".", "--claude", "--followups");
+      s().edit(claude, "    Trackers/Bilinear/Bilinear.md\n", "    Trackers/Bilinear\n");
+      const before = s().read(claude);
+      expect(await update(".")).toContain(`unchanged ${claude}`);
+      expect(s().read(claude)).toBe(before);
     });
 
     it("takes the triage state from the tracker the section names, not the one that was there when it was written", async () => {
@@ -981,10 +991,10 @@ describe("for LLM agents", () => {
       s().edit(s().index, "triage-state: triage\n", "");
       let r = await s().run("--tracker", s().dir, "agent-setup", ".", "--update");
       expect(r.code).toBe(1);
-      expect(r.err).toContain(`${claude} names the tracker Trackers/Bilinear, which has no triage state`);
+      expect(r.err).toContain(`${claude} names the tracker Trackers/Bilinear/Bilinear.md, which has no triage state`);
       expect(r.err).toContain("run agent-setup without --update");
       expect(s().read(skill)).toBe("an older version");
-      s().edit(claude, "    Trackers/Bilinear\n", "    Trackers/Gone\n");
+      s().edit(claude, "    Trackers/Bilinear/Bilinear.md\n", "    Trackers/Gone\n");
       r = await s().run("agent-setup", ".", "--update");
       expect(r.code).toBe(1);
       expect(r.err).toContain(`${claude} names the tracker Trackers/Gone, which cannot be read`);
@@ -1024,6 +1034,18 @@ describe("for LLM agents", () => {
     });
   });
 
+  it("names the tracker of a folder of several by its index note", async () => {
+    repo();
+    const other = join(s().dir, "Other.md");
+    await s().ok("init", other, "--prefix", "OT");
+    await s().ok("--tracker", other, "agent-setup", ".", "--claude");
+    expect(s().read(join(s().vault, "CLAUDE.md"))).toBe(claudeBlock("Trackers/Bilinear/Other.md"));
+    const r = await s().run("--tracker", s().dir, "agent-setup", ".", "--claude");
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("holds several trackers");
+    expect(await s().ok("agent-setup", ".", "--update")).toContain(`unchanged ${join(s().vault, "CLAUDE.md")}`);
+  });
+
   it("names the tracker from the root of the repository when it is in it or beside it, else in full", async () => {
     const repo = join(s().vault, "code", "repo");
     fs.mkdirSync(join(repo, ".git"), { recursive: true });
@@ -1041,25 +1063,25 @@ describe("for LLM agents", () => {
 
     // Inside the repository: from its root, wherever the command or the folder is.
     const inside = await make(join(repo, "docs", "Tracker"));
-    expect(await written(repo, inside)).toBe(codexBlock("docs/Tracker"));
-    expect(await written(join(repo, "docs", "deep"), inside)).toBe(codexBlock("docs/Tracker"));
-    expect(await written(repo, inside, "sub")).toBe(codexBlock("docs/Tracker"));
-    expect(await written(repo, inside, join("docs", "deep"))).toBe(codexBlock("docs/Tracker"));
-    expect(await written(inside, inside)).toBe(codexBlock("docs/Tracker"));
+    expect(await written(repo, inside)).toBe(codexBlock("docs/Tracker/Tracker.md"));
+    expect(await written(join(repo, "docs", "deep"), inside)).toBe(codexBlock("docs/Tracker/Tracker.md"));
+    expect(await written(repo, inside, "sub")).toBe(codexBlock("docs/Tracker/Tracker.md"));
+    expect(await written(repo, inside, join("docs", "deep"))).toBe(codexBlock("docs/Tracker/Tracker.md"));
+    expect(await written(inside, inside)).toBe(codexBlock("docs/Tracker/Tracker.md"));
 
     // One level above the repository: still relative.
     const beside = await make(join(s().vault, "code", "Notes", "Tracker"));
-    expect(await written(repo, beside)).toBe(codexBlock("../Notes/Tracker"));
+    expect(await written(repo, beside)).toBe(codexBlock("../Notes/Tracker/Tracker.md"));
 
     // Further away: the absolute path.
-    expect(await written(repo, s().dir)).toBe(codexBlock(s().dir));
+    expect(await written(repo, s().dir)).toBe(codexBlock(s().index));
 
     // The tracker folder is the repository.
     fs.mkdirSync(join(beside, ".git"));
-    expect(await written(beside, beside)).toBe(codexBlock("."));
+    expect(await written(beside, beside)).toBe(codexBlock("Tracker.md"));
 
     // No repository: the absolute path.
-    expect(await written(s().vault, s().dir)).toBe(codexBlock(s().dir));
+    expect(await written(s().vault, s().dir)).toBe(codexBlock(s().index));
   });
 
   it("names the tracker in full in the home directory, even in a repository", async () => {
@@ -1068,7 +1090,7 @@ describe("for LLM agents", () => {
     await s().ok("init", join(home(), "Notes", "Tracker", "Tracker.md"), "--prefix", "HM");
     for (const [folder, file] of [[".claude", "CLAUDE.md"], [".codex", "AGENTS.md"]]) {
       await s().ok("--tracker", join(home(), "Notes", "Tracker"), "agent-setup", `~/${folder}`);
-      expect(s().read(join(home(), folder, file)), folder).toContain(`Its path:\n\n    ${join(home(), "Notes", "Tracker")}\n`);
+      expect(s().read(join(home(), folder, file)), folder).toContain(`Its path:\n\n    ${join(home(), "Notes", "Tracker", "Tracker.md")}\n`);
     }
   });
 
@@ -1082,7 +1104,7 @@ describe("for LLM agents", () => {
       expect(await setup(".", "--claude", "--local")).toBe(
         `created ${join(s().vault, CLAUDE)}\ncreated ${local}\nexcluded /CLAUDE.local.md in ${exclude()}\nexcluded /.claude/skills/bilinear/ in ${exclude()}\n`,
       );
-      expect(s().read(local)).toBe(claudeBlock("Trackers/Bilinear"));
+      expect(s().read(local)).toBe(claudeBlock("Trackers/Bilinear/Bilinear.md"));
       expect(fs.existsSync(join(s().vault, "CLAUDE.md"))).toBe(false);
       expect(s().read(exclude())).toBe("/CLAUDE.local.md\n/.claude/skills/bilinear/\n");
       expect(await setup(".", "--claude", "--local")).toBe(`unchanged ${join(s().vault, CLAUDE)}\nunchanged ${local}\n`);

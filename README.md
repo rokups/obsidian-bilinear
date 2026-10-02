@@ -209,11 +209,12 @@ the command says that nothing was excluded.
   blocks what, with large work split into issues that the issue for the
   whole is blocked by, and which issues are related. It also describes the
   commands, the properties and the exit codes.
-- The instructions say only where: they name one tracker and refer to the
-  skill. In a project the tracker is named by its path from the root of the
-  repository if it is inside the repository or one level above it, and by its
-  absolute path otherwise, or when `<dir>` is in no repository; in your home
-  folders it is always the absolute path. They sit between
+- The instructions say only where: they name one tracker, by the path of its
+  index note, and refer to the skill. A folder of several trackers can so
+  serve several projects, each with its own. In a project the path is from
+  the root of the repository if the tracker is inside the repository or one
+  level above it, and absolute otherwise, or when `<dir>` is in no
+  repository; in your home folders it is always absolute. They sit between
   `<!-- bilinear:start -->` and `<!-- bilinear:end -->`; running the command
   again replaces that block and leaves the rest of the file alone.
 - `--followups` adds a rule to the section: whatever a task skips, puts off

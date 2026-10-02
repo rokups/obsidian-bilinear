@@ -572,7 +572,8 @@ const COMMANDS: Record<string, Command> = {
           if (idx.triageState === null) throw new OpError("the tracker has no triage state for follow-ups to wait in; make one with: bilinear state triage --triage");
           triage = idx.triageState;
         }
-        where = root === null ? native(t.dir) : trackerPath(native(t.dir), root);
+        // The index note, not its folder, which may hold other trackers too.
+        where = root === null ? native(t.indexPath) : trackerPath(native(t.indexPath), root);
       }
       if (local && !p.home) {
         for (const file of p.targets.flatMap((target) => [target.skill, target.file])) {

@@ -14,16 +14,21 @@ export const SKILL_NAME = "bilinear";
 /** The skill, as a SKILL.md: frontmatter that says when to use it, then how. */
 export const SKILL = `---
 name: ${SKILL_NAME}
-description: Track work as issues in a Bilinear tracker, a folder of Markdown notes in an Obsidian vault, using the bilinear command-line client. Use for all work in a project whose instructions name a Bilinear issue tracker, where every piece of work must be tracked as an issue from before it starts until it is finished, and whenever asked to create, find, update, comment on, reorder, archive or delete issues or tasks.
+description: Track work as issues in a Bilinear tracker, Markdown notes in an Obsidian vault, using the bilinear command-line client. Use for all work in a project whose instructions name a Bilinear issue tracker, where every piece of work must be tracked as an issue from before it starts until it is finished, and whenever asked to create, find, update, comment on, reorder, archive or delete issues or tasks.
 ---
 
 # Bilinear
 
-A Bilinear tracker is a folder: an index note (frontmatter \`bilinear: tracker\`)
-that lists the issues in order, and one Markdown note per issue in \`issues/\`
-(open) and \`archive/\` (archived). Issue IDs look like \`BL-12\`. The user may
-have the same tracker open in Obsidian; the CLI and Obsidian can be used at the
-same time.
+A Bilinear tracker is an index note (frontmatter \`bilinear: tracker\`) that
+lists the issues in order, and one Markdown note per issue beside it, in
+\`issues/\` (open) and \`archive/\` (archived). Issue IDs look like \`BL-12\`:
+the tracker's prefix and a number. The user may have the same tracker open in
+Obsidian; the CLI and Obsidian can be used at the same time.
+
+A folder may hold several trackers, each with a prefix of its own, whose
+notes lie together in \`issues/\` and \`archive/\`. The tracker of a project is
+the one its instructions name, by the path of its index note: work in that
+one only, and leave the issues of the others alone unless you are asked.
 
 ## Tracking work
 
@@ -158,11 +163,12 @@ npx --yes obsidian-bilinear <command>     # nothing to install; needs Node 20+
 bilinear <command>                        # if installed with npm install -g obsidian-bilinear
 \`\`\`
 
-The tracker is taken from \`--tracker PATH\` (the folder or its index note), then
-\`$BILINEAR_TRACKER\`, then a search upward from the working directory. Pass
-\`--tracker\` with the path the project's instructions give; a relative path
-there is from the root of the repository. Run \`<command> --help\` for a
-command's exact arguments.
+The tracker is taken from \`--tracker PATH\` (its index note, or a folder with
+one tracker), then \`$BILINEAR_TRACKER\`, then a search upward from the working
+directory. Pass \`--tracker\` with the path the project's instructions give,
+with every command, or set \`BILINEAR_TRACKER\` to it; a relative path there
+is from the root of the repository. Run \`<command> --help\` for a command's
+exact arguments.
 
 ## Commands
 
@@ -213,8 +219,9 @@ bilinear set BL-12 status=done
   description. Do not use triage to ask leave for what you can decide.
 - Before you put an issue in the triage state, search the tracker for the
   issues that have to do with it: \`list --all\` shows every issue, the
-  closed and the archived ones too, and the notes in the tracker's folder
-  can be searched for the words that matter. Add the issue only if it is
+  closed and the archived ones too, and its notes (those in \`issues/\` and
+  \`archive/\` beside the index note whose names have its prefix) can be
+  searched for the words that matter. Add the issue only if it is
   warranted. If an issue already covers it, comment there instead; if one
   like it was rejected or canceled, do not propose it again unless something
   has changed, and then say what. When you do add it, set its relations as
@@ -247,9 +254,9 @@ export function repositoryRoot(folder: string): string | null {
 }
 
 /**
- * How instructions name a tracker: by its path from the root of the
- * repository when it is inside the repository or beside it (one level up),
- * and by its absolute path when it is further away.
+ * How instructions name a tracker: by the path of its index note, from the
+ * root of the repository when it is inside the repository or beside it (one
+ * level up), and by its absolute path when it is further away.
  */
 export function trackerPath(tracker: string, root: string): string {
   const relative = nodePath.relative(root, tracker);
