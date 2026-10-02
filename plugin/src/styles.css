@@ -14,6 +14,7 @@
   font-size: var(--font-ui-small);
   color: var(--text-normal);
   --bl-row-height: 34px;
+  --bl-check-size: 14px;
   --bl-accent: var(--interactive-accent);
 }
 
@@ -121,7 +122,7 @@
   color: var(--text-muted);
 }
 
-.bl-link {
+.bl-root button.bl-link {
   box-shadow: none;
   background: transparent;
   color: var(--text-accent);
@@ -387,8 +388,8 @@ button.bl-filter-chip {
 
 .bl-root button.bl-check {
   flex: none;
-  width: 14px;
-  height: 14px;
+  width: var(--bl-check-size);
+  height: var(--bl-check-size);
   padding: 0;
   border: 1px solid var(--background-modifier-border-hover);
   border-radius: 3px;
@@ -801,19 +802,125 @@ input.bl-prompt-input {
 
 /* -- narrow panes and phones */
 
-@container (max-width: 520px) {
-  .bl-row .bl-label,
-  .bl-row .bl-due {
-    display: none;
-  }
-}
-
 .bl-root {
   container-type: inline-size;
 }
 
+.bl-toolbar .bl-fold-toggle {
+  display: none;
+}
+
+@container (max-width: 520px) {
+  body:not(.is-mobile) .bl-row .bl-label,
+  body:not(.is-mobile) .bl-row .bl-due {
+    display: none;
+  }
+
+  /* One row: the filter box, the toggle and the two actions. The layout
+     switch, the views and the second row fold away until the toggle opens
+     them, and then wrap below. */
+  .is-mobile .bl-toolbar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .is-mobile .bl-toolbar-main,
+  .is-mobile .bl-toolbar-options {
+    display: contents;
+  }
+
+  .is-mobile .bl-toolbar .bl-fold-toggle {
+    display: inline-flex;
+  }
+
+  .is-mobile .bl-toolbar .bl-fold,
+  .is-mobile .bl-toolbar-options > * {
+    order: 2;
+  }
+
+  .is-mobile .bl-toolbar:not(.is-open) .bl-fold,
+  .is-mobile .bl-toolbar:not(.is-open) .bl-toolbar-options > *,
+  .is-mobile .bl-toolbar-options > .bl-spacer,
+  .is-mobile .bl-new-text {
+    display: none;
+  }
+
+  /* Starts the folded controls on a line of their own. */
+  .is-mobile .bl-toolbar.is-open::before {
+    content: "";
+    order: 1;
+    flex: 0 0 100%;
+    margin-top: calc(-1 * var(--size-4-2));
+  }
+
+  .is-mobile .bl-toolbar .bl-chips {
+    order: 3;
+    flex: 0 0 100%;
+  }
+
+  .is-mobile .bl-filter {
+    flex-basis: 6em;
+    min-width: 0;
+  }
+
+  /* Two lines to a row: status, title and assignee, then priority, ID and
+     the chips. The checkbox hangs in the left padding. */
+  .is-mobile .bl-list .bl-row {
+    --bl-hang: calc(var(--bl-check-size) + var(--size-4-2));
+    flex-wrap: wrap;
+    height: auto;
+    min-height: var(--bl-row-height);
+    padding: var(--size-4-1) var(--size-4-3) var(--size-4-1) calc(var(--size-4-3) + var(--bl-hang));
+    row-gap: var(--size-2-1);
+  }
+
+  .is-mobile .bl-list .bl-row > .bl-check {
+    margin-left: calc(-1 * var(--bl-hang));
+  }
+
+  .is-mobile .bl-list .bl-row::after {
+    content: "";
+    order: 1;
+    flex: 0 0 100%;
+    margin-top: calc(-1 * var(--size-2-1));
+  }
+
+  .is-mobile .bl-list .bl-row > .bl-title {
+    flex: 1 1 0;
+    min-width: 0;
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-height: var(--line-height-tight);
+  }
+
+  .is-mobile .bl-list .bl-row > .bl-spacer {
+    display: none;
+  }
+
+  /* Lines the icons up with whatever wraps under them. */
+  .is-mobile .bl-list .bl-row > .bl-cell {
+    margin-left: calc(-1 * var(--size-2-2));
+  }
+
+  .is-mobile .bl-list .bl-row > .bl-cell-priority,
+  .is-mobile .bl-list .bl-row > .bl-id,
+  .is-mobile .bl-list .bl-row > .bl-chip,
+  .is-mobile .bl-list .bl-row > .bl-due,
+  .is-mobile .bl-list .bl-row > .bl-small {
+    order: 2;
+  }
+
+  .is-mobile .bl-list .bl-id {
+    min-width: 0;
+  }
+}
+
 .is-mobile .bl-root {
   --bl-row-height: 42px;
+  --bl-check-size: 18px;
 }
 
 .is-mobile .bl-root button.bl-check {
@@ -822,4 +929,69 @@ input.bl-prompt-input {
 
 .is-mobile .bl-column {
   flex-basis: 82vw;
+}
+
+.is-mobile .bl-option {
+  padding: var(--size-4-2) var(--size-4-3);
+}
+
+/* On a phone the navigation bar floats over the bottom of the view. */
+.is-phone .bl-list,
+.is-phone .bl-column-body {
+  padding-bottom: var(--view-bottom-spacing, 0px);
+}
+
+.is-phone .bl-bulk {
+  bottom: calc(var(--view-bottom-spacing, 0px) + var(--size-4-3));
+}
+
+/* The dialogs on a phone: fields two to a line and all the same size. */
+.is-phone .bl-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.is-phone .bl-field {
+  min-width: 0;
+}
+
+.is-phone .bl-field.bl-field-wide {
+  grid-column: 1 / -1;
+}
+
+.is-phone .bl-field input,
+.is-phone .bl-field select {
+  width: 100%;
+  min-width: 0;
+  height: var(--input-height);
+}
+
+.is-phone .bl-form-actions .bl-check-label {
+  flex: 0 0 100%;
+}
+
+.is-phone .bl-form-actions .bl-spacer {
+  display: none;
+}
+
+.is-phone .bl-form-actions button {
+  flex: 1 1 auto;
+}
+
+/* A state's name gets a line, and its icon and colour share the next. */
+.is-phone .bl-customize-row {
+  flex-wrap: wrap;
+}
+
+.is-phone .bl-customize-name {
+  flex-basis: 80%;
+}
+
+.is-phone .bl-customize-name ~ select {
+  flex: 1 1 40%;
+  min-width: 0;
+}
+
+.is-phone .bl-customize-row input.bl-customize-icon {
+  flex: 1 1 100%;
 }

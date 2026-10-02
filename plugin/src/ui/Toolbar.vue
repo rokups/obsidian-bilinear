@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject } from "vue";
+import { computed, inject, ref } from "vue";
 import { GROUP_KEYS, SORT_KEYS, UNASSIGNED, filterIsEmpty, type Filter } from "../store/query";
 import { CTRL } from "./controller";
 import type { MenuEntry } from "./host";
@@ -51,27 +51,33 @@ function moreMenu(e: MouseEvent): void {
   ]);
 }
 
+// In a narrow pane everything but the filter box folds away behind a toggle.
+const open = ref(false);
+/** Something folded away is narrowing or changing what the list shows. */
+const folded = computed(() => chips.value.length > 0 || c.showArchived.value || c.activeView.value !== null);
+
 function onText(): void {
   c.activeView.value = null;
 }
 </script>
 
 <template>
-  <div class="bl-toolbar">
-    <div class="bl-toolbar-row">
-      <div class="bl-segment" role="group" aria-label="Layout">
+  <div class="bl-toolbar" :class="{ 'is-open': open }">
+    <div class="bl-toolbar-row bl-toolbar-main">
+      <div class="bl-segment bl-fold" role="group" aria-label="Layout">
         <button :class="{ 'is-active': c.spec.layout === 'list' }" aria-label="List layout" @click="c.spec.layout = 'list'"><Icon name="list" /></button>
         <button :class="{ 'is-active': c.spec.layout === 'board' }" aria-label="Board layout" @click="c.spec.layout = 'board'"><Icon name="columns-3" /></button>
       </div>
-      <button class="bl-tool" @click="viewsMenu($event)"><Icon name="bookmark" /> {{ c.activeView.value ?? "Views" }}</button>
+      <button class="bl-tool bl-fold" @click="viewsMenu($event)"><Icon name="bookmark" /> {{ c.activeView.value ?? "Views" }}</button>
       <div class="bl-filter">
         <Icon name="search" />
         <input v-model="c.spec.filter.text" class="bl-filter-input" type="search" placeholder="Filter issues" aria-label="Filter issues" spellcheck="false" @input="onText" @keydown.esc.stop="($event.target as HTMLElement).blur()" />
       </div>
+      <button class="bl-tool bl-fold-toggle" :class="{ 'is-on': folded }" aria-label="Layout, filters and sorting" :aria-expanded="open" @click="open = !open"><Icon name="sliders-horizontal" /></button>
       <button class="clickable-icon" aria-label="More actions" @click="moreMenu($event)"><Icon name="more-horizontal" /></button>
-      <button class="mod-cta bl-new" @click="c.host.newIssue({})"><Icon name="plus" /> New issue</button>
+      <button class="mod-cta bl-new" aria-label="New issue" @click="c.host.newIssue({})"><Icon name="plus" /> <span class="bl-new-text">New issue</span></button>
     </div>
-    <div class="bl-toolbar-row">
+    <div class="bl-toolbar-row bl-toolbar-options">
       <button v-for="f in facets" :key="f.key" class="bl-tool" :class="{ 'is-on': c.spec.filter[f.key].length }" @click="facetMenu($event, f.key)">{{ f.title }}</button>
       <span class="bl-spacer"></span>
       <label class="bl-select">Group

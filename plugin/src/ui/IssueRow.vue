@@ -60,11 +60,11 @@ function onDrop(e: DragEvent): void {
     @dragstart="onDragStart" @dragend="c.dragEnd()" @dragover="onDragOver" @drop="onDrop"
   >
     <button class="bl-check" :class="{ 'is-on': isSelected }" role="checkbox" :aria-checked="isSelected" :aria-label="`Select ${issue.id}`" @click.stop="c.toggleSelect(issue.id)"></button>
-    <button class="bl-cell clickable-icon" :title="`Priority: ${issue.priority}`" :aria-label="`Priority: ${issue.priority}`" :disabled="issue.missing" @click.stop="c.openPicker('priority', [issue.id])">
+    <button class="bl-cell bl-cell-priority clickable-icon" :title="`Priority: ${issue.priority}`" :aria-label="`Priority: ${issue.priority}`" :disabled="issue.missing" @click.stop="c.openPicker('priority', [issue.id])">
       <PriorityIcon :priority="issue.priority" />
     </button>
     <span class="bl-id">{{ issue.id }}</span>
-    <button class="bl-cell clickable-icon" :title="`Status: ${issue.status ?? 'none'}`" :aria-label="`Status: ${issue.status ?? 'none'}`" :disabled="issue.missing" @click.stop="c.openPicker('status', [issue.id])">
+    <button class="bl-cell bl-cell-status clickable-icon" :title="`Status: ${issue.status ?? 'none'}`" :aria-label="`Status: ${issue.status ?? 'none'}`" :disabled="issue.missing" @click.stop="c.openPicker('status', [issue.id])">
       <StatusIcon :status="issue.status" :config="c.config.value" />
     </button>
     <span class="bl-title">{{ issue.title || issue.id }}</span>
