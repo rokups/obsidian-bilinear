@@ -5,6 +5,7 @@ import io
 import json
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -191,6 +192,25 @@ class ConflictTest(CliCase):
                 note.write_text(text)
         self.ok("set", "BL-1", "title=B")
 
+    def test_a_note_caught_empty_mid_write_is_read_again(self):
+        """Obsidian writes in place: for a moment the file is empty."""
+        import threading
+        self.ok("new", "A")
+        note = self.dir / "issues" / "BL-1.md"
+        text = note.read_text()
+        note.write_text("")
+        threading.Timer(0.02, note.write_text, [text]).start()
+        self.ok("set", "BL-1", "status=todo")
+        self.assertEqual(text.replace("status: backlog", "status: todo"), note.read_text())
+
+    def test_the_index_caught_empty_mid_write_is_read_again(self):
+        import threading
+        self.ok("new", "A")
+        text = self.index.read_text()
+        self.index.write_text("")
+        threading.Timer(0.02, self.index.write_text, [text]).start()
+        self.assertEqual(["BL-1"], self.ids())
+
     def test_no_temp_files_left_behind(self):
         self.ok("new", "A")
         self.ok("set", "BL-1", "status=todo")
@@ -218,11 +238,20 @@ class LockTest(CliCase):
             self.assertEqual(["Bilinear.md", "issues/BL-1.md"], self.entries())
         self.assertEqual("BL-2\n", self.ok("new", "B"))
 
-    def test_readers_do_not_wait(self):
+    def test_readers_wait_too(self):
         with bilinear.TrackerLock(self.dir):
-            self.assertEqual(["BL-1"], self.ids())
-            self.assertIn("BL-1  A", self.ok("show", "BL-1"))
-            self.assertEqual(0, self.run_cli("lint")[0])
+            for argv in (["list"], ["show", "BL-1"], ["lint"]):
+                with self.subTest(argv=argv):
+                    self.assertEqual((3, ""), self.run_cli(*argv)[:2])
+        self.assertEqual(["BL-1"], self.ids())
+
+    @unittest.skipIf(os.name == "nt" or os.geteuid() == 0, "needs a folder that cannot be written to")
+    def test_readers_work_in_a_read_only_folder(self):
+        os.chmod(self.dir, 0o555)
+        self.addCleanup(os.chmod, self.dir, 0o755)
+        self.assertEqual(["BL-1"], self.ids())
+        self.assertIn("BL-1  A", self.ok("show", "BL-1"))
+        self.assertNotEqual(0, self.run_cli("set", "BL-1", "status=todo")[0])
 
     def test_lock_is_released_after_a_failed_command(self):
         self.assertEqual(1, self.run_cli("set", "BL-1", "status=nope")[0])
@@ -237,10 +266,55 @@ class LockTest(CliCase):
         threading.Timer(0.3, lambda: lock.__exit__(None, None, None)).start()
         self.assertEqual("BL-2\n", self.ok("new", "B"))
 
-    @unittest.skipIf(bilinear.fcntl is None, "the folder itself is only locked on POSIX")
     def test_no_lock_file_is_left_in_the_vault(self):
         self.ok("new", "B")
-        self.assertEqual(["Bilinear.md", "issues/BL-1.md", "issues/BL-2.md"], self.entries())
+        self.ok("list")
+        self.assertEqual(1, self.run_cli("set", "BL-1", "status=nope")[0])
+        self.assertEqual(["Bilinear.md", "issues/BL-1.md", "issues/BL-2.md"], sorted(
+            p.relative_to(self.dir).as_posix() for p in self.dir.rglob("*") if p.is_file()))
+
+    def test_waits_for_a_lock_file_held_by_the_plugin(self):
+        """The plugin has no flock: it holds `.bilinear.lock` and touches it while it works."""
+        import threading
+        os.environ["BILINEAR_LOCK_TIMEOUT"] = "5"
+        lock = self.dir / bilinear.LOCK_FILE
+        lock.write_text('{"by": "plugin", "pid": 1, "token": "abc"}\n')
+        self.addCleanup(setattr, bilinear, "LOCK_STALE", bilinear.LOCK_STALE)
+        bilinear.LOCK_STALE = 0.3
+        beats = []
+
+        def beat():
+            if len(beats) < 6:
+                beats.append(1)
+                os.utime(lock, ns=(time.time_ns(), time.time_ns()))
+                threading.Timer(0.1, beat).start()
+            else:
+                bilinear.patiently(lock.unlink)
+
+        beat()
+        self.assertEqual("BL-2\n", self.ok("new", "B"))
+        self.assertEqual(6, len(beats))
+        self.assertFalse(lock.exists())
+
+    def test_takes_over_an_abandoned_lock_file(self):
+        os.environ["BILINEAR_LOCK_TIMEOUT"] = "5"
+        lock = self.dir / bilinear.LOCK_FILE
+        lock.write_text('{"by": "plugin", "pid": 1, "token": "abc"}\n')
+        self.addCleanup(setattr, bilinear, "LOCK_STALE", bilinear.LOCK_STALE)
+        bilinear.LOCK_STALE = 0.3
+        started = time.monotonic()
+        self.assertEqual("BL-2\n", self.ok("new", "B"))
+        self.assertGreaterEqual(time.monotonic() - started, 0.3)
+        self.assertFalse(lock.exists())
+
+    def test_a_fresh_lock_file_is_not_taken_over(self):
+        lock = self.dir / bilinear.LOCK_FILE
+        lock.write_text('{"by": "plugin", "pid": 1, "token": "abc"}\n')
+        code, _, err = self.run_cli("new", "B")
+        self.assertEqual(3, code)
+        self.assertIn("or by Obsidian", err)
+        self.assertTrue(lock.exists())
+        lock.unlink()
 
     def test_concurrent_processes_lose_nothing(self):
         import subprocess

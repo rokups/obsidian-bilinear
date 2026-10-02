@@ -106,13 +106,15 @@ bilinear lint --fix
 - Exit codes: 0 success, 1 usage or not found, 2 lint problems found, 3 write
   conflict after retries, a note moved or deleted while the command ran, or
   the tracker stayed locked.
-- Commands that write take a lock on the tracker folder first, so several
-  `bilinear` processes (scripts, agents, cron jobs) can work on one tracker
-  at once without losing each other's changes; they simply run in turn. A
-  command waits up to 10 seconds for its turn; set `BILINEAR_LOCK_TIMEOUT`
-  (seconds) to change that. On Linux and macOS the folder itself is locked
-  and nothing is added to the vault; on Windows a `.bilinear.lock` file in
-  the tracker folder is used. CI runs the CLI tests on all three.
+- Every command takes a lock on the tracker first, and so does every
+  operation of the plugin, so scripts, agents, cron jobs and Obsidian can
+  all work on one tracker at once without losing each other's changes or
+  seeing half of an operation; they simply run in turn. The lock is a
+  `.bilinear.lock` file in the tracker folder that exists only while an
+  operation runs. A command waits up to 10 seconds for its turn; set
+  `BILINEAR_LOCK_TIMEOUT` (seconds) to change that. `spec/FORMAT.md`
+  section 3.2 has the details, and what is and is not covered when you type
+  in a note while a script edits it.
 
 The CLI moves notes with a plain file move. Bare `[[BL-4]]` links survive;
 path-style links in other notes are only rewritten when the plugin does the
@@ -239,6 +241,19 @@ suites apply the operation with their own implementation and compare byte for
 byte; both also check that parsing and re-serializing every fixture file is
 the identity. The fixtures cover each operation, every row of the consistency
 table, and the YAML variants Obsidian emits.
+
+`scripts/stress_obsidian.mjs` races the CLI against the plugin in a running
+Obsidian: the plugin writing while the CLI reads, the reverse, both writing,
+and text being typed into a note while the CLI or the plugin edits it. Every
+edit carries its own marker, and the script reports each one that was
+acknowledged and is missing afterwards. It drives the plugin through
+`app.plugins.plugins.bilinear.ops`, the same operations the views use. Start
+Obsidian on a vault that has
+the plugin enabled with `--remote-debugging-port=9333`, then:
+
+```sh
+node scripts/stress_obsidian.mjs --vault /path/to/vault --seconds 20
+```
 
 Manual checklist, in `test-vault/`:
 

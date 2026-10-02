@@ -1,10 +1,11 @@
-import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf, type ViewState } from "obsidian";
+import { MarkdownView, Notice, Plugin, TFile, TextFileView, WorkspaceLeaf, type ViewState } from "obsidian";
 import { ARCHIVE_DIR, ID_RE, ISSUES_DIR, todayIso } from "./format/ids";
 import type { Tracker } from "./ops/io";
 import { shallowReactive, watch } from "vue";
+import * as issueOps from "./ops/issues";
 import { archiveClosed, commentIssue, createIssue, createTracker, setLabel, setStateStyle, type NewIssue } from "./ops/issues";
 import { lint } from "./ops/lint";
-import { notePath } from "./ops/tracker";
+import { listIssues, notePath } from "./ops/tracker";
 import { TrackerStore, folderOf } from "./store/tracker-store";
 import "./styles.css";
 import type { TrackerChoice } from "./ui/NewIssueForm.vue";
@@ -28,6 +29,11 @@ export default class BilinearPlugin extends Plugin {
   private asMarkdown = new WeakMap<WorkspaceLeaf, string>();
   private markdownActions = new WeakMap<MarkdownView, HTMLElement>();
   private active = false;
+  /**
+   * The tracker operations, for scripts and other plugins:
+   * `plugin.ops.setProps(plugin.tracker(indexFile), "BL-1", { status: "done" })`.
+   */
+  readonly ops = { ...issueOps, listIssues, lint };
 
   async onload(): Promise<void> {
     this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) as Partial<BilinearSettings> | null) };
@@ -35,6 +41,7 @@ export default class BilinearPlugin extends Plugin {
 
     this.registerView(VIEW_TYPE, (leaf) => new TrackerView(leaf, this));
     this.patchSetViewState();
+    this.patchSave();
     this.addSettingTab(new BilinearSettingTab(this.app, this));
     this.registerMarkdownCodeBlockProcessor("bilinear", (source, el, ctx) => {
       ctx.addChild(new EmbedChild(el, this, source, ctx.sourcePath));
@@ -191,6 +198,54 @@ export default class BilinearPlugin extends Plugin {
     proto.setViewState = patched;
     this.register(() => {
       if (proto.setViewState === patched) proto.setViewState = original;
+    });
+  }
+
+  /**
+   * An editor saves its whole text. If the note was changed a moment ago,
+   * by the CLI or by an operation of this plugin, and the editor has not
+   * taken the change in yet, that save would undo it. So the save of a
+   * tracker's note waits for the tracker's lock, and first has the view
+   * take in what is on disk: Obsidian merges it into the text being edited,
+   * as it does for any change made outside the editor.
+   */
+  private patchSave(): void {
+    const plugin = this;
+    const proto = TextFileView.prototype;
+    const original = proto.save;
+    const patched = async function (this: TextFileView, clear?: boolean): Promise<void> {
+      const file = this.file;
+      const ours = plugin.active && file && (ID_RE.test(file.basename) || plugin.isTracker(file));
+      const index = ours ? plugin.trackerContaining(file.path) : null;
+      if (!file || !index) return original.call(this, clear);
+      const { adapter } = plugin.app.vault;
+      const save = async (): Promise<void> => {
+        // Neither of these is part of the public API; without them the save
+        // goes ahead as before.
+        const { lastSavedData: known, loadFileInternal: reload } = this as unknown as Record<string, unknown>;
+        if (typeof known === "string" && typeof reload === "function") {
+          const onDisk = await adapter.read(file.path).catch(() => known);
+          if (onDisk !== known) await reload.call(this, file, false);
+        }
+        saving = true;
+        await original.call(this, clear);
+      };
+      const io = new VaultIO(plugin.app);
+      const dir = folderOf(index);
+      let saving = false;
+      // An operation of ours may be waiting for this very save (a note is
+      // saved as its view closes), so the save must not wait for it in turn.
+      if (io.locking(dir)) return save();
+      try {
+        await io.lock(dir, save);
+      } catch (e) {
+        if (saving) throw e;
+        await original.call(this, clear); // The lock could not be had; save all the same.
+      }
+    };
+    proto.save = patched;
+    this.register(() => {
+      if (proto.save === patched) proto.save = original;
     });
   }
 

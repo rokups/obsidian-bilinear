@@ -85,8 +85,13 @@ export function requireItem(idx: Index, id: string): Item {
   return it;
 }
 
+/** Run fn holding the tracker's lock: no other operation, here or in the CLI, runs meanwhile. Not reentrant. */
+export function locked<T>(t: Tracker, fn: () => Promise<T>): Promise<T> {
+  return t.io.lock ? t.io.lock(t.dir, fn) : fn();
+}
+
 async function noteTitle(t: Tracker, path: string): Promise<string> {
-  const quick = t.io.title?.(path);
+  const quick = await t.io.title?.(path);
   if (quick !== undefined) return cleanTitle(quick);
   const text = await t.io.read(path);
   return text === null ? "" : cleanTitle(new Doc(text).getStr("title"));
@@ -138,11 +143,13 @@ export async function issueRecord(t: Tracker, item: Item): Promise<IssueRecord> 
 }
 
 /** Every issue, open and archived, in index order, read with the subset parser. */
-export async function listIssues(t: Tracker): Promise<IssueRecord[]> {
-  const idx = await readIndex(t);
-  const out: IssueRecord[] = [];
-  for (const it of idx.unique()) out.push(await issueRecord(t, it));
-  return out;
+export function listIssues(t: Tracker): Promise<IssueRecord[]> {
+  return locked(t, async () => {
+    const idx = await readIndex(t);
+    const out: IssueRecord[] = [];
+    for (const it of idx.unique()) out.push(await issueRecord(t, it));
+    return out;
+  });
 }
 
 /** Top-level notes of a folder that carry `bilinear: tracker`, folder-named note first. */

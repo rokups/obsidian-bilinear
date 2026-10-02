@@ -6,7 +6,7 @@
 export interface TrackerIO {
   /** File contents, or null if there is no such file. */
   read(path: string): Promise<string | null>;
-  /** Atomically replace the contents with fn(contents). */
+  /** Replace the contents with fn(contents). */
   process(path: string, fn: (text: string) => string): Promise<void>;
   /** Create a file that must not exist yet. Returns false if it does. */
   createExclusive(path: string, text: string): Promise<boolean>;
@@ -18,10 +18,15 @@ export interface TrackerIO {
   /** Names (without `.md`) of the Markdown files directly in a folder. */
   listNotes(folder: string): Promise<string[]>;
   /**
-   * Optional shortcut for a note's `title` property. Return undefined when
-   * unknown, and the note is read instead.
+   * Optional shortcut for a note's `title` property. Resolve to undefined
+   * when it is unknown or may be out of date, and the note is read instead.
    */
-  title?(path: string): string | null | undefined;
+  title?(path: string): Promise<string | null | undefined>;
+  /**
+   * Optional: run fn while holding the lock on a tracker folder, which keeps
+   * out every other operation, in this program and in others.
+   */
+  lock?<T>(dir: string, fn: () => Promise<T>): Promise<T>;
 }
 
 export interface Tracker {

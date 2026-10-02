@@ -10,8 +10,10 @@ same files.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
-import hashlib
+import errno
+import io
 import json
 import os
 import re
@@ -41,7 +43,11 @@ STATE_SHAPES = ["dashed", "circle", "quarter", "half", "three-quarters", "check"
 LIST_KEYS = ("labels", "blocked-by")
 RETRIES = 3
 LOCK_TIMEOUT = 10.0  # seconds; override with BILINEAR_LOCK_TIMEOUT
-LOCK_FILE = ".bilinear.lock"  # only where a folder cannot be locked itself
+LOCK_STALE = 8.0  # seconds without a heartbeat after which a lock file is taken over
+LOCK_POLL = 0.004  # seconds between attempts to take the lock file
+LOCK_YIELD = 0.015  # seconds to stand back for a program that is already waiting
+LOCK_FILE = ".bilinear.lock"
+WAIT_FILE = ".bilinear.lock.wait"
 
 EXIT_OK = 0
 EXIT_USAGE = 1
@@ -967,18 +973,22 @@ except ImportError:  # Windows
 class TrackerLock:
     """Exclusive lock on a tracker folder, held for one whole command.
 
-    Every command that writes takes it first, so two CLI processes never
-    interleave: the second waits for the first to finish and then works on
-    what the first left behind. The lock is advisory and only binds other
-    `bilinear` processes; Obsidian and sync tools are covered by the hash
-    check in update_file instead.
+    Every command takes it first, so nothing interleaves: a second command
+    waits for the first to finish and then works on what the first left
+    behind. Two locks are taken, in this order:
 
-    On POSIX the folder itself is locked with flock, which leaves no file
-    behind and is released by the kernel if the process dies. Where that is
-    not possible a `.bilinear.lock` file in the folder is locked instead.
+    - Between `bilinear` processes, where the platform has it, flock on the
+      folder itself: nothing to clean up, released by the kernel if the
+      process dies.
+    - Between the CLI and the plugin, the lock file of spec/FORMAT.md section
+      3.2: `.bilinear.lock`, created exclusively and removed on release. The
+      plugin has no flock, so this is the lock it can share.
+
+    Commands that only read pass required=False: in a folder where no lock
+    file can be made (read-only media) they go ahead without one.
     """
 
-    def __init__(self, folder: Path, timeout: float | None = None):
+    def __init__(self, folder: Path, timeout: float | None = None, required: bool = True):
         self.folder = folder
         if timeout is None:
             try:
@@ -986,50 +996,152 @@ class TrackerLock:
             except ValueError:
                 timeout = LOCK_TIMEOUT
         self.timeout = timeout
+        self.required = required
         self.fd: int | None = None
+        self.path = folder / LOCK_FILE
+        self.content: bytes | None = None
 
-    def _try(self) -> bool:
+    def _flock(self) -> bool:
         try:
-            if fcntl is not None:
-                fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            else:
-                import msvcrt
-                os.lseek(self.fd, 0, os.SEEK_SET)
-                msvcrt.locking(self.fd, msvcrt.LK_NBLCK, 1)
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             return False
         return True
 
-    def __enter__(self) -> "TrackerLock":
-        if fcntl is not None:
-            self.fd = os.open(self.folder, os.O_RDONLY)
-        else:
-            self.fd = os.open(self.folder / LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o644)
-        deadline = time.monotonic() + self.timeout
+    def _create(self) -> bool:
+        """Make the lock file, if there is none."""
+        content = json.dumps({"by": "cli", "pid": os.getpid(), "token": os.urandom(8).hex()}).encode() + b"\n"
+        try:
+            fd = patiently(lambda: os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+        except FileExistsError:
+            return False
+        try:
+            os.write(fd, content)
+        finally:
+            os.close(fd)
+        self.content = content
+        return True
+
+    def _seen(self):
+        """What identifies the lock file as it is now: its contents and its heartbeat."""
+        try:
+            return read_bytes_once(self.path), os.stat(self.path).st_mtime_ns
+        except OSError:
+            return None
+
+    def _give_up(self) -> ConflictError:
+        return ConflictError(
+            f"{self.folder} is locked by another bilinear process or by Obsidian; gave up after {self.timeout:g}s")
+
+    def _take_folder(self, deadline: float) -> None:
         delay = 0.005
-        while not self._try():
+        while not self._flock():
             if time.monotonic() >= deadline:
-                os.close(self.fd)
-                self.fd = None
-                raise ConflictError(
-                    f"{self.folder} is locked by another bilinear process; gave up after {self.timeout:g}s")
+                raise self._give_up()
             time.sleep(delay)
             delay = min(delay * 2, 0.1)
-        return self
 
-    def __exit__(self, *exc) -> None:
-        if self.fd is None:
-            return
+    def _take_file(self, deadline: float) -> None:
+        wait = self.folder / WAIT_FILE
+
+        def touched():
+            try:
+                return os.stat(wait).st_mtime_ns
+            except OSError:
+                return None
+
+        def remove(path: Path) -> None:
+            try:
+                patiently(lambda: os.unlink(path))
+            except OSError:
+                pass
+
+        # Someone is waiting for the lock already: let them have it first.
+        # A waiter keeps touching the wait file; one that nobody touches was
+        # left by a program that died.
+        mark = touched()
+        if mark is not None:
+            time.sleep(LOCK_YIELD)
+            if touched() == mark:
+                remove(wait)
+
+        waiting = False
+        seen, since = None, time.monotonic()
+        try:
+            while not self._create():
+                now = time.monotonic()
+                # A lock file whose owner has stopped touching it is abandoned
+                # (the owner died). Timed on our own clock, so clocks that
+                # disagree across a network share do not matter.
+                current = self._seen()
+                if current != seen:
+                    seen, since = current, now
+                elif current is not None and now - since >= LOCK_STALE:
+                    if self._seen() == current:
+                        remove(self.path)
+                    continue
+                if now >= deadline:
+                    raise self._give_up()
+                waiting = True
+                with open(wait, "ab"):
+                    pass
+                os.utime(wait, ns=(time.time_ns(), time.time_ns()))
+                time.sleep(LOCK_POLL)
+        finally:
+            if waiting:
+                remove(wait)
+
+    def __enter__(self) -> "TrackerLock":
+        deadline = time.monotonic() + self.timeout
         try:
             if fcntl is not None:
-                fcntl.flock(self.fd, fcntl.LOCK_UN)
-            else:
-                import msvcrt
-                os.lseek(self.fd, 0, os.SEEK_SET)
-                msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
+                self.fd = os.open(self.folder, os.O_RDONLY)
+                self._take_folder(deadline)
+            try:
+                self._take_file(deadline)
+            except PermissionError:
+                if self.required:
+                    raise
+            except OSError as e:
+                if self.required or e.errno != errno.EROFS:
+                    raise
+        except BaseException:
+            self.__exit__()
+            raise
+        return self
+
+    def touch(self) -> None:
+        """Heartbeat: show the lock is still in use. Called as a command makes progress."""
+        if self.content is not None:
+            try:
+                os.utime(self.path)
+            except OSError:
+                pass
+
+    def __exit__(self, *exc) -> None:
+        global _held_lock
+        if _held_lock is self:
+            _held_lock = None
+        try:
+            # Remove the lock file only if it is still ours: after a long
+            # stall another process may have taken it over.
+            if self.content is not None:
+                try:
+                    if read_bytes_once(self.path) == self.content:
+                        patiently(lambda: os.unlink(self.path))
+                except OSError:
+                    pass
+                self.content = None
         finally:
-            os.close(self.fd)
-            self.fd = None
+            if self.fd is not None:
+                try:
+                    fcntl.flock(self.fd, fcntl.LOCK_UN)
+                finally:
+                    os.close(self.fd)
+                    self.fd = None
+
+
+_held_lock: TrackerLock | None = None  # the lock of the running command, for heartbeats
 
 
 def _sync_dir(folder: Path) -> None:
@@ -1044,10 +1156,6 @@ def _sync_dir(folder: Path) -> None:
         pass
     finally:
         os.close(fd)
-
-
-def _digest(data: bytes) -> bytes:
-    return hashlib.sha256(data).digest()
 
 
 def patiently(fn):
@@ -1073,12 +1181,31 @@ def replace_file(src: Path | str, dst: Path) -> None:
     patiently(lambda: os.replace(src, dst))
 
 
-def read_bytes(path: Path) -> bytes:
+def read_bytes_once(path: Path) -> bytes:
     return patiently(path.read_bytes)
 
 
-def atomic_write(path: Path, data: bytes) -> None:
-    """Replace a file's contents in one step: readers see the old or the new, never a mix."""
+def read_bytes(path: Path) -> bytes:
+    """Read a whole file, not one caught in the middle of being written.
+
+    The CLI and the plugin replace files in one step, but Obsidian's editor
+    and other tools write in place: the file is emptied, then filled. A file
+    found empty, or one that changed while it was read, is read again.
+    """
+    data = b""
+    for attempt in range(8):
+        before = os.stat(path)
+        data = read_bytes_once(path)
+        after = os.stat(path)
+        if data and len(data) == after.st_size and (before.st_ino, before.st_size, before.st_mtime_ns) == (
+                after.st_ino, after.st_size, after.st_mtime_ns):
+            break
+        time.sleep(0.002 * (attempt + 1))
+    return data
+
+
+def write_temp(path: Path, data: bytes) -> str:
+    """Write data to a temporary file next to path, ready to be moved over it."""
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix="." + path.name + ".", suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as f:
@@ -1089,14 +1216,17 @@ def atomic_write(path: Path, data: bytes) -> None:
             os.chmod(tmp, os.stat(path).st_mode & 0o7777)
         except FileNotFoundError:
             os.chmod(tmp, 0o644)
-        replace_file(tmp, path)
-        _sync_dir(path.parent)
     except BaseException:
-        try:
-            os.unlink(tmp)
-        except FileNotFoundError:
-            pass
+        discard(tmp)
         raise
+    return tmp
+
+
+def discard(tmp: str) -> None:
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
 
 
 def update_file(path: Path, fn) -> bool:
@@ -1106,25 +1236,35 @@ def update_file(path: Path, fn) -> bool:
     whole operation is redone on a fresh read if the file changed between
     read and write; after three attempts ConflictError is raised.
 
-    Other bilinear processes are kept out by TrackerLock. This check is for
-    writers that do not take the lock (Obsidian, sync): it catches a change
-    made while fn ran, but not one landing in the instant between the
-    re-read and the rename.
+    Other bilinear processes and the plugin are kept out by TrackerLock.
+    This check is for writers that do not take the lock (Obsidian's editor,
+    sync). The new contents are written out first and the file is compared
+    last, so only a change landing in the instant between that comparison
+    and the rename goes unnoticed. The rename replaces the file in one step:
+    readers see the old contents or the new, never part of each.
     """
     for _ in range(RETRIES):
         old = read_bytes(path)
-        seen = _digest(old)
         new = fn(old.decode("utf-8"))
         if new is None:
             return False
         data = new.encode("utf-8")
-        if _before_write_hook:
-            _before_write_hook(path)
-        if _digest(read_bytes(path)) != seen:
-            continue
-        if data != old:
-            atomic_write(path, data)
-        return True
+        if _held_lock:
+            _held_lock.touch()
+        tmp = write_temp(path, data) if data != old else None
+        try:
+            if _before_write_hook:
+                _before_write_hook(path)
+            if read_bytes(path) != old:
+                continue
+            if tmp is not None:
+                replace_file(tmp, path)
+                tmp = None
+                _sync_dir(path.parent)
+            return True
+        finally:
+            if tmp is not None:
+                discard(tmp)
     raise ConflictError(f"{path} kept changing; gave up after {RETRIES} attempts")
 
 
@@ -1138,7 +1278,13 @@ def is_index_note(path: Path) -> bool:
             return f.read(4096)
 
     try:
-        head = patiently(read_head).decode("utf-8", errors="replace")
+        head = b""
+        for attempt in range(8):  # as in read_bytes: empty may mean mid-write
+            head = patiently(read_head)
+            if head:
+                break
+            time.sleep(0.002 * (attempt + 1))
+        head = head.decode("utf-8", errors="replace")
     except OSError:
         return False
     if not head.lstrip("﻿").startswith("---"):
@@ -2092,6 +2238,7 @@ def build_parser() -> Parser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global _held_lock
     parser = build_parser()
     args = parser.parse_args(argv)
     if not args.command:
@@ -2101,24 +2248,40 @@ def main(argv: list[str] | None = None) -> int:
         if not args.needs_tracker:
             return args.func(args)
         tracker = Tracker.open(getattr(args, "tracker", None) or os.environ.get("BILINEAR_TRACKER"))
-        # Reads need no lock: every write is an atomic replace. `lint` only
-        # writes with --fix.
-        if not args.writes or (args.command == "lint" and not args.fix) or (args.command in ("label", "state") and not args.name):
-            return args.func(tracker, args)
-        with TrackerLock(tracker.dir):
-            return args.func(tracker, args)
+        # Commands that only read are locked too, so they never see half of
+        # an operation. Their output is held back until the lock is released:
+        # a full pipe must not keep the tracker locked.
+        reads = not args.writes or (args.command == "lint" and not args.fix) or (args.command in ("label", "state") and not args.name)
+        out = io.StringIO()
+        try:
+            with TrackerLock(tracker.dir, required=not reads) as lock:
+                _held_lock = lock
+                with contextlib.redirect_stdout(out):
+                    return args.func(tracker, args)
+        finally:
+            sys.stdout.write(out.getvalue())
+            sys.stdout.flush()
     except UsageError as e:
         warn(str(e))
         return EXIT_USAGE
     except ConflictError as e:
         warn(str(e))
         return EXIT_CONFLICT
+    except PermissionError as e:
+        warn(f"{e.filename}: permission denied")
+        return EXIT_USAGE
     except FileNotFoundError as e:
         # A file that was there when the command looked is gone: Obsidian or
         # a sync tool moved or deleted it meanwhile.
         warn(f"{e.filename} was moved or deleted while the command ran; run the command again")
         return EXIT_CONFLICT
     except BrokenPipeError:
+        # The reader went away (`bilinear list | head`). Point stdout at
+        # nothing, so the interpreter's own flush at exit stays quiet.
+        try:
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        except (OSError, ValueError):
+            pass
         return EXIT_OK
 
 

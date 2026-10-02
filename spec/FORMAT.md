@@ -384,43 +384,104 @@ of the two, then the tracker folder itself.
 One problem is reported per occurrence. A problem's subject is an issue ID, or
 the index note.
 
-### 3.2 Concurrent writes
+### 3.2 Concurrent use
 
-- Plugin: all writes go through `vault.process`; note moves go through
-  `fileManager.renameFile`; deletes through `fileManager.trashFile`.
-- CLI against CLI: every command that writes first takes an exclusive lock
-  on the tracker and holds it until it exits, so commands from different
-  processes run one after another, each on what the previous one left. On
-  POSIX the lock is `flock` on the tracker folder itself: nothing is written
-  to the vault, and the kernel releases it if the process dies. Where a
-  folder cannot be locked (Windows) a `.bilinear.lock` file in the folder is
-  locked instead. A command waits up to 10 seconds for the lock
-  (`BILINEAR_LOCK_TIMEOUT`, in seconds) and then exits with code 3 having
-  changed nothing. Commands that only read take no lock.
-- CLI against other writers: read the file and hash it; before writing,
-  re-read and compare; if it changed, redo the operation on the new content
-  (up to three attempts, then exit code 3). Write to a temp file in the same
-  directory, `fsync` it and `os.replace` it into place, so a reader sees the
-  old contents or the new, never part of each. A file that another writer
-  moves or deletes after the command has found it also ends the command with
-  exit code 3; running it again works on what is there.
+An operation of section 2 runs alone: nothing else reads or changes the
+tracker between its first read and its last write. The CLI and the plugin
+get there the same way.
+
+**The lock file.** A tracker is locked by creating `.bilinear.lock` in the
+tracker folder, exclusively (the create fails if the file exists), and
+unlocked by deleting it. Every operation takes the lock first and holds it to
+the end: every CLI command, the commands that only read included, and every
+plugin operation.
+
+- The file holds one line of JSON, `{"by": "cli", "pid": 4711, "token":
+  "9f1c…"}`. Only `token` matters: a holder deletes the file on release only
+  if it still holds its own token.
+- A holder keeps the file's modification time moving while it works: the
+  plugin touches it every 2 seconds, the CLI before each file it writes. A
+  lock file that a waiting program has seen
+  unchanged, contents and modification time, for 8 seconds was left by a
+  program that died; the waiter deletes it and tries again. The 8 seconds are
+  measured on the waiter's own clock.
+- A program that does not get the lock tries again every few milliseconds,
+  and while it waits it keeps `.bilinear.lock.wait` in existence and touches
+  it on every attempt, deleting it when it stops waiting. A program about to
+  take the lock that finds this file stands back for 15 ms first, so that a
+  program running one operation after another cannot keep a waiting one out.
+  A wait file that is not touched during those 15 ms is left over and is
+  deleted.
+- A program gives up after 10 seconds (`BILINEAR_LOCK_TIMEOUT` for the CLI,
+  in seconds). The CLI then exits with code 3 having changed nothing; the
+  plugin shows a notice.
+- Both files are dot files: Obsidian does not show them, and they exist only
+  while an operation runs.
+
+Besides the lock file:
+
+- CLI against CLI: where the platform has `flock`, a command first takes it
+  on the tracker folder, then the lock file. The kernel releases `flock` when
+  a process dies, so CLI processes never depend on the 8-second rule among
+  themselves.
+- A CLI command that only reads goes ahead without the lock if the lock file
+  cannot be created (a read-only folder). Its output is written after the
+  lock is released, so a slow reader of that output does not hold the
+  tracker.
+- Plugin: operations within one Obsidian run one after another, then take
+  the lock file. On a phone there is no lock file, and no other program.
+  Under the lock the plugin asks the disk, not Obsidian's file list or
+  metadata cache, what exists and what a note's title is; those follow a
+  change made by the CLI with a delay.
+- Plugin: writes go through `vault.process`; note moves through
+  `fileManager.renameFile`; deletes through `fileManager.trashFile`. A move
+  counts as done when the note has moved; updating links in other notes,
+  which can wait for the user to answer a dialog, happens after the lock is
+  released.
 - The plugin re-reads on `vault` and `metadataCache` events, so CLI edits show
   up live.
 
+**Writers that take no lock.** Obsidian's editor, its Properties UI, other
+plugins and sync tools write notes without knowing of the lock, and Obsidian
+writes in place: the file is emptied, then filled.
+
+- The CLI reads a file again if it is empty or changed while being read, so
+  it does not act on half a file.
+- The CLI writes like this: read the file; work out the new contents; write
+  them to a temp file in the same directory and `fsync` it; read the file
+  again; if it changed, redo the operation on the new contents (up to three
+  attempts, then exit code 3); otherwise `os.replace` the temp file into
+  place. A reader sees the old contents or the new, never part of each. A
+  file that is moved or deleted after the command has found it also ends the
+  command with exit code 3; running it again works on what is there.
+- The editor saves its whole text two seconds after a keystroke, and would
+  undo a change made to the note since it last read it. The plugin therefore
+  wraps the save of every text view on a tracker's notes: the save takes the
+  tracker's lock and, if the note on disk is not what the view last read or
+  wrote, first has the view load it, which merges the change into the text
+  being edited. (If an operation of this Obsidian is in progress the save
+  does not wait for the lock, since the operation may be waiting for the
+  save.)
+
 ### 3.3 Known limits
 
-- The lock is advisory and binds only `bilinear` processes. A write by
-  Obsidian or a sync tool that lands in the instant between the CLI's re-read
-  and its rename is overwritten; a write at any earlier point of the command
-  is detected and the operation redone.
-- The reverse holds for the plugin. `vault.process` keeps writers inside
-  Obsidian apart, but it does not take the CLI's lock and does not check the
-  file again before writing: a CLI write that lands between its read and its
-  write is overwritten, and nothing reports it.
+- The lock binds the CLI and the plugin, nothing else. A write by a sync
+  tool, another plugin or a text editor that lands in the instant between
+  the CLI's last comparison and its rename, or between the read and the
+  write of the plugin's `vault.process`, is overwritten. A write at any
+  earlier point of a CLI command is detected and the operation redone.
+- The editor's save relies on two parts of Obsidian that are not in its
+  public API (the view's last-saved text and its load-and-merge step). If a
+  future Obsidian lacks them, the save still takes the lock but no longer
+  merges, and a change the CLI made to an open note within a few
+  milliseconds of a save can be lost again.
+- A program that is suspended for more than 8 seconds while it holds the
+  lock file (not merely slow: the plugin keeps touching the file) can find
+  that another has taken the lock over. The CLI's comparison before each
+  rename still applies.
 - An operation that touches a note and the index is two atomic writes, not
   one. Killed in between, it leaves the state described in section 2: the
   index correct and at worst a stray note.
-
 - A bad sync merge of the index can drop an issue from the tracker. The note
   survives as an orphan and `lint` reports it.
 - The CLI moves notes with a plain file move. Bare `[[BL-4]]` links survive, but

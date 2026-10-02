@@ -96,6 +96,6 @@ export class TrackerStore {
   }
 
   async saveViews(views: SavedView[]): Promise<void> {
-    await this.app.vault.process(this.indexFile, (text) => writeViews(text, views));
+    await this.io.lock(this.dir, () => this.io.process(this.indexFile.path, (text) => writeViews(text, views)));
   }
 }

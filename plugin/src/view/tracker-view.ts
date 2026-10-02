@@ -48,9 +48,9 @@ export class TrackerView extends FileView implements Host {
     return "list-checks";
   }
 
-  canAcceptExtension(extension: string): boolean {
-    return extension === "md";
-  }
+  // canAcceptExtension stays false: a view that accepts "md" is reused by
+  // Obsidian for every note opened in its tab, tracker or not. Index notes
+  // reach this view through the plugin's setViewState patch instead.
 
   async onLoadFile(file: TFile): Promise<void> {
     this.unmount();
