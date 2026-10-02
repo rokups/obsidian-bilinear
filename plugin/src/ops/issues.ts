@@ -18,6 +18,10 @@ export interface NewIssue {
   due?: string;
   /** Parent issue ID. */
   parent?: string;
+  /** IDs of the issues this one waits for. */
+  blockedBy?: string[];
+  /** The body of the note, as Markdown. */
+  description?: string;
   top?: boolean;
 }
 
@@ -82,11 +86,13 @@ export function createIssue(t: Tracker, args: NewIssue, today: string): Promise<
       assignee: args.assignee || null,
       due: args.due || null,
       parent: args.parent || null,
+      "blocked-by": args.blockedBy ?? [],
       created: today,
     };
     checkProps(idx, props, null, t.warn);
     if (props["parent"]) props["parent"] = makeLink(linkId(props["parent"] as string)!);
-    const text = newNoteText(props);
+    props["blocked-by"] = (args.blockedBy ?? []).map((v) => makeLink(linkId(v)!));
+    const text = newNoteText(props, args.description);
 
     const prefix = idx.prefix!;
     let highest = idx.highest();

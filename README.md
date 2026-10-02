@@ -79,7 +79,7 @@ bilinear lint --fix
 | Command | Purpose |
 |---|---|
 | `init <folder> --prefix BL` | Create the folder, index note, `issues/` and `archive/` |
-| `new "Title" [--status ..] [--priority ..] [--label ..] [--assignee ..] [--due ..] [--parent ..] [--top]` | Create an issue; prints the ID |
+| `new "Title" [--description ..] [--status ..] [--priority ..] [--label ..] [--assignee ..] [--due ..] [--parent ..] [--blocked-by ..] [--top]` | Create an issue; prints the ID |
 | `list [--status ..] [--label ..] [--assignee ..] [--priority ..] [--archived] [--all]` | List in index order |
 | `show <ID>` | Print properties and body |
 | `set <ID> key=value ...` | Change properties, including `title`. `key=` removes a key; `labels+=x` and `labels-=x` edit lists |
@@ -226,6 +226,10 @@ or by sync, show up live.
 Commands: create tracker, new issue (from anywhere), toggle tracker / Markdown
 view, archive closed issues, lint tracker, customize states and labels, add
 comment to this issue.
+
+The new issue dialog takes the whole issue: title, status, priority, assignee,
+due date, labels, parent, blockers and a Markdown description, so the note
+need not be opened afterwards. "Create and open" opens it all the same.
 
 Settings: the author name for comments, and the default folder for new
 trackers.

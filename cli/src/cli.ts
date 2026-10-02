@@ -134,7 +134,7 @@ const COMMANDS: Record<string, Command> = {
   },
 
   new: {
-    args: "<title> [--status S] [--priority P] [--label L]... [--assignee A] [--due YYYY-MM-DD] [--parent ID] [--top] [--json]",
+    args: "<title> [--status S] [--priority P] [--label L]... [--assignee A] [--due YYYY-MM-DD] [--parent ID] [--blocked-by ID]... [--description TEXT] [--top] [--json]",
     help: "create an issue and print its ID",
     options: {
       status: { type: "string" },
@@ -143,6 +143,8 @@ const COMMANDS: Record<string, Command> = {
       assignee: { type: "string" },
       due: { type: "string" },
       parent: { type: "string" },
+      "blocked-by": { type: "string", multiple: true },
+      description: { type: "string" },
       top: { type: "boolean" },
       json: { type: "boolean" },
     },
@@ -159,6 +161,8 @@ const COMMANDS: Record<string, Command> = {
           assignee: str(values["assignee"]),
           due: str(values["due"]),
           parent: str(values["parent"]),
+          blockedBy: csv(list(values["blocked-by"])),
+          description: str(values["description"]),
           top: values["top"] === true,
         },
         ctx.env["BILINEAR_TODAY"] || todayIso(),

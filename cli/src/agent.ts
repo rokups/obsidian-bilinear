@@ -29,9 +29,9 @@ work you do in that project is tracked in it, from before you start until
 after you finish. This is required, and it does not wait to be asked for.
 
 1. **Before starting**, find the issue for the work (\`list\`, \`show <ID>\`).
-   If there is none, create it with \`new "Title"\`, with a title that says
-   what is to be done, and write what is known into its description: what was
-   asked, the constraints, how to tell that it is done. Do not start work
+   If there is none, create it with \`new "Title" --description "..."\`, with a
+   title that says what is to be done and a description of what is known:
+   what was asked, the constraints, how to tell that it is done. Do not start work
    that has no issue. One issue is one piece of work that can be finished on
    its own; larger work is a parent issue with sub-issues (\`--parent <ID>\`).
 2. **On starting**, move the issue to the state that means it is being worked
@@ -74,7 +74,7 @@ command's exact arguments.
 
 - \`list [--status S] [--label L] [--assignee A] [--priority P] [--archived | --all] [--json]\`: issues in the tracker's order. Filters take comma-separated values
 - \`show <ID> [--json]\`: one issue: properties, linked issues, body and comments
-- \`new "Title" [--status S] [--priority P] [--label L] [--assignee A] [--due YYYY-MM-DD] [--parent ID] [--top]\`: create an issue; prints its ID
+- \`new "Title" [--description TEXT] [--status S] [--priority P] [--label L] [--assignee A] [--due YYYY-MM-DD] [--parent ID] [--blocked-by ID] [--top]\`: create an issue; prints its ID. The description is Markdown and may have several lines
 - \`set <ID> key=value ...\`: change properties. \`key=\` removes one; \`labels+=x\`, \`labels-=x\` edit a list
 - \`comment <ID> "text"\`: append a dated comment
 - \`move <ID> --top | --bottom | --before <ID> | --after <ID>\`: reorder; the order is the priority order the user sees

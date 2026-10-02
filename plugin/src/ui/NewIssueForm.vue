@@ -23,8 +23,12 @@ const form = reactive({
   labels: (props.defaults.labels ?? []).join(", "),
   assignee: props.defaults.assignee ?? "",
   due: props.defaults.due ?? "",
+  parent: props.defaults.parent ?? "",
+  blockedBy: (props.defaults.blockedBy ?? []).join(", "),
+  description: props.defaults.description ?? "",
   top: props.defaults.top ?? false,
 });
+const ids = (text: string) => text.split(/[\s,]+/).map((id) => id.trim().toUpperCase()).filter(Boolean);
 const titleInput = ref<HTMLInputElement | null>(null);
 const current = computed(() => props.trackers.find((t) => t.indexPath === form.tracker) ?? props.trackers[0]);
 
@@ -49,7 +53,9 @@ function submit(open: boolean): void {
       labels: form.labels.split(",").map((l) => l.trim()).filter(Boolean),
       assignee: form.assignee.trim() || undefined,
       due: form.due || undefined,
-      parent: props.defaults.parent,
+      parent: ids(form.parent)[0],
+      blockedBy: ids(form.blockedBy),
+      description: form.description,
       top: form.top,
     },
     open,
@@ -90,8 +96,19 @@ onMounted(() => {
         <input v-model="form.due" type="date" />
       </label>
     </div>
-    <label class="bl-field">Labels
-      <input v-model="form.labels" type="text" :placeholder="current?.labels.length ? current.labels.join(', ') : 'comma-separated'" />
+    <div class="bl-form-row">
+      <label class="bl-field bl-field-wide">Labels
+        <input v-model="form.labels" type="text" :placeholder="current?.labels.length ? current.labels.join(', ') : 'comma-separated'" />
+      </label>
+      <label class="bl-field">Parent
+        <input v-model="form.parent" type="text" placeholder="issue ID" />
+      </label>
+      <label class="bl-field">Blocked by
+        <input v-model="form.blockedBy" type="text" placeholder="issue IDs" />
+      </label>
+    </div>
+    <label class="bl-field">Description
+      <textarea v-model="form.description" class="bl-form-description" rows="8" placeholder="What is to be done, in Markdown"></textarea>
     </label>
     <div class="bl-form-actions">
       <label class="bl-check-label"><input v-model="form.top" type="checkbox" /> Add at the top</label>

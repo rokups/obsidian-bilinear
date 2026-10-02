@@ -624,6 +624,10 @@ button.bl-filter-chip {
 
 /* -- modals */
 
+.modal.bl-modal {
+  width: min(720px, 92vw);
+}
+
 .bl-form {
   display: flex;
   flex-direction: column;
@@ -650,6 +654,19 @@ button.bl-filter-chip {
   flex: 1 1 8em;
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
+}
+
+.bl-field.bl-field-wide {
+  flex-grow: 3;
+}
+
+.bl-form textarea.bl-form-description {
+  width: 100%;
+  min-height: 8em;
+  resize: vertical;
+  font-family: var(--font-text);
+  font-size: var(--font-ui-medium);
+  color: var(--text-normal);
 }
 
 .bl-form-actions {

@@ -5,14 +5,16 @@ import { Doc, type Value } from "./yaml";
 
 export const NOTE_KEY_ORDER = ["title", "status", "priority", "labels", "assignee", "due", "parent", "blocked-by", "created"];
 
-export function newNoteText(props: Record<string, Value | undefined>): string {
+/** A new note: the properties in the documented order, then the description, if there is one, as the body. */
+export function newNoteText(props: Record<string, Value | undefined>, description = ""): string {
   const doc = new Doc("");
   for (const key of NOTE_KEY_ORDER) {
     const value = props[key];
     if (value === undefined || value === null || (Array.isArray(value) && value.length === 0)) continue;
     doc.set(key, value);
   }
-  return doc.text();
+  const body = description.replace(/\r\n?/g, "\n").replace(/^\n+|\s+$/g, "");
+  return body ? `${doc.text()}\n${body}\n` : doc.text();
 }
 
 /** Append `- <date> <author>: <text>` under `## Comments`, creating the section if needed. */

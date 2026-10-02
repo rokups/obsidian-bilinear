@@ -703,6 +703,17 @@ describe("commands", () => {
     expect(r.err).toContain("label 'odd'");
   });
 
+  it("new takes a description and blockers, so the issue is whole from the start", async () => {
+    expect(await s().ok("new", "Delta", "--description", "\r\nFirst line.\r\n\r\n- a list\n\n", "--blocked-by", "BL-1, BL-2", "--blocked-by", "BL-3")).toBe("BL-4\n");
+    expect(s().read(s().note("BL-4"))).toBe('---\ntitle: Delta\nstatus: backlog\npriority: none\nblocked-by: ["[[BL-1]]", "[[BL-2]]", "[[BL-3]]"]\ncreated: 2026-10-01\n---\n\nFirst line.\n\n- a list\n');
+    await s().ok("comment", "BL-4", "after the body");
+    expect(s().read(s().note("BL-4")).endsWith("- a list\n\n## Comments\n- 2026-10-01 rk: after the body\n")).toBe(true);
+    expect(await s().run("lint")).toMatchObject(CLEAN);
+    for (const argv of [["--blocked-by", "BL-99"], ["--blocked-by", "nope"]]) expect(await s().code("new", "X", ...argv), argv.join(" ")).toBe(1);
+    await s().ok("new", "Empty", "--description", "  \n ");
+    expect(s().read(s().note("BL-5")).endsWith("created: 2026-10-01\n---\n")).toBe(true);
+  });
+
   it("new --json gives the ID and the path", async () => {
     expect(JSON.parse(await s().ok("new", "X", "--json"))).toEqual({ id: "BL-4", path: s().note("BL-4") });
   });
