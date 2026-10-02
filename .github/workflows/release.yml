@@ -40,15 +40,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ inputs.tag || github.ref_name }}
       - name: Check that the tag matches every version number
         run: node scripts/check_version.mjs "$TAG"
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: plugin/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -65,7 +65,7 @@ jobs:
           cp plugin/dist/main.js plugin/dist/manifest.json plugin/dist/styles.css cli/dist/bilinear.js release/
           (cd cli && npm pack --pack-destination ../release)
           test -f "release/obsidian-bilinear-$TAG.tgz"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release
           path: release/
@@ -80,7 +80,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release
           path: release
@@ -98,11 +98,11 @@ jobs:
     permissions:
       id-token: write # lets npm verify that the publish comes from this workflow
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release
           path: release
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
