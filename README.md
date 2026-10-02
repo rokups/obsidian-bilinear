@@ -104,7 +104,8 @@ bilinear lint --fix
 - `rm` finds the vault by searching upward for `.obsidian/`. Without one it
   refuses unless `--force` is given, which deletes the note.
 - Exit codes: 0 success, 1 usage or not found, 2 lint problems found, 3 write
-  conflict after retries, or the tracker stayed locked.
+  conflict after retries, a note moved or deleted while the command ran, or
+  the tracker stayed locked.
 - Commands that write take a lock on the tracker folder first, so several
   `bilinear` processes (scripts, agents, cron jobs) can work on one tracker
   at once without losing each other's changes; they simply run in turn. A

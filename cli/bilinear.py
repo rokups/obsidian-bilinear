@@ -54,7 +54,7 @@ class UsageError(Exception):
 
 
 class ConflictError(Exception):
-    """A file kept changing underneath us. Exit code 3."""
+    """A file kept changing underneath us, or the tracker stayed locked. Exit code 3."""
 
 
 # --------------------------------------------------------------------------
@@ -2112,6 +2112,11 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_USAGE
     except ConflictError as e:
         warn(str(e))
+        return EXIT_CONFLICT
+    except FileNotFoundError as e:
+        # A file that was there when the command looked is gone: Obsidian or
+        # a sync tool moved or deleted it meanwhile.
+        warn(f"{e.filename} was moved or deleted while the command ran; run the command again")
         return EXIT_CONFLICT
     except BrokenPipeError:
         return EXIT_OK

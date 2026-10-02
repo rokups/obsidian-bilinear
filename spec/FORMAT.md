@@ -401,7 +401,9 @@ the index note.
   re-read and compare; if it changed, redo the operation on the new content
   (up to three attempts, then exit code 3). Write to a temp file in the same
   directory, `fsync` it and `os.replace` it into place, so a reader sees the
-  old contents or the new, never part of each.
+  old contents or the new, never part of each. A file that another writer
+  moves or deletes after the command has found it also ends the command with
+  exit code 3; running it again works on what is there.
 - The plugin re-reads on `vault` and `metadataCache` events, so CLI edits show
   up live.
 
@@ -411,6 +413,10 @@ the index note.
   Obsidian or a sync tool that lands in the instant between the CLI's re-read
   and its rename is overwritten; a write at any earlier point of the command
   is detected and the operation redone.
+- The reverse holds for the plugin. `vault.process` keeps writers inside
+  Obsidian apart, but it does not take the CLI's lock and does not check the
+  file again before writing: a CLI write that lands between its read and its
+  write is overwritten, and nothing reports it.
 - An operation that touches a note and the index is two atomic writes, not
   one. Killed in between, it leaves the state described in section 2: the
   index correct and at worst a stray note.

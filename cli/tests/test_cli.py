@@ -173,6 +173,24 @@ class ConflictTest(CliCase):
         self.assertIn("kept changing", err)
         self.assertEqual(before + "xxx", (self.dir / "issues" / "BL-1.md").read_text())
 
+    def test_a_note_that_vanishes_gives_exit_code_3(self):
+        self.ok("new", "A")
+        note = self.dir / "issues" / "BL-1.md"
+        before = self.index.read_bytes()
+        for argv in (["set", "BL-1", "title=B"], ["comment", "BL-1", "x"]):
+            with self.subTest(argv=argv):
+                text = note.read_text()
+                bilinear._before_write_hook = lambda path: path.unlink()
+                code, out, err = self.run_cli(*argv)
+                bilinear._before_write_hook = None
+                self.assertEqual((3, ""), (code, out))
+                self.assertIn("BL-1.md was moved or deleted while the command ran", err)
+                self.assertNotIn("Traceback", err)
+                self.assertEqual(before, self.index.read_bytes())
+                self.assertEqual(["Bilinear.md"], self.entries())
+                note.write_text(text)
+        self.ok("set", "BL-1", "title=B")
+
     def test_no_temp_files_left_behind(self):
         self.ok("new", "A")
         self.ok("set", "BL-1", "status=todo")
