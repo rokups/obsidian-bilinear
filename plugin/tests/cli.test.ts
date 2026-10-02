@@ -688,13 +688,17 @@ describe("for LLM agents", () => {
     expect(text).toContain("is the name of the agent you are");
     expect(text).toContain("An issue that needs the user to act is assigned to the user");
     expect(text).toContain("## Relations between issues");
+    expect(text).toContain("## Writing issues");
+    expect(text).toContain("- Prefer checklists to prose");
+    expect(text).toContain("- Short-form technical English");
     expect(text).toContain("The triage state is only for decisions of high importance about the\n  architecture");
     expect(text).toContain("Before you put an issue in the triage state, search the tracker");
     for (const relation of ["Has to wait for another issue", "Made up of other issues", "Related in another way"]) {
       expect(text, relation).toContain(`- **${relation}**`);
     }
     expect(text).toContain("`set <ID> blocked-by+=<other ID>`");
-    expect(text).toContain("As soon as you intend to work on an issue, set it to\n   the state for work that is up next");
+    expect(text).toContain("As soon as you intend to work on\n   an issue, set it to the state for work that is up next, and assign it\n   to yourself: `set <ID> assignee=<your name> status=<state>`");
+    expect(text).toContain("to the state for work that is up next, still assigned to you, if");
     expect(text).toContain("The user deletes the options they discard, leaves the one they\n  accept and moves the issue to the backlog.");
     expect(text).not.toContain(s().dir);
     expect(text).not.toContain("Trackers/Bilinear");

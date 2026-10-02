@@ -186,16 +186,17 @@ the command says that nothing was excluded.
 
 - The skill is the same for every tracker. It requires the agent to track the
   whole life of each piece of work: an issue before starting, moved out of
-  the backlog to the state for work that is up next as soon as the agent
-  intends to work on it, assigned to the agent under its own name and in the
-  working state while it is in hand, comments signed with that name on what
-  is found and decided, review, and closing with what was done and how it
-  was checked. An issue that needs you to act, such as one that waits for
-  your answer, is assigned to you. It requires the relations between
-  issues to be recorded and kept true: what blocks what, with large work
-  split into issues that the issue for the whole is blocked by, and which
-  issues are related. It also describes the commands, the properties and
-  the exit codes.
+  the backlog to the state for work that is up next and assigned to the
+  agent under its own name as soon as the agent intends to work on it, in
+  the working state while it is in hand, comments signed with that name on
+  what is found and decided, review, and closing with what was done and how
+  it was checked. An issue that needs you to act, such as one that waits
+  for your answer, is assigned to you. Issue text is to be short:
+  checklists rather than prose, in short-form technical English. It
+  requires the relations between issues to be recorded and kept true: what
+  blocks what, with large work split into issues that the issue for the
+  whole is blocked by, and which issues are related. It also describes the
+  commands, the properties and the exit codes.
 - The instructions say only where: they name one tracker and refer to the
   skill. In a project the tracker is named by its path from the root of the
   repository if it is inside the repository or one level above it, and by its

@@ -38,19 +38,22 @@ after you finish. This is required, and it does not wait to be asked for.
    that has no issue. One issue is one piece of work that can be finished on
    its own; larger work is split into issues of their own, which the issue
    for the whole is blocked by (\`--blocked-by <ID>\`).
-2. **On choosing what to work on**, move the issue out of the backlog, before
-   anything is started. As soon as you intend to work on an issue, set it to
-   the state for work that is up next: the one between the state new issues
-   start in and the working state, \`todo\` in a new tracker (\`state\` lists
-   the tracker's states in order). Do this even when the work starts later
-   or after other issues, so that the user sees what is coming. A tracker
-   with no such state has nothing to move to here.
-3. **On starting**, assign the issue to yourself and move it to the state that
-   means it is being worked on: \`set <ID> assignee=<your name> status=<state>\`
-   (\`state\` lists the tracker's states). Do not take an issue that is
+2. **On choosing what to work on**, take the issue and move it out of the
+   backlog, before anything is started. As soon as you intend to work on
+   an issue, set it to the state for work that is up next, and assign it
+   to yourself: \`set <ID> assignee=<your name> status=<state>\`. That
+   state is the one between the state new issues start in and the working
+   state, \`todo\` in a new tracker (\`state\` lists the tracker's states in
+   order). Do this even when the work starts later or after other issues,
+   so that the user sees what is coming and who has taken it. In a tracker
+   with no such state there is nothing to move to here: assign the issue
+   to yourself and leave it where it is. Do not take an issue that is
    assigned to someone else unless you are asked to; an issue that bears
    the user's name only because it waited for them is the exception, as
    said below.
+3. **On starting**, move the issue to the state that means it is being
+   worked on: \`set <ID> status=<state>\`. It is assigned to you from the
+   step before; if it is still unassigned, assign it to yourself now.
 4. **While working**, comment (\`--author <your name> comment <ID> "text"\`)
    whenever you learn or decide something a later reader needs: the cause you found, the approach
    you chose or gave up, a change of plan. If the issue cannot go on until
@@ -68,9 +71,10 @@ after you finish. This is required, and it does not wait to be asked for.
    Do not close an issue whose work was not checked.
 7. **On stopping before the work is finished**, comment what is done and what
    is left, so that someone else can carry on from the issue alone. Leave it
-   in the working state only if the work is still going on; otherwise give up
-   the assignment (\`assignee=\`) and move it back: to the state for work
-   that is up next if you intend to carry on with it, else to the backlog.
+   in the working state only if the work is still going on; otherwise move
+   it back: to the state for work that is up next, still assigned to you, if
+   you intend to carry on with it, else to the backlog, with the assignment
+   given up (\`assignee=\`).
    An issue that stops because it waits for the user is not given up: it
    stays assigned to the user, in the state it is in.
 
@@ -93,6 +97,22 @@ description that the work is the user's, and leave such an issue to them.
 
 The status of an issue says what is true now. Archiving and deleting issues is
 the user's to do: do neither unless asked.
+
+## Writing issues
+
+Titles, descriptions and comments are read in passing. Keep them short.
+
+- Prefer checklists to prose: what to do, constraints and how to tell it is
+  done go in as items (\`- [ ] item\`). Tick an item (\`- [x]\`) in the
+  description when it is done; a comment is not edited.
+- Short-form technical English: no filler, no greetings, no "I have found
+  that". Lead with the fact or the verb. "Cache key ignores locale. Fix:
+  add locale to key."
+- Exact names in backticks: paths, symbols, commands, error text.
+- Prose only where a list cannot carry it, such as a reason or a
+  trade-off, and then a sentence or two.
+- Options in a triage issue follow the same rule: a heading, then items for
+  and against.
 
 ## Relations between issues
 
@@ -165,7 +185,8 @@ custom property.
 \`\`\`sh
 bilinear list --status todo,in-progress --json
 bilinear new "Fix flaky cache test" --priority high --label bug
-bilinear set BL-12 assignee=claude status=in-progress
+bilinear set BL-12 assignee=claude status=todo
+bilinear set BL-12 status=in-progress
 bilinear --author claude comment BL-12 "Reproduced: the cache key ignores the locale."
 bilinear set BL-12 status=done
 \`\`\`
