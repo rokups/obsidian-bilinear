@@ -96,7 +96,7 @@ bilinear lint --fix
 | `label [name] [--color COLOR]` | List the labels, or add one and set its colour (`none` clears it) |
 | `state [name] [--icon ICON] [--color COLOR] [--triage]` | List the states, or set a state's icon and colour (`none` clears it), or make it the triage state |
 | `lint [--fix]` | Check and optionally repair consistency |
-| `agent-setup <dir> [--codex] [--claude] [--local] [--followups]` | Set an LLM agent up to track its work here: install a skill, and add a section to `CLAUDE.md` or `AGENTS.md` that names this tracker as where work is tracked |
+| `agent-setup <dir> [--codex] [--claude] [--global-skill] [--local] [--followups]` | Set an LLM agent up to track its work here: install a skill, and add a section to `CLAUDE.md` or `AGENTS.md` that names this tracker as where work is tracked |
 | `agent-setup <dir> --update` | Refresh what an earlier `agent-setup` wrote in `<dir>`: the skill, and each section it finds, keeping the tracker each names and its follow-ups rule |
 
 - The tracker is taken from `--tracker PATH`, then `BILINEAR_TRACKER`, then a
@@ -164,6 +164,7 @@ a project's folder, or one of the folders the agents keep in your home:
 bilinear --tracker Trackers/Bilinear agent-setup . --claude          # a project, for Claude Code
 bilinear --tracker Trackers/Bilinear agent-setup . --codex           # a project, for Codex
 bilinear --tracker Trackers/Bilinear agent-setup . --claude --local  # a project, kept out of git
+bilinear --tracker Trackers/Bilinear agent-setup . --claude --global-skill  # a project, with the skill in your home
 bilinear --tracker Trackers/Bilinear agent-setup ~/.claude           # for Claude Code, in all projects
 bilinear --tracker Trackers/Bilinear agent-setup ~/.codex            # for Codex, in all projects
 bilinear agent-setup ~/.agents                                       # the skill only, for agents that read it
@@ -176,6 +177,8 @@ It writes the skill and the instructions where each agent reads them:
 | --- | --- | --- |
 | a project, `--claude` | `<dir>/CLAUDE.md` | `<dir>/.claude/skills/bilinear/SKILL.md` |
 | a project, `--codex` | `<dir>/AGENTS.md` | `<dir>/.agents/skills/bilinear/SKILL.md` |
+| a project, `--claude --global-skill` | `<dir>/CLAUDE.md` | `~/.claude/skills/bilinear/SKILL.md` |
+| a project, `--codex --global-skill` | `<dir>/AGENTS.md` | `~/.agents/skills/bilinear/SKILL.md` |
 | `~/.claude` | `~/.claude/CLAUDE.md` | `~/.claude/skills/bilinear/SKILL.md` |
 | `~/.codex` | `~/.codex/AGENTS.md` | `~/.agents/skills/bilinear/SKILL.md` |
 | `~/.agents` | none | `~/.agents/skills/bilinear/SKILL.md` |
@@ -185,6 +188,20 @@ their agent, so they need no option, and refuse the other one. `~/.agents` is
 read by Codex and other agents that take skills from there; it gets only the
 skill, so it needs no tracker and does not take `--followups`.
 `CLAUDE_CONFIG_DIR` and `CODEX_HOME` move the first two.
+
+`--global-skill` keeps the skill out of a project: it goes to the agent's
+folder in your home, where it serves every project, and the project gets only
+its instructions, which name its tracker. This is the setup for one folder of
+trackers that several projects use, each with a tracker of its own: one
+skill, and in each project a section that names its index note. `--update`
+in such a project refreshes the skill in your home, where the section says
+it is. In the folders of your home, where the skill already is, the option
+does nothing.
+
+```sh
+cd ~/code/website && bilinear --tracker ~/Notes/Trackers/Website agent-setup . --claude --global-skill
+cd ~/code/engine  && bilinear --tracker ~/Notes/Trackers/Engine  agent-setup . --claude --global-skill
+```
 
 `--local` keeps a project's files out of git, as far as that can be done (it
 does nothing in the folders of your home): the instructions go to

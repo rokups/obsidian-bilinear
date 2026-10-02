@@ -1034,6 +1034,86 @@ describe("for LLM agents", () => {
     });
   });
 
+  describe("with --global-skill", () => {
+    const skill = (harness: string) => join(home(), harness, "skills", "bilinear", "SKILL.md");
+    const globalBlock = (path: string, harness: string) => block(path, `~/${harness}/skills/bilinear/SKILL.md`);
+
+    it("puts the skill in the home folder and only the instructions in the project", async () => {
+      const claude = join(proj(), "CLAUDE.md");
+      expect(await setup("proj", "--claude", "--global-skill")).toBe(`created ${skill(".claude")}\ncreated ${claude}\n`);
+      expect(s().read(claude)).toBe(globalBlock(s().index, ".claude"));
+      expect(s().read(skill(".claude"))).toContain("name: bilinear");
+      expect(fs.readdirSync(proj())).toEqual(["CLAUDE.md"]);
+      expect(await setup("proj", "--claude", "--global-skill")).toBe(`unchanged ${skill(".claude")}\nunchanged ${claude}\n`);
+    });
+
+    it("puts the skill for Codex in ~/.agents, and sets up both", async () => {
+      const [claude, agents] = [join(proj(), "CLAUDE.md"), join(proj(), "AGENTS.md")];
+      expect(await setup("proj", "--codex", "--claude", "--global-skill")).toBe(`created ${skill(".claude")}\ncreated ${claude}\ncreated ${skill(".agents")}\ncreated ${agents}\n`);
+      expect(s().read(agents)).toBe(globalBlock(s().index, ".agents"));
+      expect(fs.readdirSync(proj()).sort()).toEqual(["AGENTS.md", "CLAUDE.md"]);
+    });
+
+    it("follows CLAUDE_CONFIG_DIR", async () => {
+      s().env["CLAUDE_CONFIG_DIR"] = join(s().root, "claude");
+      const there = join(s().root, "claude", "skills", "bilinear", "SKILL.md");
+      expect(await setup("proj", "--claude", "--global-skill")).toBe(`created ${there}\ncreated ${join(proj(), "CLAUDE.md")}\n`);
+      expect(s().read(join(proj(), "CLAUDE.md"))).toBe(block(s().index, there));
+    });
+
+    it("gives each project its own tracker of a folder, and one skill to all", async () => {
+      const other = join(s().dir, "Other.md");
+      await s().ok("init", other, "--prefix", "OT");
+      for (const [project, index] of [["one", s().index], ["two", other]]) {
+        const dir = join(s().root, "code", project);
+        fs.mkdirSync(join(dir, ".git"), { recursive: true });
+        await s().ok("--tracker", index, "agent-setup", dir, "--claude", "--global-skill");
+        expect(s().read(join(dir, "CLAUDE.md")), project).toBe(globalBlock(index, ".claude"));
+        expect(fs.readdirSync(dir).sort(), project).toEqual([".git", "CLAUDE.md"]);
+      }
+    });
+
+    it("excludes only the instructions with --local", async () => {
+      repo();
+      const exclude = join(s().vault, ".git", "info", "exclude");
+      expect(await setup(".", "--claude", "--codex", "--global-skill", "--local")).toBe(
+        `created ${skill(".claude")}\ncreated ${join(s().vault, "CLAUDE.local.md")}\ncreated ${skill(".agents")}\ncreated ${join(s().vault, "AGENTS.md")}\n` +
+          `excluded /CLAUDE.local.md in ${exclude}\nexcluded /AGENTS.md in ${exclude}\n`,
+      );
+      expect(s().read(exclude)).toBe("/CLAUDE.local.md\n/AGENTS.md\n");
+      expect(s().read(join(s().vault, "CLAUDE.local.md"))).toBe(globalBlock("Trackers/Bilinear/Bilinear.md", ".claude"));
+    });
+
+    it("is refreshed by --update where the section says the skill is, and makes none in the project", async () => {
+      repo();
+      const [claude, agents] = [join(s().vault, "CLAUDE.md"), join(s().vault, "AGENTS.md")];
+      await setup(".", "--claude", "--global-skill", "--followups");
+      await setup(".", "--codex");
+      const before = s().read(claude);
+      fs.writeFileSync(skill(".claude"), "an older version");
+      expect(await s().ok("agent-setup", ".", "--update")).toBe(`updated ${skill(".claude")}\nunchanged ${claude}\nunchanged ${join(s().vault, AGENTS)}\nunchanged ${agents}\n`);
+      expect(s().read(skill(".claude"))).toContain("name: bilinear");
+      expect(s().read(claude)).toBe(before);
+      expect(fs.existsSync(join(s().vault, ".claude"))).toBe(false);
+
+      // A skill that is gone is made again where the section says, and a section that names no skill gets the project's.
+      fs.rmSync(join(home(), ".claude"), { recursive: true });
+      expect(await s().ok("agent-setup", ".", "--update")).toContain(`created ${skill(".claude")}\n`);
+      s().edit(claude, "`~/.claude/skills/bilinear/SKILL.md`", "`~/elsewhere/notes.md`");
+      expect(await s().ok("agent-setup", ".", "--update")).toContain(`created ${join(s().vault, CLAUDE)}\nupdated ${claude}\n`);
+      expect(s().read(claude)).toContain("`.claude/skills/bilinear/SKILL.md`");
+      expect(fs.existsSync(join(home(), "elsewhere"))).toBe(false);
+    });
+
+    it("does nothing in the home folders, and does not go with --update", async () => {
+      expect(await setup("~/.claude", "--global-skill")).toBe(`created ${skill(".claude")}\ncreated ${join(home(), ".claude", "CLAUDE.md")}\n`);
+      expect(s().read(join(home(), ".claude", "CLAUDE.md"))).toBe(globalBlock(s().index, ".claude"));
+      const r = await s().run("agent-setup", ".", "--update", "--global-skill");
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("--global-skill does not go with --update: what is there decides");
+    });
+  });
+
   it("names the tracker of a folder of several by its index note", async () => {
     repo();
     const other = join(s().dir, "Other.md");

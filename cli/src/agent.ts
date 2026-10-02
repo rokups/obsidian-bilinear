@@ -3,7 +3,8 @@
 // tracker a project's work is tracked in. The skill is the same for every
 // tracker and says how work is tracked; the instructions only say where.
 // The files go where Claude Code and Codex read them: in a project, or in
-// the folders they keep in the user's home.
+// the folders they keep in the user's home, or the instructions in a project
+// and the skill in the home folder, where it serves every project.
 
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -240,6 +241,8 @@ bilinear set BL-12 status=done
   underneath the command. On 3, run the command again.
 `;
 
+const posix = (path: string): string => path.split(nodePath.sep).join("/");
+
 const START = "<!-- bilinear:start -->";
 const END = "<!-- bilinear:end -->";
 /** The line after START that says the block has the rule about follow-ups. */
@@ -342,6 +345,17 @@ export function skillPath(dir: string): string {
   return nodePath.join(dir, "skills", SKILL_NAME, "SKILL.md");
 }
 
+/**
+ * The skill a block refers to, as the block names it and as a path: one
+ * from `~` is in the home folder, a relative one in the project. Null if the
+ * block names none, or something that is not where a skill goes.
+ */
+export function blockSkill(block: string, dir: string, home: string): { ref: string; path: string } | null {
+  const ref = /The skill is in\s+`([^`\r\n]+)`/.exec(block)?.[1];
+  if (ref === undefined || !posix(ref).endsWith(posix(skillPath("")))) return null;
+  return { ref, path: ref.startsWith("~/") ? nodePath.join(nodePath.resolve(home), ref.slice(2)) : nodePath.resolve(dir, ref) };
+}
+
 /** Write a file, with its folders. Returns whether it was there, and whether it changed. */
 export function writeFile(path: string, text: string): "created" | "updated" | "unchanged" {
   const old = fs.existsSync(path) ? fs.readFileSync(path, "utf8") : null;
@@ -377,6 +391,8 @@ export interface Target {
   skill: string;
   file: string | null;
   ref: string;
+  /** The skill is in a folder of the user's home, not in the project. */
+  global: boolean;
 }
 
 /** Where `agent-setup` goes: the folder, whether it is one of the user's own, and the files to write, claude before codex. */
@@ -398,18 +414,19 @@ export interface Flags {
   claude?: boolean;
   local?: boolean;
   followups?: boolean;
+  /** A project gets only the instructions; the skill goes to the harness's folder in the home directory. */
+  globalSkill?: boolean;
   /** Refresh what an earlier run wrote: a project folder gives every file it may have written. */
   update?: boolean;
 }
-
-const posix = (path: string): string => path.split(nodePath.sep).join("/");
 
 /**
  * Decide what `agent-setup <arg>` writes. A project folder takes `--codex`,
  * `--claude` or both; `~/.claude`, `~/.codex` and `~/.agents` (or where
  * CLAUDE_CONFIG_DIR and CODEX_HOME put the first two) mean their harness,
  * and `~/.agents` gets only the skill, which Codex also reads from there. With
- * `update`, a project folder needs no option: it gives each file that an
+ * `globalSkill` a project's skill goes to those folders too, and the project
+ * has only the instructions. With `update`, a project folder needs no option: it gives each file that an
  * earlier run may have written, for the caller to look at which are there.
  */
 export function plan(arg: string, at: Places, flags: Flags): Plan {
@@ -417,12 +434,13 @@ export function plan(arg: string, at: Places, flags: Flags): Plan {
   const dir = nodePath.resolve(at.cwd, arg === "~" || arg.startsWith("~/") || arg.startsWith(`~${nodePath.sep}`) ? nodePath.join(home, arg.slice(1)) : arg);
   const is = (...paths: (string | undefined)[]) => paths.some((p) => p !== undefined && nodePath.resolve(at.cwd, p) === dir);
   const tilde = (path: string) => (path.startsWith(home + nodePath.sep) ? `~/${posix(nodePath.relative(home, path))}` : path);
-  const target = (base: string, file: string | null, ref: (skill: string) => string): Target => {
+  const target = (base: string, file: string | null, ref: (skill: string) => string, global: boolean): Target => {
     const skill = skillPath(base);
-    return { skill, file, ref: ref(skill) };
+    return { skill, file, ref: ref(skill), global };
   };
-  const inHome = (base: string, file: string | null) => target(base, file, tilde);
+  const inHome = (base: string, file: string | null) => target(base, file, tilde, true);
   const agents = nodePath.join(home, ".agents");
+  const claudeHome = at.claudeHome !== undefined ? nodePath.resolve(at.cwd, at.claudeHome) : nodePath.join(home, ".claude");
   const kind = is(at.claudeHome, nodePath.join(home, ".claude")) ? "claude" : is(at.codexHome, nodePath.join(home, ".codex")) ? "codex" : is(agents) ? "agents" : null;
   const wrong = (flag: string, what: string) => new SetupError(`${flag} does not go with ${arg}: it is ${what}`);
 
@@ -442,12 +460,14 @@ export function plan(arg: string, at: Places, flags: Flags): Plan {
   if ([".claude", ".codex", ".agents"].includes(nodePath.basename(dir))) {
     throw new SetupError(`give the project's folder, not its ${nodePath.basename(dir)}, or one of the folders in your home to set up for all projects`);
   }
-  const project = (base: string, file: string) => target(nodePath.join(dir, base), nodePath.join(dir, file), (skill) => posix(nodePath.relative(dir, skill)));
-  if (flags.update) return { dir, home: false, targets: [project(".claude", "CLAUDE.md"), project(".claude", "CLAUDE.local.md"), project(".agents", "AGENTS.md")] };
+  const local = (base: string, file: string) => target(nodePath.join(dir, base), nodePath.join(dir, file), (skill) => posix(nodePath.relative(dir, skill)), false);
+  if (flags.update) return { dir, home: false, targets: [local(".claude", "CLAUDE.md"), local(".claude", "CLAUDE.local.md"), local(".agents", "AGENTS.md")] };
   if (!flags.claude && !flags.codex) throw new SetupError("give --codex, --claude or both");
+  // With the skill in the home folder, the project has only its instructions.
+  const project = (base: string, homeBase: string, file: string) => (flags.globalSkill ? inHome(homeBase, nodePath.join(dir, file)) : local(base, file));
   const targets: Target[] = [];
-  if (flags.claude) targets.push(project(".claude", flags.local ? "CLAUDE.local.md" : "CLAUDE.md"));
-  if (flags.codex) targets.push(project(".agents", "AGENTS.md"));
+  if (flags.claude) targets.push(project(".claude", claudeHome, flags.local ? "CLAUDE.local.md" : "CLAUDE.md"));
+  if (flags.codex) targets.push(project(".agents", agents, "AGENTS.md"));
   return { dir, home: false, targets };
 }
 
@@ -467,10 +487,10 @@ export function isTracked(file: string, cwd: string): boolean {
   return fs.existsSync(file) && spawnSync("git", ["ls-files", "--error-unmatch", "--", file], { cwd, stdio: "ignore" }).status === 0;
 }
 
-/** What to exclude from git for a project's files: the instructions files and the skill folders, from the repository's root. `real` is `dir` with its links resolved. */
+/** What to exclude from git for a project's files: the instructions files and the skill folders that are in the project, from the repository's root. `real` is `dir` with its links resolved. */
 export function excludePatterns(targets: Target[], dir: string, real: string, root: string): string[] {
   const from = (path: string) => `/${posix(nodePath.relative(root, nodePath.join(real, nodePath.relative(dir, path))))}`;
-  return targets.flatMap(({ skill, file }) => [...(file === null ? [] : [from(file)]), `${from(nodePath.dirname(skill))}/`]);
+  return targets.flatMap(({ skill, file, global }) => [...(file === null ? [] : [from(file)]), ...(global ? [] : [`${from(nodePath.dirname(skill))}/`])]);
 }
 
 /** Add patterns to a git exclude file, keeping what is there. Returns those that were not there yet. */
