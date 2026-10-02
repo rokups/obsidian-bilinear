@@ -114,7 +114,7 @@ jobs:
           if npm view "obsidian-bilinear@$TAG" version > /dev/null 2>&1; then
             echo "obsidian-bilinear $TAG is already on npm"
           else
-            npm publish "release/obsidian-bilinear-$TAG.tgz" --access public
+            npm publish "./release/obsidian-bilinear-$TAG.tgz" --access public
           fi
       - name: Wait until npm serves it
         # npm takes a few minutes to list a version it has accepted.
