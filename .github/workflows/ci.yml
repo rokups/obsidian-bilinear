@@ -30,6 +30,6 @@ jobs:
       - run: node ../scripts/check_version.mjs
       - name: The packed CLI runs
         run: |
-          npm pack ../cli
-          npx --yes --package="$PWD"/obsidian-bilinear-*.tgz -- bilinear --version
+          tarball=$(npm pack ../cli | tail -n 1)
+          npx --yes --package="./$tarball" -- bilinear --version
         shell: bash

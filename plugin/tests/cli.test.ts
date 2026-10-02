@@ -2,7 +2,7 @@
 
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Worker } from "node:worker_threads";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -145,7 +145,8 @@ describe("writers that take no lock", () => {
     await s().ok("new", "A");
     let hit = false;
     NodeIO.beforeWrite = (path) => {
-      if (path === s().index && !hit) {
+      // The CLI's paths have forward slashes on every platform.
+      if (resolve(path) === s().index && !hit) {
         hit = true;
         s().edit(path, "\n## Issues\n", "\nEdited meanwhile.\n\n## Issues\n");
       }
