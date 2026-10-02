@@ -93,6 +93,7 @@ bilinear lint --fix
 | `state [name] [--icon ICON] [--color COLOR] [--triage]` | List the states, or set a state's icon and colour (`none` clears it), or make it the triage state |
 | `lint [--fix]` | Check and optionally repair consistency |
 | `agent-setup <dir> [--codex] [--claude] [--local] [--followups]` | Set an LLM agent up to track its work here: install a skill, and add a section to `CLAUDE.md` or `AGENTS.md` that names this tracker as where work is tracked |
+| `agent-setup <dir> --update` | Refresh what an earlier `agent-setup` wrote in `<dir>`: the skill, and each section it finds, keeping the tracker each names and its follow-ups rule |
 
 - The tracker is taken from `--tracker PATH` (folder or index note), then
   `BILINEAR_TRACKER`, then a search upward from the working directory.
@@ -154,6 +155,7 @@ bilinear --tracker Trackers/Bilinear agent-setup . --claude --local  # a project
 bilinear --tracker Trackers/Bilinear agent-setup ~/.claude           # for Claude Code, in all projects
 bilinear --tracker Trackers/Bilinear agent-setup ~/.codex            # for Codex, in all projects
 bilinear agent-setup ~/.agents                                       # the skill only, for agents that read it
+bilinear agent-setup . --update                                      # after upgrading bilinear: refresh what is there
 ```
 
 It writes the skill and the instructions where each agent reads them:

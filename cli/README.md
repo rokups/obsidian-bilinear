@@ -20,7 +20,8 @@ To have an LLM coding agent track its work in a tracker,
 that says how, from opening an issue to closing it, and adds a section to
 `CLAUDE.md` or `AGENTS.md` that says where: the path of the tracker. `<dir>` is
 a project's folder, or `~/.claude`, `~/.codex` or `~/.agents`; each file goes
-where Claude Code and Codex read it.
+where Claude Code and Codex read it. After upgrading bilinear,
+`bilinear agent-setup <dir> --update` refreshes what is there.
 
 `npm install -g obsidian-bilinear` installs it as `bilinear`. It needs Node 20
 or later and has no dependencies. `bilinear --help` lists the commands; the

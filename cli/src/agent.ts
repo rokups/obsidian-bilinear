@@ -214,6 +214,8 @@ bilinear set BL-12 status=done
 
 const START = "<!-- bilinear:start -->";
 const END = "<!-- bilinear:end -->";
+/** The line after START that says the block has the rule about follow-ups. */
+const FOLLOWUPS = "<!-- bilinear:followups -->";
 
 /** The folder with `.git` at or above a folder: the root of its repository. Null if there is none. */
 export function repositoryRoot(folder: string): string | null {
@@ -272,7 +274,7 @@ and moves the issue to the backlog.
 /** The instructions for CLAUDE.md or AGENTS.md: which tracker the project's work is tracked in, and where the skill is. */
 export function instructions(path: string, skill: string, triage?: string): string {
   const where = nodePath.isAbsolute(path) ? "Its path:" : "Its path, from the root of the repository:";
-  return `${START}
+  return `${START}${triage === undefined ? "" : `\n${FOLLOWUPS}`}
 ## Issue tracking
 
 Work on this project is tracked in a Bilinear issue tracker. ${where}
@@ -284,6 +286,27 @@ as the \`bilinear\` skill says. The skill is in
 \`${skill}\`.
 ${triage === undefined ? "" : followups(triage)}${END}
 `;
+}
+
+/** The block an earlier run wrote in the text of an instructions file, from START to END. Null if there is none. */
+export function instructionsBlock(text: string): string | null {
+  const start = text.indexOf(START);
+  const end = text.indexOf(END);
+  return start >= 0 && end > start ? text.slice(start, end + END.length) : null;
+}
+
+/** Whether a block has the rule about follow-ups: it says so, or, if it is from before it did, it has the rule's text. */
+export function hasFollowups(block: string): boolean {
+  return block.includes(FOLLOWUPS) || block.includes("follow-up issue");
+}
+
+/** The tracker a block names: the first line indented by four spaces after the one that says "Its path". Null if there is none. */
+export function blockTracker(block: string): string | null {
+  const lines = block.split("\n");
+  for (let i = lines.findIndex((line) => line.includes("Its path")) + 1; i > 0 && i < lines.length; i++) {
+    if (/^ {4}\S/.test(lines[i])) return lines[i].slice(4).replace(/\r$/, "");
+  }
+  return null;
 }
 
 /** Where the skill goes in a folder that agents read skills from (`.claude`, `.agents`): `skills/bilinear/SKILL.md`. */
@@ -347,6 +370,8 @@ export interface Flags {
   claude?: boolean;
   local?: boolean;
   followups?: boolean;
+  /** Refresh what an earlier run wrote: a project folder gives every file it may have written. */
+  update?: boolean;
 }
 
 const posix = (path: string): string => path.split(nodePath.sep).join("/");
@@ -355,7 +380,9 @@ const posix = (path: string): string => path.split(nodePath.sep).join("/");
  * Decide what `agent-setup <arg>` writes. A project folder takes `--codex`,
  * `--claude` or both; `~/.claude`, `~/.codex` and `~/.agents` (or where
  * CLAUDE_CONFIG_DIR and CODEX_HOME put the first two) mean their harness,
- * and `~/.agents` gets only the skill, which Codex also reads from there.
+ * and `~/.agents` gets only the skill, which Codex also reads from there. With
+ * `update`, a project folder needs no option: it gives each file that an
+ * earlier run may have written, for the caller to look at which are there.
  */
 export function plan(arg: string, at: Places, flags: Flags): Plan {
   const home = nodePath.resolve(at.home);
@@ -387,8 +414,9 @@ export function plan(arg: string, at: Places, flags: Flags): Plan {
   if ([".claude", ".codex", ".agents"].includes(nodePath.basename(dir))) {
     throw new SetupError(`give the project's folder, not its ${nodePath.basename(dir)}, or one of the folders in your home to set up for all projects`);
   }
-  if (!flags.claude && !flags.codex) throw new SetupError("give --codex, --claude or both");
   const project = (base: string, file: string) => target(nodePath.join(dir, base), nodePath.join(dir, file), (skill) => posix(nodePath.relative(dir, skill)));
+  if (flags.update) return { dir, home: false, targets: [project(".claude", "CLAUDE.md"), project(".claude", "CLAUDE.local.md"), project(".agents", "AGENTS.md")] };
+  if (!flags.claude && !flags.codex) throw new SetupError("give --codex, --claude or both");
   const targets: Target[] = [];
   if (flags.claude) targets.push(project(".claude", flags.local ? "CLAUDE.local.md" : "CLAUDE.md"));
   if (flags.codex) targets.push(project(".agents", "AGENTS.md"));

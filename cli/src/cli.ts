@@ -19,7 +19,7 @@ import { LOCK_TIMES, LockTimeout } from "../../plugin/src/ops/lock-file";
 import { allRecords, indexNotes, locked, notePath, readIndex, requireItem, resolveNote } from "../../plugin/src/ops/tracker";
 import type { Progress, Relations } from "../../plugin/src/store/query";
 import { version } from "../package.json";
-import { SKILL, SetupError, exclude, excludePatterns, instructions, isTracked, plan, realPath, repositoryRoot, trackerPath, withInstructions, writeFile } from "./agent";
+import { SKILL, SetupError, blockTracker, exclude, excludePatterns, hasFollowups, instructions, instructionsBlock, isTracked, plan, realPath, repositoryRoot, trackerPath, withInstructions, writeFile } from "./agent";
 import { ConflictError, NodeIO, slashed } from "./node-io";
 
 export const EXIT_OK = 0;
@@ -60,6 +60,8 @@ interface Invocation {
   out(line: string): void;
   io: NodeIO;
   tracker(): Promise<Tracker>;
+  /** Open the tracker at a path, as `--tracker` would name it. */
+  open(given: string): Promise<Tracker>;
 }
 
 const str = (v: Values[string]): string | undefined => (typeof v === "string" ? v : undefined);
@@ -484,22 +486,66 @@ const COMMANDS: Record<string, Command> = {
   },
 
   "agent-setup": {
-    args: "<dir> [--codex] [--claude] [--local] [--followups]",
+    args: "<dir> [--codex] [--claude] [--local] [--followups] | <dir> --update",
     help: "set an LLM agent up to track its work here: a skill, and a section in CLAUDE.md or AGENTS.md",
-    options: { codex: { type: "boolean" }, claude: { type: "boolean" }, local: { type: "boolean" }, followups: { type: "boolean" } },
+    options: { codex: { type: "boolean" }, claude: { type: "boolean" }, local: { type: "boolean" }, followups: { type: "boolean" }, update: { type: "boolean" } },
     takes: [1, 1],
     reads: () => true,
-    async run({ ctx, values, positionals, out, tracker }) {
+    async run({ ctx, values, positionals, out, tracker, open }) {
       const home = ctx.env["HOME"] || ctx.env["USERPROFILE"] || os.homedir();
       const local = values["local"] === true;
+      const update = values["update"] === true;
+      if (update) {
+        const flag = ["codex", "claude", "local", "followups"].find((name) => values[name] === true);
+        if (flag) throw new UsageError(`--${flag} does not go with --update: what is there decides`);
+      }
       let p;
       try {
-        p = plan(positionals[0], { cwd: ctx.cwd, home, claudeHome: ctx.env["CLAUDE_CONFIG_DIR"] || undefined, codexHome: ctx.env["CODEX_HOME"] || undefined }, { codex: values["codex"] === true, claude: values["claude"] === true, local, followups: values["followups"] === true });
+        p = plan(positionals[0], { cwd: ctx.cwd, home, claudeHome: ctx.env["CLAUDE_CONFIG_DIR"] || undefined, codexHome: ctx.env["CODEX_HOME"] || undefined }, { codex: values["codex"] === true, claude: values["claude"] === true, local, followups: values["followups"] === true, update });
       } catch (e) {
         throw e instanceof SetupError ? new UsageError(e.message) : e;
       }
       const real = realPath(p.dir);
       const root = p.home ? null : repositoryRoot(real);
+      if (update) {
+        // What is there decides: each instructions file with a block is
+        // refreshed, with the tracker the block names and the rule about
+        // follow-ups if it had it, and each skill that is there, or whose
+        // instructions are. All of it is read before anything is written.
+        const read = (file: string | null) => (file !== null && fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null);
+        const found = p.targets.map((target) => {
+          const old = read(target.file);
+          return { ...target, old, block: old === null ? null : instructionsBlock(old) };
+        });
+        const skills = new Set(found.filter((f) => f.block !== null || fs.existsSync(f.skill)).map((f) => f.skill));
+        if (!skills.size) throw new OpError(`nothing to update in ${positionals[0]}: no bilinear skill or instructions section there`);
+        const texts = new Map<string, string>();
+        for (const { file, ref, old, block } of found) {
+          if (file === null || old === null || block === null) continue;
+          const recorded = blockTracker(block);
+          if (recorded === null) throw new OpError(`${file} names no tracker; run agent-setup without --update`);
+          let triage: string | undefined;
+          if (hasFollowups(block)) {
+            const from = `${file} names the tracker ${recorded}`;
+            let t: Tracker;
+            try {
+              t = await open(nodePath.isAbsolute(recorded) ? recorded : nodePath.resolve(root ?? real, recorded));
+            } catch (e) {
+              throw new OpError(`${from}, which cannot be read: ${e instanceof Error ? e.message : String(e)}; run agent-setup without --update`);
+            }
+            const idx = await locked(t, () => readIndex(t));
+            if (idx.triageState === null) throw new OpError(`${from}, which has no triage state for follow-ups to wait in; run agent-setup without --update`);
+            triage = idx.triageState;
+          }
+          texts.set(file, withInstructions(old, instructions(recorded, ref, triage)));
+        }
+        for (const { skill, file } of found) {
+          if (skills.delete(skill)) out(`${writeFile(skill, SKILL)} ${skill}`);
+          const text = file === null ? undefined : texts.get(file);
+          if (file !== null && text !== undefined) out(`${writeFile(file, text)} ${file}`);
+        }
+        return EXIT_OK;
+      }
       let where = "";
       let triage: string | undefined;
       if (p.targets.some((target) => target.file !== null)) {
@@ -581,13 +627,17 @@ function help(name?: string): string {
         "CLAUDE.md (Codex has no local file, so AGENTS.md is used), and the files are added to the\n" +
         "repository's .git/info/exclude. A file that is already committed is refused; in the home\n" +
         "folders, which are in no project, --local does nothing. The rest of the\n" +
-        "instructions file is kept; run again to refresh the section. The tracker is named by its path\n" +
+        "instructions file is kept. The tracker is named by its path\n" +
         "from the root of the repository if it is inside the repository or one level above it, else by\n" +
         "its absolute path, as it is when <dir> is in no repository, and always in a home folder.\n" +
         "\n--followups adds the rule that whatever a task skips becomes a follow-up issue in the backlog,\n" +
         "and that only one that needs a decision of high importance about the architecture waits in\n" +
         "the tracker's triage state for the user to accept or reject, assigned to the user and written\n" +
-        "with the ways to do it as options, which the user deletes down to one.\n";
+        "with the ways to do it as options, which the user deletes down to one.\n" +
+        "\n--update refreshes what an earlier run wrote in <dir>: the skill, and each section it finds in\n" +
+        "CLAUDE.md, CLAUDE.local.md and AGENTS.md. Each section keeps the tracker it names, and the\n" +
+        "follow-ups rule if it had it. Run it after upgrading bilinear. It takes none of the other\n" +
+        "options, and does not use --tracker.\n";
     }
     return text;
   }
@@ -687,6 +737,7 @@ export async function main(argv: string[], ctx: Context): Promise<number> {
         io,
         out: (line) => lines.push(line),
         tracker: async () => (tracker ??= await openTracker(io, ctx, str(values["tracker"]) || ctx.env["BILINEAR_TRACKER"])),
+        open: (given) => openTracker(io, ctx, given),
       });
     } catch (e) {
       if (e instanceof LockTimeout) {

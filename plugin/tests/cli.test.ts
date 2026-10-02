@@ -562,7 +562,7 @@ describe("for LLM agents", () => {
   /** The vault is the root of a repository, so that the tracker is named from it. */
   const repo = () => fs.mkdirSync(join(s().vault, ".git"));
   const block = (path: string, skill: string, triage = "") =>
-    `<!-- bilinear:start -->\n## Issue tracking\n\nWork on this project is tracked in a Bilinear issue tracker. ${isAbsolute(path) ? "Its path:" : "Its path, from the root of the repository:"}\n\n    ${path}\n\n` +
+    `<!-- bilinear:start -->\n${triage === "" ? "" : "<!-- bilinear:followups -->\n"}## Issue tracking\n\nWork on this project is tracked in a Bilinear issue tracker. ${isAbsolute(path) ? "Its path:" : "Its path, from the root of the repository:"}\n\n    ${path}\n\n` +
     `Track every piece of work there, from before it starts until it is finished,\nas the \`bilinear\` skill says. The skill is in\n\`${skill}\`.\n${triage}<!-- bilinear:end -->\n`;
   const claudeBlock = (path = s().dir) => block(path, ".claude/skills/bilinear/SKILL.md");
   const codexBlock = (path = s().dir) => block(path, ".agents/skills/bilinear/SKILL.md");
@@ -728,7 +728,9 @@ describe("for LLM agents", () => {
     expect(await setup(".", "--claude", "--followups")).toBe(`unchanged ${skill}\nupdated ${claude}\n`);
     const text = s().read(claude);
     expect(plain).not.toContain("follow-up");
-    expect(text.startsWith(plain.replace("<!-- bilinear:end -->\n", ""))).toBe(true);
+    expect(text.startsWith("<!-- bilinear:start -->\n<!-- bilinear:followups -->\n## Issue tracking")).toBe(true);
+    expect(plain).not.toContain("bilinear:followups");
+    expect(text.replace("<!-- bilinear:followups -->\n", "").startsWith(plain.replace("<!-- bilinear:end -->\n", ""))).toBe(true);
     expect(text.endsWith("<!-- bilinear:end -->\n")).toBe(true);
     expect(text).toContain("becomes a\nfollow-up issue before you close the task");
     expect(text).toContain('(`new "Title" --status triage`)');
@@ -755,6 +757,175 @@ describe("for LLM agents", () => {
     expect(r.code).toBe(1);
     expect(r.err).toContain("bilinear state triage --triage");
     expect(fs.existsSync(join(s().vault, "none"))).toBe(false);
+  });
+
+  describe("with --update", () => {
+    const update = (...argv: string[]) => s().ok("--tracker", s().dir, "agent-setup", ...argv, "--update");
+    const stale = (path: string) => fs.writeFileSync(path, "an older version");
+
+    it("refreshes what is there, and leaves a file that is the same as it was", async () => {
+      repo();
+      const claude = join(s().vault, "CLAUDE.md");
+      const skill = join(s().vault, CLAUDE);
+      await setup(".", "--claude", "--followups");
+      const [before, skillBefore] = [s().read(claude), s().read(skill)];
+      expect(before).toContain("<!-- bilinear:followups -->\n");
+      expect(await update(".")).toBe(`unchanged ${skill}\nunchanged ${claude}\n`);
+      expect(s().read(claude)).toBe(before);
+      expect(s().read(skill)).toBe(skillBefore);
+      expect(fs.existsSync(join(s().vault, "CLAUDE.local.md"))).toBe(false);
+      expect(fs.existsSync(join(s().vault, "AGENTS.md"))).toBe(false);
+    });
+
+    it("reads the skills and sections of each harness, and ignores a file with no section", async () => {
+      repo();
+      const [local, agents] = [join(s().vault, "CLAUDE.local.md"), join(s().vault, "AGENTS.md")];
+      const [claudeSkill, codexSkill, plain] = [join(s().vault, CLAUDE), join(s().vault, AGENTS), join(s().vault, "CLAUDE.md")];
+      await setup(".", "--claude", "--local");
+      await setup(".", "--codex");
+      fs.writeFileSync(plain, "# Rules\n");
+      stale(claudeSkill);
+      stale(codexSkill);
+      expect(await update(".")).toBe(`updated ${claudeSkill}\nunchanged ${local}\nupdated ${codexSkill}\nunchanged ${agents}\n`);
+      expect(s().read(claudeSkill)).toContain("name: bilinear");
+      expect(s().read(plain)).toBe("# Rules\n");
+      expect(s().read(local)).toBe(claudeBlock("Trackers/Bilinear"));
+    });
+
+    it("creates a skill that is missing beside instructions that are there, and refreshes only a skill that is alone", async () => {
+      repo();
+      const [claudeSkill, claude] = [join(s().vault, CLAUDE), join(s().vault, "CLAUDE.md")];
+      await setup(".", "--claude");
+      fs.rmSync(join(s().vault, ".claude"), { recursive: true });
+      expect(await update(".")).toBe(`created ${claudeSkill}\nunchanged ${claude}\n`);
+      fs.rmSync(claude);
+      stale(claudeSkill);
+      expect(await update(".")).toBe(`updated ${claudeSkill}\n`);
+    });
+
+    it("works in the home folders without a tracker", async () => {
+      await setup("~/.codex");
+      const [skill, agents] = [join(home(), AGENTS), join(home(), ".codex", "AGENTS.md")];
+      const before = s().read(agents);
+      stale(skill);
+      const r = await s().ok("agent-setup", "~/.codex", "--update");
+      expect(r).toBe(`updated ${skill}\nunchanged ${agents}\n`);
+      expect(s().read(agents)).toBe(before);
+
+      fs.rmSync(agents);
+      fs.writeFileSync(skill, "x");
+      expect(await s().ok("agent-setup", "~/.agents", "--update")).toBe(`updated ${skill}\n`);
+      expect(s().read(skill)).toContain("name: bilinear");
+      expect(await s().code("agent-setup", "~/.claude", "--update")).toBe(1);
+    });
+
+    it("reads the triage state from a tracker named by its absolute path", async () => {
+      await s().ok("--tracker", s().dir, "state", "triage", "--triage");
+      await setup("~/.codex", "--followups");
+      const agents = join(home(), ".codex", "AGENTS.md");
+      expect(s().read(agents)).toContain("--status triage");
+      await s().ok("--tracker", s().dir, "state", "inbox", "--triage");
+      expect(await s().ok("agent-setup", "~/.codex", "--update")).toBe(`unchanged ${join(home(), AGENTS)}\nupdated ${agents}\n`);
+      expect(s().read(agents)).toContain("--status inbox");
+      expect(s().read(agents)).not.toContain("--status triage");
+    });
+
+    it("keeps the line endings of a file that has CRLF", async () => {
+      repo();
+      const claude = join(s().vault, "CLAUDE.md");
+      const crlf = `# Rules\n\n${claudeBlock("Trackers/Bilinear")}`.replace(/\n/g, "\r\n");
+      fs.writeFileSync(claude, crlf.replace("Track every piece", "Track some"));
+      expect(await update(".")).toBe(`created ${join(s().vault, CLAUDE)}\nupdated ${claude}\n`);
+      expect(s().read(claude)).toBe(crlf);
+    });
+
+    it("puts the marker back in a block from before there was one, and adds no rule to a block without it", async () => {
+      repo();
+      const [claude, local] = [join(s().vault, "CLAUDE.md"), join(s().vault, "CLAUDE.local.md")];
+      await setup(".", "--claude", "--followups");
+      const withRule = s().read(claude);
+      fs.writeFileSync(claude, withRule.replace("<!-- bilinear:followups -->\n", ""));
+      await setup(".", "--claude", "--local");
+      const without = s().read(local);
+      expect(without).not.toContain("follow-up");
+      await update(".");
+      expect(s().read(claude)).toBe(withRule);
+      expect(s().read(local)).toBe(without);
+    });
+
+    it("keeps the tracker the section names, whatever else is found", async () => {
+      repo();
+      const claude = join(s().vault, "CLAUDE.md");
+      await setup(".", "--claude", "--followups");
+      const before = s().read(claude);
+      const other = join(s().vault, "Other");
+      await s().ok("init", other, "--prefix", "OT");
+      expect(await s().ok("--tracker", other, "agent-setup", ".", "--update")).toContain(`unchanged ${claude}`);
+      expect(s().read(claude)).toBe(before);
+      s().cwd = other;
+      await s().ok("agent-setup", s().vault, "--update");
+      expect(s().read(claude)).toBe(before);
+      expect(before).toContain("\n    Trackers/Bilinear\n");
+    });
+
+    it("takes the triage state from the tracker the section names, not the one that was there when it was written", async () => {
+      repo();
+      const claude = join(s().vault, "CLAUDE.md");
+      await setup(".", "--claude", "--followups");
+      await s().ok("--tracker", s().dir, "state", "inbox", "--triage");
+      await update(".");
+      expect(s().read(claude)).toContain('(`new "Title" --status inbox`)');
+    });
+
+    it("fails, and writes nothing, when the tracker of a section with the rule cannot be read or has no triage state", async () => {
+      repo();
+      const [claude, skill] = [join(s().vault, "CLAUDE.md"), join(s().vault, CLAUDE)];
+      await setup(".", "--claude", "--followups");
+      stale(skill);
+      s().edit(s().index, "triage-state: triage\n", "");
+      let r = await s().run("--tracker", s().dir, "agent-setup", ".", "--update");
+      expect(r.code).toBe(1);
+      expect(r.err).toContain(`${claude} names the tracker Trackers/Bilinear, which has no triage state`);
+      expect(r.err).toContain("run agent-setup without --update");
+      expect(s().read(skill)).toBe("an older version");
+      s().edit(claude, "    Trackers/Bilinear\n", "    Trackers/Gone\n");
+      r = await s().run("agent-setup", ".", "--update");
+      expect(r.code).toBe(1);
+      expect(r.err).toContain(`${claude} names the tracker Trackers/Gone, which cannot be read`);
+      expect(s().read(skill)).toBe("an older version");
+    });
+
+    it("fails when a section names no tracker", async () => {
+      const claude = join(s().vault, "CLAUDE.md");
+      fs.writeFileSync(claude, "<!-- bilinear:start -->\nold text\n<!-- bilinear:end -->\n");
+      const r = await s().run("agent-setup", ".", "--update");
+      expect(r.code).toBe(1);
+      expect(r.err).toContain(`${claude} names no tracker; run agent-setup without --update`);
+    });
+
+    it("fails where there is nothing to update, and with the options that say what to write", async () => {
+      fs.writeFileSync(join(s().vault, "CLAUDE.md"), "# Rules\n");
+      const r = await s().run("--tracker", s().dir, "agent-setup", ".", "--update");
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("nothing to update in .: no bilinear skill or instructions section there");
+      expect(fs.existsSync(join(s().vault, ".claude"))).toBe(false);
+      for (const flag of ["--claude", "--codex", "--local", "--followups"]) {
+        const bad = await s().run("--tracker", s().dir, "agent-setup", ".", "--update", flag);
+        expect(bad.code, flag).toBe(1);
+        expect(bad.err, flag).toContain(`${flag} does not go with --update: what is there decides`);
+      }
+      expect(await s().code("--tracker", s().dir, "agent-setup", join(".claude"), "--update")).toBe(1);
+    });
+
+    it("keeps the text around the section", async () => {
+      repo();
+      const claude = join(s().vault, "CLAUDE.md");
+      await setup(".", "--claude");
+      const text = `# Project\n\nBefore.\n\n${s().read(claude).replace("Track every piece", "Track every old piece")}\n## After\n\nAfter.\n`;
+      fs.writeFileSync(claude, text);
+      expect(await update(".")).toContain(`updated ${claude}`);
+      expect(s().read(claude)).toBe(text.replace("Track every old piece", "Track every piece"));
+    });
   });
 
   it("names the tracker from the root of the repository when it is in it or beside it, else in full", async () => {
