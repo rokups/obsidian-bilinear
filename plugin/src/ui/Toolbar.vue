@@ -68,7 +68,6 @@ function onText(): void {
         <Icon name="search" />
         <input v-model="c.spec.filter.text" class="bl-filter-input" type="search" placeholder="Filter issues" aria-label="Filter issues" spellcheck="false" @input="onText" @keydown.esc.stop="($event.target as HTMLElement).blur()" />
       </div>
-      <span class="bl-spacer"></span>
       <button class="clickable-icon" aria-label="More actions" @click="moreMenu($event)"><Icon name="more-horizontal" /></button>
       <button class="mod-cta bl-new" @click="c.host.newIssue({})"><Icon name="plus" /> New issue</button>
     </div>
