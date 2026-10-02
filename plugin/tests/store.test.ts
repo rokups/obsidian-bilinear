@@ -36,7 +36,7 @@ describe("snapshot from the metadata cache", () => {
 
   it.each(listCases.map((c) => [c.name, c] as const))("agrees with the CLI on %s", async (_name, c) => {
     const io = MemoryIO.fromDisk(join(c.dir, "before"), TRACKER_DIR);
-    const t = await openTracker(io);
+    const t = await openTracker(io, TRACKER_DIR, c.op.tracker);
     const snap = buildSnapshot(io.files.get(t.indexPath)!, t.dir, cacheLookup(io));
     const got = toFixtureRecords([...snap.issues, ...snap.archived], snap.config.closedStates);
     const want = c.op.expect!.issues!;

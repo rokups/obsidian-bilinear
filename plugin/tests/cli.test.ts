@@ -27,17 +27,31 @@ describe("init", () => {
     expect(await s().run("lint")).toMatchObject(CLEAN);
   });
 
-  it("refuses an existing tracker and a bad prefix", async () => {
-    expect(await s().code("init", s().dir, "--prefix", "BL")).toBe(1);
-    expect(await s().code("init", join(s().vault, "X"), "--prefix", "bl")).toBe(1);
-    expect(await s().code("init", join(s().vault, "X"))).toBe(1);
+  it("refuses an existing tracker, a bad prefix and a path that is not a note's", async () => {
+    expect(await s().code("init", s().index, "--prefix", "BL")).toBe(1);
+    expect(await s().code("init", join(s().vault, "X", "X.md"), "--prefix", "bl")).toBe(1);
+    expect(await s().code("init", join(s().vault, "X", "X.md"))).toBe(1);
+    const r = await s().run("init", join(s().vault, "X"), "--prefix", "XX");
+    expect(r.code).toBe(1);
+    expect(r.err).toContain(`give the path of the index note, such as ${join(s().vault, "X")}.md`);
     expect(fs.existsSync(join(s().vault, "X"))).toBe(false);
   });
 
-  it("takes a relative folder", async () => {
+  it("takes a relative path", async () => {
     s().cwd = s().vault;
-    expect(await s().ok("init", "Other", "--prefix", "OT")).toBe(`${join("Other", "Other.md")}\n`);
+    expect(await s().ok("init", join("Other", "Other.md"), "--prefix", "OT")).toBe(`${join("Other", "Other.md")}\n`);
     expect(await s().ok("--tracker", "Other", "new", "A")).toBe("OT-1\n");
+  });
+
+  it("puts a second tracker in a folder, with a prefix of its own", async () => {
+    const other = join(s().dir, "Other.md");
+    const taken = await s().run("init", other, "--prefix", "BL");
+    expect(taken.code).toBe(1);
+    expect(taken.err).toContain("Bilinear, in the same folder, already has the prefix BL");
+    expect(fs.existsSync(other)).toBe(false);
+    expect(await s().ok("init", other, "--prefix", "OT")).toBe(`${other}\n`);
+    expect(s().entries()).toEqual(["Bilinear.md", "Other.md"]);
+    expect(fs.existsSync(s().lockFile)).toBe(false);
   });
 });
 
@@ -63,6 +77,84 @@ describe("finding the tracker", () => {
   it("knows the index note by its frontmatter, not its name", async () => {
     fs.renameSync(s().index, join(s().dir, "Board.md"));
     expect(await s().ok("new", "One")).toBe("BL-1\n");
+  });
+
+  describe("in a folder of several", () => {
+    const other = () => join(s().dir, "Other.md");
+    beforeEach(async () => {
+      await s().ok("init", other(), "--prefix", "OT");
+      await s().ok("--tracker", s().index, "new", "One");
+      await s().ok("--tracker", other(), "new", "Two");
+    });
+
+    it("needs the tracker named when the command names no issue", async () => {
+      for (const argv of [["list"], ["new", "Three"], ["lint"], ["state"], ["label"], ["archive", "--closed"]]) {
+        const r = await s().run(...argv);
+        expect(r.code, argv.join(" ")).toBe(1);
+        expect(r.err, argv.join(" ")).toContain(`${s().dir} holds several trackers (Bilinear.md, Other.md); name one, as in --tracker ${s().index}`);
+      }
+      const named = await s().run("--tracker", join("..", "Bilinear"), "list");
+      expect(named.code).toBe(1);
+      expect(named.err).toContain(`--tracker ${join("..", "Bilinear", "Bilinear.md")}`);
+      expect(await s().ids("--tracker", other())).toEqual(["OT-1"]);
+      s().env["BILINEAR_TRACKER"] = s().index;
+      expect(await s().ids()).toEqual(["BL-1"]);
+    });
+
+    it("takes the tracker whose prefix the issue has", async () => {
+      s().cwd = join(s().dir, "issues");
+      await s().ok("set", "OT-1", "status=todo");
+      await s().ok("comment", "BL-1", "Seen.");
+      expect(JSON.parse(await s().ok("show", "OT-1", "--json")).status).toBe("todo");
+      expect(s().read(s().note("BL-1"))).toContain("rk: Seen.");
+      expect(await s().ok("--tracker", s().dir, "new", "Three", "--blocked-by", "OT-1")).toBe("OT-2\n");
+      expect(await s().ok("new", "Four", "--related-to", "[[BL-1]]")).toBe("BL-2\n");
+      expect(await s().ids("--blocked-by", "OT-1")).toEqual(["OT-2"]);
+      await s().ok("move", "OT-2", "--top");
+      await s().ok("move", "BL-2", "--before", "BL-1");
+      expect(await s().ok("archive", "OT-1", "OT-2")).toBe("OT-1\nOT-2\n");
+      expect(await s().ok("unarchive", "OT-2")).toBe("OT-2\n");
+      await s().ok("rm", "BL-2");
+      expect(await s().ids("--tracker", s().index, "--all")).toEqual(["BL-1"]);
+      expect(await s().ids("--tracker", other(), "--all")).toEqual(["OT-2", "OT-1"]);
+    });
+
+    it("does not guess from a prefix that is no tracker's, or from issues of two", async () => {
+      for (const argv of [["show", "XX-1"], ["show", "nonsense"], ["archive", "BL-1", "OT-1"]]) {
+        const r = await s().run(...argv);
+        expect(r.code, argv.join(" ")).toBe(1);
+        expect(r.err, argv.join(" ")).toContain("holds several trackers");
+      }
+      // The title of a new issue is not an issue named.
+      expect(await s().code("new", "OT-1")).toBe(1);
+      // A tracker that is named is the one, whatever the issue's prefix.
+      const r = await s().run("--tracker", s().index, "show", "OT-1");
+      expect(r.err).toContain("OT-1: no such issue");
+    });
+
+    it("names a tracker without the .md of its index note", async () => {
+      s().cwd = s().vault;
+      expect(await s().ids("--tracker", join("Trackers", "Bilinear", "Other"))).toEqual(["OT-1"]);
+      const r = await s().run("--tracker", join("Trackers", "Bilinear", "Nope"), "list");
+      expect(r.code).toBe(1);
+      expect(r.err).toContain(`no tracker index note in ${join("Trackers", "Bilinear", "Nope")}`);
+      fs.writeFileSync(join(s().dir, "Plain.md"), "A note.\n");
+      const plain = await s().run("--tracker", join("Trackers", "Bilinear", "Plain"), "list");
+      expect(plain.err).toContain(`${join("Trackers", "Bilinear", "Plain")}.md is not a tracker index note`);
+    });
+
+    it("lints each on its own, and locks them as one", async () => {
+      expect(await s().run("--tracker", s().index, "lint")).toMatchObject(CLEAN);
+      expect(await s().run("--tracker", other(), "lint")).toMatchObject(CLEAN);
+      fs.writeFileSync(s().lockFile, PLUGIN_LOCK);
+      s().env["BILINEAR_LOCK_TIMEOUT"] = "0.05";
+      const beat = setInterval(() => fs.utimesSync(s().lockFile, new Date(), new Date()), 10);
+      try {
+        expect(await s().code("--tracker", other(), "new", "Held")).toBe(3);
+      } finally {
+        clearInterval(beat);
+      }
+    });
   });
 });
 
@@ -863,7 +955,7 @@ describe("for LLM agents", () => {
       await setup(".", "--claude", "--followups");
       const before = s().read(claude);
       const other = join(s().vault, "Other");
-      await s().ok("init", other, "--prefix", "OT");
+      await s().ok("init", join(other, "Other.md"), "--prefix", "OT");
       expect(await s().ok("--tracker", other, "agent-setup", ".", "--update")).toContain(`unchanged ${claude}`);
       expect(s().read(claude)).toBe(before);
       s().cwd = other;
@@ -943,7 +1035,7 @@ describe("for LLM agents", () => {
     };
     const make = async (folder: string) => {
       s().cwd = s().root;
-      await s().ok("init", folder, "--prefix", "IN");
+      await s().ok("init", join(folder, "Tracker.md"), "--prefix", "IN");
       return folder;
     };
 
@@ -973,7 +1065,7 @@ describe("for LLM agents", () => {
   it("names the tracker in full in the home directory, even in a repository", async () => {
     fs.mkdirSync(join(home(), ".git"), { recursive: true });
     fs.mkdirSync(join(home(), "Notes", "Tracker"), { recursive: true });
-    await s().ok("init", join(home(), "Notes", "Tracker"), "--prefix", "HM");
+    await s().ok("init", join(home(), "Notes", "Tracker", "Tracker.md"), "--prefix", "HM");
     for (const [folder, file] of [[".claude", "CLAUDE.md"], [".codex", "AGENTS.md"]]) {
       await s().ok("--tracker", join(home(), "Notes", "Tracker"), "agent-setup", `~/${folder}`);
       expect(s().read(join(home(), folder, file)), folder).toContain(`Its path:\n\n    ${join(home(), "Notes", "Tracker")}\n`);
@@ -1433,12 +1525,12 @@ describe("commands", () => {
     expect(r.out).toContain("[index-key]");
   });
 
-  it("a second index note is reported", async () => {
-    fs.writeFileSync(join(s().dir, "Other.md"), "---\nbilinear: tracker\nprefix: OT\nnext: 1\nstates: [todo]\n---\n");
-    const r = await s().run("lint");
+  it("a second index note with the same prefix is reported", async () => {
+    fs.writeFileSync(join(s().dir, "Other.md"), "---\nbilinear: tracker\nprefix: BL\nnext: 1\nstates: [todo]\n---\n");
+    const r = await s().run("--tracker", s().index, "lint");
     expect(r.code).toBe(2);
-    expect(r.out).toContain("[multiple-trackers]");
-    expect(await s().ids()).toEqual(["BL-1", "BL-2", "BL-3"]);
+    expect(r.out).toContain("error: Bilinear.md: Other, in the same folder, has the prefix BL too [prefix-shared]");
+    expect(await s().ids("--tracker", s().index)).toEqual(["BL-1", "BL-2", "BL-3"]);
   });
 
   it("usage errors exit with 1", async () => {

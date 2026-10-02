@@ -19,7 +19,7 @@ describe("fixtures", () => {
 
   it.each(all.map((c) => [c.name, c] as const))("%s", async (_name, c) => {
     const io = MemoryIO.fromDisk(join(c.dir, "before"), TRACKER_DIR);
-    const result = await apply(await openTracker(io), c.op);
+    const result = await apply(await openTracker(io, TRACKER_DIR, c.op.tracker), c.op);
     expect(io.snapshot(TRACKER_DIR)).toEqual(MemoryIO.fromDisk(join(c.dir, "after"), TRACKER_DIR).snapshot(TRACKER_DIR));
     const expected = c.op.expect ?? {};
     if (expected.id !== undefined) expect(result.id).toBe(expected.id);

@@ -1,22 +1,22 @@
 // bilinear: command-line client for Bilinear trackers.
 //
-// A tracker is a folder of Markdown notes: one index note (frontmatter
-// `bilinear: tracker`), one note per issue in `issues/` and `archive/`. The
-// format is specified in spec/FORMAT.md. The commands here are thin: the
+// A tracker is Markdown notes: an index note (frontmatter `bilinear: tracker`)
+// and, beside it, one note per issue in `issues/` and `archive/`, which the
+// trackers of a folder share. The format is specified in spec/FORMAT.md. The commands here are thin: the
 // operations themselves are the plugin's (plugin/src/ops), run on Node's fs.
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
-import { COLOR_NAMES, LINK_LIST_KEYS, LIST_KEYS, STATE_SHAPES, linkId, makeLink, todayIso } from "../../plugin/src/format/ids";
+import { COLOR_NAMES, ID_RE, LINK_LIST_KEYS, LIST_KEYS, STATE_SHAPES, linkId, makeLink, todayIso } from "../../plugin/src/format/ids";
 import type { IssueRecord } from "../../plugin/src/format/record";
 import { Doc, type Value } from "../../plugin/src/format/yaml";
 import { OpError, type Tracker } from "../../plugin/src/ops/io";
 import { adoptIssue, archiveClosed, archiveIssues, commentIssue, createIssue, createTracker, deleteIssue, moveIssue, setLabel, setProps, setStateStyle, setTriageState, unarchiveIssues, unrelate, type PropEdits } from "../../plugin/src/ops/issues";
 import { lint } from "../../plugin/src/ops/lint";
 import { LOCK_TIMES, LockTimeout } from "../../plugin/src/ops/lock-file";
-import { allRecords, indexNotes, locked, notePath, readIndex, requireItem, resolveNote } from "../../plugin/src/ops/tracker";
+import { allRecords, locked, notePath, readIndex, requireItem, resolveNote, trackersIn } from "../../plugin/src/ops/tracker";
 import type { Progress, Relations } from "../../plugin/src/store/query";
 import { version } from "../package.json";
 import { SKILL, SetupError, blockTracker, exclude, excludePatterns, hasFollowups, instructions, instructionsBlock, isTracked, plan, realPath, repositoryRoot, trackerPath, withInstructions, writeFile } from "./agent";
@@ -48,6 +48,8 @@ interface Command {
   takes: [number, number];
   /** The command only reads: it may run without the lock where none can be made. */
   reads?: (values: Values, positionals: string[]) => boolean;
+  /** The issues the command names: in a folder of several trackers, their prefix says which is meant. */
+  ids?: (values: Values, positionals: string[]) => string[];
   /** `init` makes the tracker; every other command runs in one. */
   run(inv: Invocation): Promise<number>;
 }
@@ -111,20 +113,25 @@ function styleValue(given: string | undefined): string | null | undefined {
   return ["none", "auto"].includes(given.toLowerCase()) ? null : given;
 }
 
+/** The first argument is the issue. */
+const firstId = (_values: Values, positionals: string[]): string[] => positionals.slice(0, 1);
+/** The issues named by options that take IDs or links to them. */
+const optionIds = (values: Values, ...keys: string[]): string[] => csv(keys.flatMap((key) => (typeof values[key] === "string" ? [values[key]] : list(values[key])))).map((v) => linkId(v) ?? v);
+
 const ASSIGN_RE = /^([^=+\-\s][^=\s]*?)(\+=|-=|=)([\s\S]*)$/;
 
 const COMMANDS: Record<string, Command> = {
   init: {
-    args: "<folder> --prefix PREFIX",
-    help: "create a tracker folder, its index note, issues/ and archive/",
+    args: "<index note> --prefix PREFIX",
+    help: "create a tracker: its index note, with issues/ and archive/ beside it, which the trackers of a folder share",
     options: { prefix: { type: "string" } },
     takes: [1, 1],
     async run({ ctx, values, positionals, out, io }) {
       const prefix = str(values["prefix"]);
       if (prefix === undefined) throw new UsageError("--prefix is required");
-      const folder = nodePath.resolve(ctx.cwd, positionals[0]);
-      const index = await createTracker(io, slashed(folder), prefix);
-      out(nodePath.join(positionals[0], nodePath.basename(index)));
+      if (!positionals[0].endsWith(".md")) throw new UsageError(`give the path of the index note, such as ${positionals[0].replace(/[\\/]+$/, "")}.md`);
+      await createTracker(io, slashed(nodePath.resolve(ctx.cwd, positionals[0])), prefix);
+      out(positionals[0]);
       return EXIT_OK;
     },
   },
@@ -145,6 +152,7 @@ const COMMANDS: Record<string, Command> = {
       json: { type: "boolean" },
     },
     takes: [1, 1],
+    ids: (values) => optionIds(values, "blocked-by", "related-to"),
     async run({ ctx, values, positionals, out, tracker }) {
       const t = await tracker();
       const id = await createIssue(
@@ -185,6 +193,7 @@ const COMMANDS: Record<string, Command> = {
     },
     takes: [0, 0],
     reads: () => true,
+    ids: (values) => optionIds(values, "blocked-by", "related-to"),
     async run({ values, out, tracker }) {
       const t = await tracker();
       const issue = (key: string): string | undefined => {
@@ -241,6 +250,7 @@ const COMMANDS: Record<string, Command> = {
     options: { json: { type: "boolean" } },
     takes: [1, 1],
     reads: () => true,
+    ids: firstId,
     async run({ values, positionals, out, tracker }) {
       const t = await tracker();
       const id = positionals[0];
@@ -288,6 +298,7 @@ const COMMANDS: Record<string, Command> = {
     args: "<id> <key=value>...",
     help: "change properties: key=value, list+=value, list-=value, key= to remove",
     takes: [2, Infinity],
+    ids: firstId,
     async run({ positionals, tracker }) {
       const [id, ...assignments] = positionals;
       const edits = assignments.map((a) => {
@@ -335,6 +346,7 @@ const COMMANDS: Record<string, Command> = {
     args: "<id> <text>",
     help: "append a comment",
     takes: [2, 2],
+    ids: firstId,
     async run({ ctx, values, positionals, tracker }) {
       const author = str(values["author"]) || ctx.env["BILINEAR_USER"] || ctx.env["USER"] || ctx.env["USERNAME"] || "unknown";
       await commentIssue(await tracker(), positionals[0], positionals[1], author, ctx.env["BILINEAR_TODAY"] || todayIso());
@@ -347,6 +359,7 @@ const COMMANDS: Record<string, Command> = {
     help: "reorder an issue",
     options: { before: { type: "string" }, after: { type: "string" }, top: { type: "boolean" }, bottom: { type: "boolean" } },
     takes: [1, 1],
+    ids: (values, positionals) => [...positionals, ...optionIds(values, "before", "after")],
     async run({ values, positionals, tracker }) {
       const given = (["before", "after", "top", "bottom"] as const).filter((k) => values[k] !== undefined);
       if (given.length !== 1) throw new UsageError("give one of --before, --after, --top, --bottom");
@@ -360,6 +373,7 @@ const COMMANDS: Record<string, Command> = {
     help: "archive the named issues, or all closed ones",
     options: { closed: { type: "boolean" } },
     takes: [0, Infinity],
+    ids: (_values, positionals) => positionals,
     async run({ values, positionals, out, tracker }) {
       if (values["closed"] && positionals.length) throw new OpError("give either IDs or --closed");
       if (!values["closed"] && !positionals.length) throw new OpError("give one or more IDs, or --closed");
@@ -373,6 +387,7 @@ const COMMANDS: Record<string, Command> = {
     args: "<id>...",
     help: "restore archived issues",
     takes: [1, Infinity],
+    ids: (_values, positionals) => positionals,
     async run({ positionals, out, tracker }) {
       for (const id of await unarchiveIssues(await tracker(), positionals)) out(id);
       return EXIT_OK;
@@ -384,6 +399,7 @@ const COMMANDS: Record<string, Command> = {
     help: "remove an issue; its note goes to the vault's .trash/",
     options: { force: { type: "boolean" } },
     takes: [1, 1],
+    ids: firstId,
     async run({ positionals, tracker }) {
       await deleteIssue(await tracker(), positionals[0]);
       return EXIT_OK;
@@ -394,6 +410,7 @@ const COMMANDS: Record<string, Command> = {
     args: "<id>",
     help: "add an index line for an orphan note",
     takes: [1, 1],
+    ids: firstId,
     async run({ positionals, tracker }) {
       await adoptIssue(await tracker(), positionals[0]);
       return EXIT_OK;
@@ -594,7 +611,8 @@ function usage(name?: string): string {
 function help(name?: string): string {
   const options =
     "options:\n" +
-    "  --tracker PATH  tracker folder or index note (default: $BILINEAR_TRACKER, then search upward)\n" +
+    "  --tracker PATH  index note, or the folder of one tracker (default: $BILINEAR_TRACKER, then search upward);\n" +
+    "                  in a folder of several, the prefix of the issue a command names says which is meant\n" +
     "  --author NAME   author for comments (default: $BILINEAR_USER, then $USER)\n";
   if (name) {
     let text = `${usage(name)}\n${COMMANDS[name].help}\n\n${options}`;
@@ -646,26 +664,44 @@ function help(name?: string): string {
   return `${usage()}\nIssue tracker stored as Markdown notes in an Obsidian vault.\n\ncommands:\n${commands.join("")}\n${options}  --version       print the version\n  -h, --help      this text, or a command's with <command> --help\n`;
 }
 
-/** The tracker a command works on: the one named, or the one around the working directory. */
-async function openTracker(io: NodeIO, ctx: Context, given: string | undefined): Promise<Tracker> {
+/**
+ * The tracker a command works on: the one named, or the one around the
+ * working directory. A folder that holds several stands for the one whose
+ * prefix the issues named by the command (`ids`) have.
+ */
+async function openTracker(io: NodeIO, ctx: Context, given: string | undefined, ids: string[] = []): Promise<Tracker> {
   const warn = (message: string) => ctx.stderr(`bilinear: ${message}\n`);
   const at = (index: string): Tracker => {
     const real = slashed(fs.realpathSync(native(index)));
     return { io, dir: real.slice(0, real.lastIndexOf("/")), indexPath: real, warn };
   };
+  const isFile = (path: string) => fs.statSync(path, { throwIfNoEntry: false })?.isFile() === true;
+  const note = async (path: string, shown: string): Promise<Tracker> => {
+    if (new Doc((await io.read(slashed(path))) ?? "").getStr("bilinear") !== "tracker") throw new OpError(`${shown} is not a tracker index note`);
+    return at(slashed(path));
+  };
+  /** The tracker a folder stands for, null if it has none. `shown` is the folder as the message names it. */
+  const inFolder = async (dir: string, shown: string): Promise<Tracker | null> => {
+    const found = await trackersIn(io, slashed(dir));
+    if (found.length <= 1) return found.length ? at(found[0].path) : null;
+    const prefixes = new Set(ids.map((id) => ID_RE.exec(id)?.[1]));
+    const meant = found.filter((f) => f.prefix !== null && prefixes.has(f.prefix));
+    if (meant.length === 1) return at(meant[0].path);
+    const names = found.map((f) => nodePath.basename(native(f.path)));
+    throw new OpError(`${shown} holds several trackers (${names.join(", ")}); name one, as in --tracker ${nodePath.join(shown, names[0])}`);
+  };
   if (given) {
     const path = nodePath.resolve(ctx.cwd, given);
-    if (fs.statSync(path, { throwIfNoEntry: false })?.isFile()) {
-      if (new Doc((await io.read(path)) ?? "").getStr("bilinear") !== "tracker") throw new OpError(`${given} is not a tracker index note`);
-      return at(slashed(path));
-    }
-    const found = await indexNotes(io, slashed(path));
-    if (!found.length) throw new OpError(`no tracker index note in ${given}`);
-    return at(found[0]);
+    if (isFile(path)) return note(path, given);
+    // A tracker may be named without the .md of its index note.
+    if (!fs.existsSync(path) && isFile(`${path}.md`)) return note(`${path}.md`, `${given}.md`);
+    const found = await inFolder(path, given);
+    if (!found) throw new OpError(`no tracker index note in ${given}`);
+    return found;
   }
   for (let dir = fs.realpathSync(ctx.cwd); ; dir = nodePath.dirname(dir)) {
-    const found = await indexNotes(io, slashed(dir));
-    if (found.length) return at(found[0]);
+    const found = await inFolder(dir, dir);
+    if (found) return found;
     if (dir === nodePath.dirname(dir)) break;
   }
   throw new OpError("no tracker found; use --tracker, BILINEAR_TRACKER or run inside a tracker folder");
@@ -736,7 +772,7 @@ export async function main(argv: string[], ctx: Context): Promise<number> {
         positionals,
         io,
         out: (line) => lines.push(line),
-        tracker: async () => (tracker ??= await openTracker(io, ctx, str(values["tracker"]) || ctx.env["BILINEAR_TRACKER"])),
+        tracker: async () => (tracker ??= await openTracker(io, ctx, str(values["tracker"]) || ctx.env["BILINEAR_TRACKER"], command.ids?.(values, positionals) ?? [])),
         open: (given) => openTracker(io, ctx, given),
       });
     } catch (e) {

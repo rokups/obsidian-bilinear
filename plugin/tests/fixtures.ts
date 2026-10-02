@@ -5,7 +5,7 @@ import type { IssueRecord } from "../src/format/record";
 import type { Tracker } from "../src/ops/io";
 import { adoptIssue, archiveClosed, archiveIssues, commentIssue, createIssue, deleteIssue, moveIssue, setLabel, setProps, setStateStyle, unarchiveIssues } from "../src/ops/issues";
 import { lint } from "../src/ops/lint";
-import { indexNotes, listIssues, readIndex } from "../src/ops/tracker";
+import { listIssues, readIndex, trackersIn } from "../src/ops/tracker";
 import { issueRelations, linkedProgress, type Progress, type Relations } from "../src/store/query";
 import { MemoryIO } from "./memory-io";
 
@@ -14,6 +14,8 @@ export const TRACKER_DIR = "Trackers/Tracker";
 
 export interface Op {
   op: string;
+  /** The index note the operation is for, where the folder holds several trackers. */
+  tracker?: string;
   args: Record<string, any>;
   today?: string;
   author?: string;
@@ -47,10 +49,12 @@ export function cases(): Case[] {
     .map((name) => ({ name, dir: join(FIXTURES, name), op: JSON.parse(readFileSync(join(FIXTURES, name, "op.json"), "utf8")) }));
 }
 
-export async function openTracker(io: MemoryIO, dir = TRACKER_DIR): Promise<Tracker> {
-  const found = await indexNotes(io, dir);
-  if (!found.length) throw new Error(`no index note in ${dir}`);
-  return { io, dir, indexPath: found[0] };
+/** The tracker of a case: the index note the case names, else the first in the folder. */
+export async function openTracker(io: MemoryIO, dir = TRACKER_DIR, name?: string): Promise<Tracker> {
+  const found = (await trackersIn(io, dir)).map((f) => f.path);
+  const indexPath = name === undefined ? found[0] : found.find((path) => path === `${dir}/${name}`);
+  if (indexPath === undefined) throw new Error(`no index note ${name ?? ""} in ${dir}`);
+  return { io, dir, indexPath };
 }
 
 /** A record with the key names the fixtures and the CLI's JSON use. */

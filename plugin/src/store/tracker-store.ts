@@ -1,6 +1,6 @@
 import { type App, type EventRef, type TAbstractFile, type TFile } from "obsidian";
 import { ref, shallowRef } from "vue";
-import { LOCATIONS } from "../format/ids";
+import { ID_RE, LOCATIONS } from "../format/ids";
 import { folderOf as locationFolder } from "../ops/tracker";
 import type { Tracker } from "../ops/io";
 import { VaultIO } from "../view/vault-io";
@@ -25,6 +25,8 @@ export class TrackerStore {
   private refs: Array<[{ offref(ref: EventRef): void }, EventRef]> = [];
   private timer: number | null = null;
   private stopped = false;
+  /** The IDs on the index's lines, as last read. */
+  private listed = new Set<string>();
 
   constructor(
     private app: App,
@@ -61,12 +63,19 @@ export class TrackerStore {
     if (this.timer !== null) window.clearTimeout(this.timer);
   }
 
-  /** Is this path the index, or a note in issues/, archive/ or the tracker folder? */
+  /**
+   * Is this path the index, or a note of this tracker in issues/, archive/
+   * or the tracker folder? Other trackers may keep their notes there too:
+   * a note is this tracker's if it has its prefix or is listed in it.
+   */
   private concerns(path: string): boolean {
     if (path === this.indexFile.path) return true;
     const slash = path.lastIndexOf("/");
     const parent = slash < 0 ? "" : path.slice(0, slash);
-    return LOCATIONS.some((where) => parent === locationFolder(this.dir, where));
+    if (!LOCATIONS.some((where) => parent === locationFolder(this.dir, where))) return false;
+    const { prefix } = this.snapshot.value.config;
+    const id = path.slice(slash + 1).replace(/\.md$/, "");
+    return prefix === null || ID_RE.exec(id)?.[1] === prefix || this.listed.has(id);
   }
 
   private touched(path: string): void {
@@ -92,6 +101,7 @@ export class TrackerStore {
       const cache = this.app.metadataCache.getFileCache(file);
       return { frontmatter: cache?.frontmatter ?? null, links: descriptionLinks(cache) };
     });
+    this.listed = new Set([...this.snapshot.value.issues, ...this.snapshot.value.archived].map((r) => r.id));
     this.loaded.value = true;
   }
 

@@ -127,8 +127,8 @@ export class NewIssueModal extends Modal {
 export class CreateTrackerModal extends Modal {
   constructor(
     app: App,
-    private parent: string,
-    private submit: (folder: string, prefix: string) => Promise<boolean>,
+    private folder: string,
+    private submit: (indexPath: string, prefix: string) => Promise<boolean>,
   ) {
     super(app);
   }
@@ -136,7 +136,7 @@ export class CreateTrackerModal extends Modal {
   onOpen(): void {
     this.setTitle("Create tracker");
     let name = "";
-    let parent = this.parent;
+    let folder = this.folder;
     let prefix = "";
     let prefixEdited = false;
     let prefixInput: HTMLInputElement | null = null;
@@ -147,17 +147,20 @@ export class CreateTrackerModal extends Modal {
       return guess.toUpperCase().replace(/^[0-9]+/, "").slice(0, 4);
     };
     const go = async () => {
-      const folder = [parent.trim().replace(/^\/+|\/+$/g, ""), name.trim()].filter(Boolean).join("/");
-      if (name.trim() && (await this.submit(folder, prefix.trim()))) this.close();
+      const indexPath = [folder.trim().replace(/^\/+|\/+$/g, ""), `${name.trim()}.md`].filter(Boolean).join("/");
+      if (name.trim() && (await this.submit(indexPath, prefix.trim()))) this.close();
     };
-    new Setting(this.contentEl).setName("Name").setDesc("The tracker's folder and index note are named after it.").addText((t) => {
+    new Setting(this.contentEl).setName("Name").setDesc("The tracker's index note is named after it.").addText((t) => {
       t.setPlaceholder("Bilinear").onChange((v) => {
         name = v;
         if (!prefixEdited && prefixInput) prefixInput.value = prefix = suggest(v);
       });
       window.setTimeout(() => t.inputEl.focus());
     });
-    new Setting(this.contentEl).setName("Parent folder").setDesc("Leave empty for the vault root.").addText((t) => t.setValue(parent).onChange((v) => (parent = v)));
+    new Setting(this.contentEl)
+      .setName("Folder")
+      .setDesc("Where the index note goes. The trackers of a folder share its issues/ and archive/. Leave empty for the vault root.")
+      .addText((t) => t.setValue(folder).onChange((v) => (folder = v)));
     new Setting(this.contentEl).setName("ID prefix").setDesc("Capital letters and digits, starting with a letter. Issues are numbered BL-1, BL-2, …").addText((t) => {
       prefixInput = t.inputEl;
       t.setPlaceholder("BL").onChange((v) => {

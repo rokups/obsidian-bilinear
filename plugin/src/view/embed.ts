@@ -66,7 +66,7 @@ export class EmbedChild extends MarkdownRenderChild {
     if (!file) {
       this.state.error = opts.tracker
         ? `Bilinear: no tracker found for "${opts.tracker}"`
-        : "Bilinear: add a line such as 'tracker: Trackers/Bilinear' to say which tracker to show";
+        : "Bilinear: add a line such as 'tracker: Trackers/Bilinear', the path of an index note, to say which tracker to show";
       return false;
     }
     this.state.error = null;
@@ -82,10 +82,12 @@ export class EmbedChild extends MarkdownRenderChild {
     const trackers = this.plugin.findTrackers();
     if (!name) return this.plugin.trackerContaining(this.sourcePath) ?? (trackers.length === 1 ? trackers[0] : null);
     const wanted = name.replace(/^\/+|\/+$/g, "").replace(/\.md$/, "");
+    // A folder or a name stands for a tracker only where it means one.
+    const only = (found: TFile[]) => (found.length === 1 ? found[0] : undefined);
     return (
       trackers.find((t) => t.path.replace(/\.md$/, "") === wanted) ??
-      trackers.find((t) => folderOf(t) === wanted) ??
-      trackers.find((t) => t.basename === wanted) ??
+      only(trackers.filter((t) => folderOf(t) === wanted)) ??
+      only(trackers.filter((t) => t.basename === wanted)) ??
       null
     );
   }

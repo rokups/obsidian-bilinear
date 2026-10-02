@@ -3,17 +3,21 @@
 A Linear-style issue tracker for Obsidian, stored as plain Markdown notes, with
 a command-line client that works on the same files and runs through `npx`.
 
-A tracker is a folder: one index note that lists the issues in order, and one
-note per issue with its properties in frontmatter, kept in `issues/` while the
-issue is open and in `archive/` once it is archived. Everything is
-hand-editable; both tools preserve what they do not understand.
+A tracker is an index note that lists the issues in order, and one note per
+issue with its properties in frontmatter, kept beside it in `issues/` while
+the issue is open and in `archive/` once it is archived. A folder holds as
+many trackers as you like: they share `issues/` and `archive/`, and each has
+an ID prefix of its own. Everything is hand-editable; both tools preserve
+what they do not understand.
 
 ```
-Trackers/Bilinear/
+Trackers/
   Bilinear.md        index note: config, `## Issues`, `## Archive`
+  Website.md         another tracker, with the prefix WEB
   issues/
     BL-9.md
     BL-13.md
+    WEB-2.md
   archive/
     BL-4.md
 ```
@@ -65,8 +69,8 @@ in its place. Each [release](https://github.com/rokups/obsidian-bilinear/release
 also carries the CLI as a single file, `bilinear.js`, that `node` runs as it is.
 
 ```sh
-bilinear init Trackers/Bilinear --prefix BL
-cd Trackers/Bilinear
+bilinear init Trackers/Bilinear.md --prefix BL
+export BILINEAR_TRACKER=Trackers/Bilinear.md
 bilinear new "Fix flaky cache test" --priority high --label build,bug
 bilinear list --status todo,in-progress
 bilinear set BL-1 status=in-progress assignee=rk labels+=ui due=2026-10-10
@@ -78,7 +82,7 @@ bilinear lint --fix
 
 | Command | Purpose |
 |---|---|
-| `init <folder> --prefix BL` | Create the folder, index note, `issues/` and `archive/` |
+| `init <index note> --prefix BL` | Create a tracker: the index note, and `issues/` and `archive/` beside it if they are not there. The prefix must be free in the folder |
 | `new "Title" [--description ..] [--status ..] [--priority ..] [--label ..] [--assignee ..] [--due ..] [--blocked-by ..] [--related-to ..] [--top]` | Create an issue; prints the ID |
 | `list [--status ..] [--label ..] [--assignee ..] [--priority ..] [--blocked] [--blocked-by ID] [--related-to ID] [--archived] [--all]` | List in index order |
 | `show <ID>` | Print properties and body |
@@ -95,8 +99,13 @@ bilinear lint --fix
 | `agent-setup <dir> [--codex] [--claude] [--local] [--followups]` | Set an LLM agent up to track its work here: install a skill, and add a section to `CLAUDE.md` or `AGENTS.md` that names this tracker as where work is tracked |
 | `agent-setup <dir> --update` | Refresh what an earlier `agent-setup` wrote in `<dir>`: the skill, and each section it finds, keeping the tracker each names and its follow-ups rule |
 
-- The tracker is taken from `--tracker PATH` (folder or index note), then
-  `BILINEAR_TRACKER`, then a search upward from the working directory.
+- The tracker is taken from `--tracker PATH`, then `BILINEAR_TRACKER`, then a
+  search upward from the working directory. `PATH` is the index note, with
+  or without its `.md` (`Trackers/Bilinear`), or a folder.
+- A folder that holds several trackers stands for the one whose prefix the
+  command's issue has: in `Trackers/`, `bilinear set WEB-2 status=done` needs
+  nothing more. A command that names no issue (`list`, `new`, `lint`) must be
+  given the index note there, and says so.
 - The comment author is `--author`, then `BILINEAR_USER`, then `$USER`.
 - `--json` on `list`, `show`, `new`, `label`, `state` and `lint`.
 - `list` shows progress as `[1/2]` and `show` names the blockers and their
@@ -124,6 +133,9 @@ bilinear lint --fix
 - Colours and icons are stored in the index note, as
   `label-colors: [bug=red]`, `state-icons: [in-review=eye]` and
   `state-colors: [in-review=purple]`, so they can also be edited by hand.
+- A tracker in a folder of its own (`Trackers/Bilinear/Bilinear.md`), which
+  is what `init` used to make, keeps working as it is, and its folder names
+  it.
 - A tracker made before `issues/` existed, with open notes directly in the
   tracker folder, keeps working as it is; `bilinear lint --fix` moves the
   notes into `issues/`.
@@ -133,10 +145,10 @@ bilinear lint --fix
 - Exit codes: 0 success, 1 usage or not found, 2 lint problems found, 3 write
   conflict after retries, a note moved or deleted while the command ran, or
   the tracker stayed locked.
-- Every command takes a lock on the tracker first, and so does every
+- Every command takes a lock on the tracker's folder first, and so does every
   operation of the plugin, so scripts, agents, cron jobs and Obsidian can
-  all work on one tracker at once without losing each other's changes or
-  seeing half of an operation; they simply run in turn. The lock is a
+  all work on the trackers of a folder at once without losing each other's
+  changes or seeing half of an operation; they simply run in turn. The lock is a
   `.bilinear.lock` file in the tracker folder that exists only while an
   operation runs. A command waits up to 10 seconds for its turn; set
   `BILINEAR_LOCK_TIMEOUT` (seconds) to change that. `spec/FORMAT.md`
@@ -290,8 +302,9 @@ The new issue dialog takes the whole issue: title, status, priority, assignee,
 due date, labels, blockers and a Markdown description, so the note
 need not be opened afterwards. "Create and open" opens it all the same.
 
-Settings: the author name for comments, and the default folder for new
-trackers.
+Settings: the author name for comments, and the folder that "Create tracker"
+puts new trackers in. The trackers of a folder share its `issues/` and
+`archive/`.
 
 | Key | Action |
 |---|---|
@@ -317,8 +330,8 @@ limit: 10
 ```
 ````
 
-Keys: `tracker` (folder, index note or tracker name; optional inside a tracker
-folder or when the vault has one tracker), `status`, `priority`, `label`,
+Keys: `tracker` (the index note, or a folder or tracker name that means one
+tracker; optional in a folder with one tracker or when the vault has one), `status`, `priority`, `label`,
 `assignee` (`none` for unassigned), `search`, `archived`, `limit`.
 
 ## Releasing

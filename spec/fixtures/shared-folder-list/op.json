@@ -1,0 +1,30 @@
+{
+  "op": "list",
+  "tracker": "Other.md",
+  "args": {},
+  "expect": {
+    "issues": [
+      {
+        "id": "OT-30",
+        "title": "Draft the release notes",
+        "status": "doing",
+        "archived": false,
+        "missing": false
+      },
+      {
+        "id": "OT-7",
+        "title": "Order the stickers",
+        "status": "done",
+        "archived": false,
+        "missing": false
+      },
+      {
+        "id": "OT-2",
+        "title": "Book the room",
+        "status": "done",
+        "archived": true,
+        "missing": false
+      }
+    ]
+  }
+}

@@ -7,8 +7,8 @@ import { newIndexText, type Index, type Where } from "../format/index-note";
 import { addComment, newNoteText } from "../format/issue-note";
 import { Doc, type Value } from "../format/yaml";
 import { reaches } from "../store/query";
-import { OpError, joinPath, type Tracker, type TrackerIO } from "./io";
-import { allRecords, folderOf, found, indexNotes, issueRecord, locked, moveNote, noteIds, notePath, pathIn, readIndex, requireItem, resolveNote, updateIndex } from "./tracker";
+import { OpError, basename, dirname, joinPath, type Tracker, type TrackerIO } from "./io";
+import { allRecords, folderOf, found, issueRecord, locked, moveNote, noteIds, notePath, otherTrackers, ownerOf, pathIn, readIndex, requireItem, resolveNote, trackersIn, updateIndex } from "./tracker";
 
 export interface NewIssue {
   title: string;
@@ -61,19 +61,32 @@ function checkProps(idx: Index, props: PropEdits, selfId: string | null, warn?: 
   }
 }
 
-/** Create the tracker folder, its index note, issues/ and archive/. Returns the index path. */
-export async function createTracker(io: TrackerIO, folder: string, prefix: string): Promise<string> {
+/**
+ * Create a tracker: its index note, and issues/ and archive/ beside it,
+ * which it shares with the other trackers of the folder. Their prefixes
+ * tell their notes apart, so the prefix must be free in the folder.
+ * Returns the index path.
+ */
+export async function createTracker(io: TrackerIO, indexPath: string, prefix: string): Promise<string> {
   if (!PREFIX_RE.test(prefix)) throw new OpError("the prefix must be of the form [A-Z][A-Z0-9]*");
-  if (!folder) throw new OpError("a tracker needs its own folder");
-  if ((await indexNotes(io, folder)).length) throw new OpError(`${folder} already contains a tracker`);
+  const name = basename(indexPath);
+  if (!indexPath.endsWith(".md") || !name) throw new OpError("the index note must be a Markdown note, such as Trackers/Bilinear.md");
+  if (ID_RE.test(name)) throw new OpError(`${name} reads as an issue ID; give the index note another name`);
+  const folder = dirname(indexPath);
   await io.mkdir(folder);
-  await io.mkdir(joinPath(folder, ISSUES_DIR));
-  await io.mkdir(joinPath(folder, ARCHIVE_DIR));
-  const indexPath = joinPath(folder, `${folder.slice(folder.lastIndexOf("/") + 1)}.md`);
-  if (!(await io.createExclusive(indexPath, newIndexText(prefix)))) {
-    throw new OpError(`${indexPath} already exists and is not a tracker index`);
-  }
-  return indexPath;
+  const create = async (): Promise<string> => {
+    for (const other of await trackersIn(io, folder)) {
+      if (other.path === indexPath) throw new OpError(`${indexPath} is already a tracker`);
+      if (other.prefix === prefix) throw new OpError(`${basename(other.path)}, in the same folder, already has the prefix ${prefix}`);
+    }
+    await io.mkdir(joinPath(folder, ISSUES_DIR));
+    await io.mkdir(joinPath(folder, ARCHIVE_DIR));
+    if (!(await io.createExclusive(indexPath, newIndexText(prefix)))) {
+      throw new OpError(`${indexPath} already exists and is not a tracker index`);
+    }
+    return indexPath;
+  };
+  return io.lock ? io.lock(folder, create) : create();
 }
 
 export function createIssue(t: Tracker, args: NewIssue, today: string): Promise<string> {
@@ -327,6 +340,8 @@ export function adoptIssue(t: Tracker, id: string): Promise<void> {
     const idx = await readIndex(t);
     if (!ID_RE.test(id)) throw new OpError(`'${id}' is not an issue ID`);
     if (idx.find(id)) throw new OpError(`${id} is already in the index`);
+    const owner = ownerOf(id, await otherTrackers(t));
+    if (owner) throw new OpError(`${id} has the prefix of ${basename(owner.path)}, another tracker in this folder`);
     const here = await found(t, id);
     if (!here.length) throw new OpError(`${id}: no such note in ${ISSUES_DIR}/, ${ARCHIVE_DIR}/ or the tracker folder`);
     const archived = here[0] === "archive";

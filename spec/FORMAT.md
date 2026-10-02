@@ -10,15 +10,23 @@ files that break a rule are tolerated wherever this document says how.
 
 ## 1. Storage model
 
-A tracker is one folder. It holds one index note and two subfolders: `issues/`
-for the notes of open issues and `archive/` for the notes of archived ones.
+A tracker is one index note. The folder it lies in is its *tracker folder*,
+which has two subfolders: `issues/` for the notes of open issues and
+`archive/` for the notes of archived ones.
+
+A folder may hold several trackers. They share the two subfolders, and the
+prefix of its IDs tells each tracker's notes from the others', so the
+trackers of one folder must have different prefixes. A tracker in a folder
+of its own is the same thing with one index note.
 
 ```
-Trackers/Bilinear/
-  Bilinear.md        index note
+Trackers/
+  Bilinear.md        index note, prefix BL
+  Website.md         index note, prefix WEB
   issues/
     BL-9.md
     BL-13.md
+    WEB-2.md
   archive/
     BL-4.md
 ```
@@ -69,11 +77,12 @@ list lines.
 
 ### 1.4 Index note
 
-The index note is the note at the top level of the tracker folder whose
-frontmatter has `bilinear: tracker`. There must be exactly one. `init` names it
-after the folder; tools find it by the marker, not by name. If there are
-several, the one named after the folder is used, otherwise the first by name,
-and `lint` reports the others.
+An index note is a note at the top level of a folder whose frontmatter has
+`bilinear: tracker`. Tools find it by the marker, not by name; the name is
+the tracker's name and anything but an issue ID. Every such note in a folder
+is a tracker of its own. A tool that is given a folder that holds several
+must be told which is meant (by the note, or by an issue ID, whose prefix
+names its tracker), and must not pick one.
 
 ```markdown
 ---
@@ -99,7 +108,7 @@ Free-form project notes. Never modified by the tools.
 | Key | Meaning |
 |---|---|
 | `bilinear` | Marker; must be `tracker` |
-| `prefix` | ID prefix, `[A-Z][A-Z0-9]*` |
+| `prefix` | ID prefix, `[A-Z][A-Z0-9]*`; not that of another tracker in the folder |
 | `next` | Next issue number to allocate; a positive integer |
 | `states` | Workflow states, in display order; not empty |
 | `closed-states` | Subset of `states` that count as closed |
@@ -319,6 +328,7 @@ operation leaves the index correct and at worst a stray note.
 
 | Operation | Steps, in order |
 |---|---|
+| Create tracker | Create the folder, `issues/` and `archive/` as far as they are missing; create the index note. Refused if a tracker in the folder has the prefix |
 | Create | Allocate ID; create note in `issues/`; add line to `## Issues` and raise `next` |
 | Edit property | Write the issue note only. An edit that would close a `blocked-by` cycle is refused |
 | Unrelate | Remove the link from the `related-to` of both notes. Removing a `related-to` entry by editing the property does the same |
@@ -328,7 +338,7 @@ operation leaves the index correct and at worst a stray note.
 | Unarchive | Move note to `issues/`; move line to the end of `## Issues` |
 | Delete | Trash the note, wherever it is; remove the links to it from `blocked-by` and `related-to` of the other notes; remove the line |
 | Comment | Append under `## Comments` in the issue note |
-| Adopt | Move a note lying in the tracker folder to `issues/`; add a line for it; raise `next` if needed |
+| Adopt | Move a note lying in the tracker folder to `issues/`; add a line for it; raise `next` if needed. A note with the prefix of another tracker in the folder is refused |
 | Label | Add the label to `labels` if absent; set or clear its `label-colors` entry |
 | State style | Set or clear a state's `state-icons` and `state-colors` entries |
 
@@ -340,7 +350,8 @@ a different, non-empty `title` property.
 
 **ID allocation.** Take `n = max(next, 1 + the highest number seen)`, where
 "seen" covers IDs with the tracker's prefix on index lines, in `issues/`, in
-`archive/` and in the tracker folder itself. Create `issues/<PREFIX>-<n>.md`
+`archive/` and in the tracker folder itself; the notes of the folder's other
+trackers have other prefixes and do not count. Create `issues/<PREFIX>-<n>.md`
 with an exclusive create; if a note with that name exists in any of the three
 places, increment and retry. Then write the
 index with `next` set to at least `n + 1`.
@@ -355,7 +366,10 @@ which they were archived.
 
 | Situation | Behaviour |
 |---|---|
-| Note in `issues/`, `archive/` or the tracker folder, no index line | Orphan: ignored; reported by `lint`; added only by `adopt` |
+| Note with the tracker's prefix in `issues/`, `archive/` or the tracker folder, no index line | Orphan: ignored; reported by `lint`; added only by `adopt` |
+| Note with another prefix there, no index line | Not this tracker's: ignored |
+| Index line whose ID has the prefix of another tracker in the folder | Two trackers would own one note; `lint` error; not auto-fixed |
+| Two trackers in a folder with one prefix | Each takes the other's notes for its own; `lint` error; not auto-fixed |
 | Index line, note missing everywhere | Issue exists; shown as "note missing" with the title from the line; `lint` error |
 | Line under `## Archive`, note in `issues/` (or the reverse) | Index wins; `lint --fix` moves the note |
 | Line under `## Issues` or `## Archive`, note in the tracker folder | The note is used where it is; `lint --fix` moves it to `issues/` or `archive/` |
@@ -378,7 +392,7 @@ of the two, then the tracker folder itself.
 |---|---|---|---|
 | `index-yaml` | error | | Index frontmatter outside the YAML subset |
 | `index-key` | error | | `prefix`, `next`, `states` or `closed-states` missing or invalid |
-| `multiple-trackers` | error | | Another note in the folder has `bilinear: tracker` |
+| `prefix-shared` | error | | Another tracker in the folder has the same `prefix` |
 | `label-color-invalid` | warning | | A `label-colors` entry is not `name=color` with a known colour |
 | `state-style-invalid` | warning | | A `state-icons` or `state-colors` entry does not parse, or names no state |
 | `triage-state-invalid` | warning | | `triage-state` names no state, or a closed one |
@@ -386,7 +400,7 @@ of the two, then the tracker folder itself.
 | `duplicate-section` | warning | | A second `## Issues` or `## Archive` heading |
 | `duplicate-id` | warning | yes | ID listed more than once |
 | `line-format` | warning | yes | Issue line not in canonical form |
-| `prefix-mismatch` | warning | | Listed ID does not use the tracker prefix |
+| `prefix-mismatch` | warning | | Listed ID does not use the tracker prefix (error if the prefix is that of another tracker in the folder) |
 | `note-missing` | error | | No note in any location |
 | `note-duplicate` | error | | Note in more than one location |
 | `wrong-location` | warning | yes | Note is not in the folder its section says, including a note left in the tracker folder |
@@ -409,11 +423,12 @@ the index note.
 ### 3.2 Concurrent use
 
 An operation of section 2 runs alone: nothing else reads or changes the
-tracker between its first read and its last write. The CLI and the plugin
+tracker folder between its first read and its last write. The lock is the
+folder's, so the trackers of one folder take turns. The CLI and the plugin
 get there the same way.
 
-**The lock file.** A tracker is locked by creating `.bilinear.lock` in the
-tracker folder, exclusively (the create fails if the file exists), and
+**The lock file.** A tracker folder is locked by creating `.bilinear.lock` in
+it, exclusively (the create fails if the file exists), and
 unlocked by deleting it. Every operation takes the lock first and holds it to
 the end: every CLI command, the commands that only read included, and every
 plugin operation.
@@ -515,6 +530,9 @@ Each directory in `spec/fixtures/` is one case:
   op.json     one operation
   after/      the tracker folder expected afterwards
 ```
+
+Where the folder holds several trackers, `op.json` has `"tracker"`: the name
+of the index note the operation is for, such as `"Other.md"`.
 
 The tests copy `before/`, apply the operation, once to the operations in
 memory and once through the command line on disk, and require the result to

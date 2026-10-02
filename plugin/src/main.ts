@@ -142,16 +142,33 @@ export default class BilinearPlugin extends Plugin {
       .sort((a, b) => a.path.localeCompare(b.path));
   }
 
-  /** The index note of the tracker a path belongs to: itself, its folder's, or (from issues/ or archive/) the one above. */
+  /** The trackers a path may belong to: those of its folder, or (from issues/ or archive/) of the one above. */
+  trackersAround(path: string): TFile[] {
+    const file = this.app.vault.getFileByPath(path);
+    if (!file) return [];
+    const trackers = this.findTrackers();
+    const dir = folderOf(file);
+    const here = trackers.filter((t) => folderOf(t) === dir);
+    if (here.length) return here;
+    const sub = [ISSUES_DIR, ARCHIVE_DIR].find((name) => dir === name || dir.endsWith(`/${name}`));
+    if (sub === undefined) return [];
+    const above = dir.slice(0, Math.max(0, dir.length - sub.length - 1));
+    return trackers.filter((t) => folderOf(t) === above);
+  }
+
+  /**
+   * The index note of the tracker a path belongs to: itself, or of the
+   * trackers around it the one whose prefix the note's name has. Where the
+   * name says nothing, the only tracker there.
+   */
   trackerContaining(path: string): TFile | null {
     const file = this.app.vault.getFileByPath(path);
     if (!file) return null;
     if (this.isTracker(file)) return file;
-    const trackers = this.findTrackers();
-    const dir = folderOf(file);
-    const sub = [ISSUES_DIR, ARCHIVE_DIR].find((name) => dir === name || dir.endsWith(`/${name}`));
-    const above = sub === undefined ? null : dir.slice(0, Math.max(0, dir.length - sub.length - 1));
-    return trackers.find((t) => folderOf(t) === dir) ?? (above !== null ? trackers.find((t) => folderOf(t) === above) : undefined) ?? null;
+    const around = this.trackersAround(path);
+    const prefix = ID_RE.exec(file.basename)?.[1];
+    const owner = prefix === undefined ? undefined : around.find((t) => this.app.metadataCache.getFileCache(t)?.frontmatter?.["prefix"] === prefix);
+    return owner ?? (around.length === 1 ? around[0] : null);
   }
 
   /** The tracker a command should act on: the one in view, the one around the active note, or the only one. */
@@ -205,7 +222,7 @@ export default class BilinearPlugin extends Plugin {
    * An editor saves its whole text. If the note was changed a moment ago,
    * by the CLI or by an operation of this plugin, and the editor has not
    * taken the change in yet, that save would undo it. So the save of a
-   * tracker's note waits for the tracker's lock, and first has the view
+   * tracker's note waits for the lock of its folder, and first has the view
    * take in what is on disk: Obsidian merges it into the text being edited,
    * as it does for any change made outside the editor.
    */
@@ -216,7 +233,8 @@ export default class BilinearPlugin extends Plugin {
     const patched = async function (this: TextFileView, clear?: boolean): Promise<void> {
       const file = this.file;
       const ours = plugin.active && file && (ID_RE.test(file.basename) || plugin.isTracker(file));
-      const index = ours ? plugin.trackerContaining(file.path) : null;
+      // The lock is the folder's, whichever of its trackers the note is in.
+      const index = ours ? (plugin.isTracker(file) ? file : plugin.trackersAround(file.path)[0]) : undefined;
       if (!file || !index) return original.call(this, clear);
       const { adapter } = plugin.app.vault;
       const save = async (): Promise<void> => {
@@ -300,9 +318,9 @@ export default class BilinearPlugin extends Plugin {
   // -- commands
 
   private createTracker(): void {
-    new CreateTrackerModal(this.app, this.settings.trackerFolder, async (folder, prefix) => {
+    new CreateTrackerModal(this.app, this.settings.trackerFolder, async (indexPath, prefix) => {
       try {
-        const path = await createTracker(new VaultIO(this.app), folder, prefix);
+        const path = await createTracker(new VaultIO(this.app), indexPath, prefix);
         const file = this.app.vault.getFileByPath(path);
         if (file) await this.openIndex(file);
         return true;

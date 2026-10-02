@@ -2,7 +2,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { OpError, type Tracker } from "../src/ops/io";
-import { archiveIssues, commentIssue, createIssue, createTracker, deleteIssue, moveIssue, recreateNote, setLabel, setProps, unarchiveIssues, unrelate } from "../src/ops/issues";
+import { adoptIssue, archiveIssues, commentIssue, createIssue, createTracker, deleteIssue, moveIssue, recreateNote, setLabel, setProps, unarchiveIssues, unrelate } from "../src/ops/issues";
 import { lint } from "../src/ops/lint";
 import { listIssues } from "../src/ops/tracker";
 import { parseEmbed } from "../src/view/embed-options";
@@ -15,22 +15,78 @@ const ids = async () => (await listIssues(t)).map((i) => i.id);
 
 beforeEach(async () => {
   io = new MemoryIO();
-  const indexPath = await createTracker(io, "T/Bilinear", "BL");
+  const indexPath = await createTracker(io, "T/Bilinear/Bilinear.md", "BL");
   t = { io, dir: "T/Bilinear", indexPath };
 });
 
 describe("createTracker", () => {
-  it("names the index after the folder", () => {
+  it("makes the index note where it is told", () => {
     expect(t.indexPath).toBe("T/Bilinear/Bilinear.md");
     expect(index().startsWith("---\nbilinear: tracker\nprefix: BL\nnext: 1\n")).toBe(true);
   });
 
-  it("refuses a bad prefix, an existing tracker and a foreign note", async () => {
-    await expect(createTracker(io, "T/Other", "bl")).rejects.toThrow(OpError);
-    await expect(createTracker(io, "T/Bilinear", "BL")).rejects.toThrow(/already contains a tracker/);
+  it("refuses a bad prefix, an existing tracker, a foreign note and a name that is not a note's", async () => {
+    await expect(createTracker(io, "T/Other/Other.md", "bl")).rejects.toThrow(OpError);
+    await expect(createTracker(io, "T/Bilinear/Bilinear.md", "OT")).rejects.toThrow(/already a tracker/);
     io.files.set("T/Plain/Plain.md", "just a note\n");
-    await expect(createTracker(io, "T/Plain", "PL")).rejects.toThrow(/not a tracker index/);
-    await expect(createTracker(io, "", "BL")).rejects.toThrow(OpError);
+    await expect(createTracker(io, "T/Plain/Plain.md", "PL")).rejects.toThrow(/not a tracker index/);
+    await expect(createTracker(io, "T/Other", "OT")).rejects.toThrow(/must be a Markdown note/);
+    await expect(createTracker(io, "T/Other/.md", "OT")).rejects.toThrow(/must be a Markdown note/);
+    await expect(createTracker(io, "T/Other/OT-1.md", "OT")).rejects.toThrow(/reads as an issue ID/);
+  });
+
+  it("puts a tracker in the vault root", async () => {
+    expect(await createTracker(io, "Root.md", "RT")).toBe("Root.md");
+    expect(await createIssue({ io, dir: "", indexPath: "Root.md" }, { title: "A" }, "2026-10-01")).toBe("RT-1");
+    expect(io.files.has("issues/RT-1.md")).toBe(true);
+  });
+});
+
+describe("several trackers in one folder", () => {
+  let other: Tracker;
+  beforeEach(async () => {
+    other = { io, dir: "T/Bilinear", indexPath: await createTracker(io, "T/Bilinear/Other.md", "OT") };
+  });
+  const problems = async (tracker: Tracker) => (await lint(tracker, false)).map((p) => `${p.severity}:${p.code}:${p.id ?? "-"}`);
+
+  it("refuses a prefix that another tracker of the folder has", async () => {
+    await expect(createTracker(io, "T/Bilinear/Third.md", "OT")).rejects.toThrow(/Other, in the same folder, already has the prefix OT/);
+    expect(io.files.has("T/Bilinear/Third.md")).toBe(false);
+    expect(await createTracker(io, "T/Elsewhere/Third.md", "OT")).toBe("T/Elsewhere/Third.md");
+  });
+
+  it("keeps the issues of each apart, in the folders they share", async () => {
+    expect(await createIssue(t, { title: "A" }, "2026-10-01")).toBe("BL-1");
+    expect(await createIssue(other, { title: "B" }, "2026-10-01")).toBe("OT-1");
+    expect(await createIssue(other, { title: "C" }, "2026-10-01")).toBe("OT-2");
+    expect(await createIssue(t, { title: "D" }, "2026-10-01")).toBe("BL-2");
+    expect([...io.files.keys()].filter((p) => p.includes("/issues/")).sort()).toEqual(["BL-1", "BL-2", "OT-1", "OT-2"].map((id) => `T/Bilinear/issues/${id}.md`));
+    expect(await ids()).toEqual(["BL-1", "BL-2"]);
+    expect((await listIssues(other)).map((i) => i.id)).toEqual(["OT-1", "OT-2"]);
+    await archiveIssues(other, ["OT-1"]);
+    expect(io.files.has("T/Bilinear/archive/OT-1.md")).toBe(true);
+    expect(await problems(t)).toEqual([]);
+    expect(await problems(other)).toEqual([]);
+  });
+
+  it("does not take the notes of another tracker for orphans, nor let them be adopted", async () => {
+    await createIssue(other, { title: "B" }, "2026-10-01");
+    expect(await problems(t)).toEqual([]);
+    await expect(adoptIssue(t, "OT-1")).rejects.toThrow(/OT-1 has the prefix of Other, another tracker in this folder/);
+    await expect(setProps(t, "OT-1", { status: "done" })).rejects.toThrow(/no such issue/);
+    io.files.set("T/Bilinear/issues/XX-1.md", "---\ntitle: Stray\nstatus: todo\n---\n");
+    await adoptIssue(t, "XX-1");
+    expect(await problems(t)).toEqual(["warning:prefix-mismatch:XX-1"]);
+  });
+
+  it("reports an issue listed in a tracker whose prefix is another's, and a prefix that two share", async () => {
+    await createIssue(other, { title: "B" }, "2026-10-01");
+    io.files.set(t.indexPath, index().replace("## Issues\n", "## Issues\n- [[OT-1]] B\n"));
+    expect(await problems(t)).toEqual(["error:prefix-mismatch:OT-1"]);
+    io.files.set(t.indexPath, index().replace("- [[OT-1]] B\n", ""));
+    io.files.set(other.indexPath, io.files.get(other.indexPath)!.replace("prefix: OT", "prefix: BL"));
+    expect(await problems(t)).toEqual(["error:prefix-shared:-"]);
+    expect(await problems(other)).toContain("error:prefix-shared:-");
   });
 });
 

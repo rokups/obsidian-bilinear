@@ -160,16 +160,35 @@ export async function allRecords(t: Tracker, idx: Index): Promise<{ records: Iss
   return { records, progress: linkedProgress(records, idx.closedStates), relations: issueRelations(records, idx.closedStates) };
 }
 
-/** Top-level notes of a folder that carry `bilinear: tracker`, folder-named note first. */
-export async function indexNotes(io: Tracker["io"], dir: string): Promise<string[]> {
-  const found: string[] = [];
+/** An index note of a folder, and its prefix: null if it has none that is valid. */
+export interface Sibling {
+  path: string;
+  prefix: string | null;
+}
+
+/** The trackers of a folder: its top-level notes that carry `bilinear: tracker`, the folder-named note first, then by name. */
+export async function trackersIn(io: Tracker["io"], dir: string): Promise<Sibling[]> {
+  const found: Sibling[] = [];
   for (const name of (await io.listNotes(dir)).sort()) {
     if (ID_RE.test(name)) continue;
     const path = joinPath(dir, `${name}.md`);
     const text = await io.read(path);
-    if (text !== null && new Doc(text).getStr("bilinear") === "tracker") found.push(path);
+    if (text === null) continue;
+    const idx = new Index(text);
+    if (idx.isTracker()) found.push({ path, prefix: idx.prefix });
   }
   const folderName = dir.slice(dir.lastIndexOf("/") + 1);
-  const rank = (p: string) => (p === joinPath(dir, `${folderName}.md`) ? 0 : 1);
+  const rank = (s: Sibling) => (s.path === joinPath(dir, `${folderName}.md`) ? 0 : 1);
   return found.sort((a, b) => rank(a) - rank(b));
+}
+
+/** The other trackers of a tracker's folder, which share its issues/ and archive/. */
+export async function otherTrackers(t: Tracker): Promise<Sibling[]> {
+  return (await trackersIn(t.io, t.dir)).filter((other) => other.path !== t.indexPath);
+}
+
+/** The tracker among these whose prefix an ID has. */
+export function ownerOf(id: string, trackers: Sibling[]): Sibling | undefined {
+  const prefix = ID_RE.exec(id)?.[1];
+  return prefix === undefined ? undefined : trackers.find((other) => other.prefix === prefix);
 }

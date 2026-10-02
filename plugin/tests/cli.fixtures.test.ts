@@ -77,7 +77,7 @@ describe("fixtures through the CLI", () => {
       fs.cpSync(join(c.dir, "before"), tracker, { recursive: true });
       let out = "";
       let err = "";
-      const code = await main(["--tracker", tracker, ...argvFor(c.op)], {
+      const code = await main(["--tracker", c.op.tracker === undefined ? tracker : join(tracker, c.op.tracker), ...argvFor(c.op)], {
         env: { BILINEAR_TODAY: c.op.today ?? "2026-01-01" },
         cwd: root,
         stdout: (s) => (out += s),

@@ -1,0 +1,11 @@
+{
+  "op": "create",
+  "tracker": "Other.md",
+  "args": {
+    "title": "Send the invitations"
+  },
+  "today": "2026-10-01",
+  "expect": {
+    "id": "OT-31"
+  }
+}

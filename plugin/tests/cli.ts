@@ -23,7 +23,7 @@ export class Sandbox {
 
   async init(): Promise<void> {
     fs.mkdirSync(join(this.vault, ".obsidian"), { recursive: true });
-    const made = await this.run("init", this.dir, "--prefix", "BL");
+    const made = await this.run("init", this.index, "--prefix", "BL");
     if (made.code !== 0 || made.out !== `${this.index}\n`) throw new Error(`init failed: ${JSON.stringify(made)}`);
   }
 

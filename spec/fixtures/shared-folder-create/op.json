@@ -1,0 +1,11 @@
+{
+  "op": "create",
+  "tracker": "Tracker.md",
+  "args": {
+    "title": "Add retry to fetcher"
+  },
+  "today": "2026-10-01",
+  "expect": {
+    "id": "BL-14"
+  }
+}

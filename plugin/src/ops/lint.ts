@@ -5,8 +5,8 @@ import type { Index, Item } from "../format/index-note";
 import { recordFromDoc, type IssueRecord } from "../format/record";
 import { Doc } from "../format/yaml";
 import { reaches } from "../store/query";
-import type { Tracker } from "./io";
-import { describe, found, indexNotes, locked, moveNote, noteIds, pathIn, place, readIndexRaw, resolveNote, updateIndex } from "./tracker";
+import { basename, type Tracker } from "./io";
+import { describe, found, locked, moveNote, noteIds, otherTrackers, ownerOf, pathIn, place, readIndexRaw, resolveNote, updateIndex } from "./tracker";
 
 export interface Problem {
   severity: "error" | "warning";
@@ -59,8 +59,10 @@ export function lint(t: Tracker, fix: boolean): Promise<Problem[]> {
     for (const p of idx.doc.problems()) add("error", "index-yaml", null, p);
     for (const p of idx.keyProblems()) add("error", "index-key", null, p);
     for (const [code, message] of idx.styleProblems()) add("warning", code, null, message);
-    for (const other of await indexNotes(t.io, t.dir)) {
-      if (other !== t.indexPath) add("error", "multiple-trackers", null, `${other.slice(other.lastIndexOf("/") + 1)} is also marked as a tracker index`);
+    // The trackers of a folder share issues/ and archive/; only their prefixes tell their notes apart.
+    const siblings = await otherTrackers(t);
+    for (const other of siblings) {
+      if (idx.prefix !== null && other.prefix === idx.prefix) add("error", "prefix-shared", null, `${basename(other.path)}, in the same folder, has the prefix ${idx.prefix} too`);
     }
     if (!idx.sections.has(ISSUES)) add("warning", "missing-section", null, `the index has no '## ${ISSUES}' section`);
     for (const name of idx.dupSections) {
@@ -78,7 +80,11 @@ export function lint(t: Tracker, fix: boolean): Promise<Problem[]> {
       }
       seen.set(it.id, it);
       if (!it.canonical) add("warning", "line-format", it.id, "index line is not in the form '- [[ID]] title'", true);
-      if (prefix && idNumber(it.id, prefix) === null) add("warning", "prefix-mismatch", it.id, `ID does not use the tracker prefix ${prefix}`);
+      if (prefix && idNumber(it.id, prefix) === null) {
+        const owner = ownerOf(it.id, siblings);
+        if (owner) add("error", "prefix-mismatch", it.id, `ID has the prefix of ${basename(owner.path)}, another tracker in this folder`);
+        else add("warning", "prefix-mismatch", it.id, `ID does not use the tracker prefix ${prefix}`);
+      }
       const here = await found(t, it.id);
       if (!here.length) {
         add("error", "note-missing", it.id, "note missing");

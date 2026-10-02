@@ -4,7 +4,7 @@ import type BilinearPlugin from "../main";
 export interface BilinearSettings {
   /** Author name written on comments. */
   author: string;
-  /** Folder in which "Create tracker" puts new trackers. */
+  /** Folder in which "Create tracker" puts the index notes of new trackers. */
   trackerFolder: string;
 }
 
@@ -35,7 +35,7 @@ export class BilinearSettingTab extends PluginSettingTab {
       );
     new Setting(containerEl)
       .setName("Default tracker folder")
-      .setDesc("Where the 'Create tracker' command puts new trackers. Leave empty for the vault root.")
+      .setDesc("Where the 'Create tracker' command puts new trackers. The trackers of a folder share its issues/ and archive/. Leave empty for the vault root.")
       .addText((t) =>
         t
           .setPlaceholder("Trackers")
