@@ -322,7 +322,10 @@ export default class BilinearPlugin extends Plugin {
     }
     const choices: TrackerChoice[] = trackers.map((t) => {
       const fm = this.app.metadataCache.getFileCache(t)?.frontmatter ?? {};
-      return { indexPath: t.path, name: t.basename, states: strings(fm["states"]), labels: strings(fm["labels"]) };
+      const states = strings(fm["states"]);
+      // As Index.defaultState: the first state that is not the triage state.
+      const triage = strings(fm["triage-state"]).find((s) => !strings(fm["closed-states"]).includes(s));
+      return { indexPath: t.path, name: t.basename, states, defaultState: states.find((s) => s !== triage) ?? states[0] ?? "", labels: strings(fm["labels"]) };
     });
     const chosen = preferred ?? this.currentTracker() ?? trackers[0];
     new NewIssueModal(this.app, choices, chosen.path, defaults, async (indexPath, issue, open) => {

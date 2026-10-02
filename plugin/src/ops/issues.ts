@@ -76,7 +76,7 @@ export function createIssue(t: Tracker, args: NewIssue, today: string): Promise<
     const title = cleanTitle(args.title);
     const props: PropEdits = {
       title,
-      status: args.status || idx.states[0],
+      status: args.status || idx.defaultState,
       priority: args.priority || "none",
       labels: args.labels ?? [],
       assignee: args.assignee || null,
@@ -266,7 +266,7 @@ export function recreateNote(t: Tracker, id: string, today: string): Promise<str
     if ((await resolveNote(t, id, item.archived)) !== null) throw new OpError(`${id}: the note exists`);
     const path = notePath(t, id, item.archived);
     await t.io.mkdir(folderOf(t.dir, item.archived ? "archive" : "issues"));
-    const text = newNoteText({ title: item.title || id, status: idx.states[0], priority: "none", created: today });
+    const text = newNoteText({ title: item.title || id, status: idx.defaultState, priority: "none", created: today });
     if (!(await t.io.createExclusive(path, text))) throw new OpError(`${id}: the note exists`);
     return path;
   });
@@ -316,5 +316,20 @@ export function setStateStyle(t: Tracker, state: string, style: { icon?: string 
       if (style.icon !== undefined) i.setStateIcon(state, icon);
       if (style.color !== undefined) i.setStateColor(state, color);
     });
+  });
+}
+
+/**
+ * Make a state the tracker's triage state: the one for issues that wait for
+ * the user to accept or reject them. A state the tracker does not have yet is
+ * added in front of the others.
+ */
+export function setTriageState(t: Tracker, state: string): Promise<void> {
+  return locked(t, async () => {
+    const idx = await readIndex(t);
+    const name = cleanTitle(state);
+    if (!name) throw new OpError("state name must not be empty");
+    if (idx.closedStates.includes(name)) throw new OpError(`'${name}' is a closed state; the triage state must be an open one`);
+    await updateIndex(t, (i) => i.setTriageState(name));
   });
 }

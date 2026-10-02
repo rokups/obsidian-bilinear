@@ -55,7 +55,7 @@ export function descriptionLinks(cache: LinkCache | null | undefined): string[] 
 
 export function emptySnapshot(): Snapshot {
   return {
-    config: { prefix: null, next: null, states: [], closedStates: [], labels: [], labelColors: {}, stateIcons: {}, stateColors: {} },
+    config: { prefix: null, next: null, states: [], closedStates: [], triageState: null, labels: [], labelColors: {}, stateIcons: {}, stateColors: {} },
     issues: [],
     archived: [],
     views: [],
@@ -71,6 +71,7 @@ export function buildSnapshot(indexText: string, dir: string, lookup: NoteLookup
     next: idx.next,
     states: idx.states,
     closedStates: idx.closedStates,
+    triageState: idx.triageState,
     labels: idx.labels,
     labelColors: idx.labelColors,
     stateIcons: idx.stateIcons,

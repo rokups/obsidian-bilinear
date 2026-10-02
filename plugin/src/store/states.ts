@@ -1,5 +1,6 @@
 // How a state is drawn: a ring that fills as the workflow advances, a check
-// or a cross for closed states, unless the index says otherwise.
+// or a cross for closed states and an inbox for the triage state, unless the
+// index says otherwise.
 
 import type { TrackerConfig } from "./query";
 
@@ -25,7 +26,12 @@ const SHAPES: Record<string, StateDrawing> = {
   cross: { kind: "cross" },
 };
 
-type Config = Pick<TrackerConfig, "states" | "closedStates" | "stateIcons" | "stateColors">;
+type Config = Pick<TrackerConfig, "states" | "closedStates" | "stateIcons" | "stateColors"> & Partial<Pick<TrackerConfig, "triageState">>;
+
+/** The states work moves through: open ones, without the triage state, which comes before the workflow. */
+function workflow(config: Config): string[] {
+  return config.states.filter((s) => !config.closedStates.includes(s) && s !== config.triageState);
+}
 
 function isDropped(status: string): boolean {
   return /cancel|wont|won't|dup|reject|invalid/i.test(status);
@@ -35,7 +41,8 @@ function isDropped(status: string): boolean {
 export function automaticDrawing(status: string | null, config: Config): StateDrawing {
   if (status === null || !config.states.includes(status)) return SHAPES["dashed"];
   if (config.closedStates.includes(status)) return isDropped(status) ? SHAPES["cross"] : SHAPES["check"];
-  const open = config.states.filter((s) => !config.closedStates.includes(s));
+  if (status === config.triageState) return { kind: "lucide", name: "inbox" };
+  const open = workflow(config);
   const at = open.indexOf(status);
   if (at <= 0) return SHAPES["dashed"];
   return { kind: "ring", dashed: false, fraction: at / open.length };
@@ -45,7 +52,8 @@ export function automaticDrawing(status: string | null, config: Config): StateDr
 export function automaticColor(status: string | null, config: Config): string {
   if (status === null || !config.states.includes(status)) return "var(--text-faint)";
   if (config.closedStates.includes(status)) return isDropped(status) ? "var(--text-faint)" : "var(--interactive-accent)";
-  return config.states.filter((s) => !config.closedStates.includes(s)).indexOf(status) <= 0 ? "var(--text-faint)" : "var(--color-yellow)";
+  if (status === config.triageState) return "var(--color-orange)";
+  return workflow(config).indexOf(status) <= 0 ? "var(--text-faint)" : "var(--color-yellow)";
 }
 
 export function stateDrawing(status: string | null, config: Config): StateDrawing {

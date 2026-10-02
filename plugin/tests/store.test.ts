@@ -48,7 +48,7 @@ describe("snapshot from the metadata cache", () => {
 
   it("reads the tracker config and reports an unusable index", () => {
     const snap = buildSnapshot("---\nbilinear: tracker\nprefix: bl\nnext: 3\nstates: [a, b]\nclosed-states: [b]\nlabel-colors: [x=Red, bad, y=#abc]\nstate-icons: [a=Lucide-Eye]\nstate-colors: [b=green]\n---\n", "T", () => undefined);
-    expect(snap.config).toEqual({ prefix: null, next: 3, states: ["a", "b"], closedStates: ["b"], labels: [], labelColors: { x: "red", y: "#abc" }, stateIcons: { a: "eye" }, stateColors: { b: "green" } });
+    expect(snap.config).toEqual({ prefix: null, next: 3, states: ["a", "b"], closedStates: ["b"], triageState: null, labels: [], labelColors: { x: "red", y: "#abc" }, stateIcons: { a: "eye" }, stateColors: { b: "green" } });
     expect(snap.problems).toHaveLength(1);
     expect(buildSnapshot("---\nbilinear: tracker\n", "T", () => undefined).problems).toEqual(["frontmatter is not terminated"]);
   });
@@ -74,7 +74,7 @@ function issue(id: string, over: Partial<IssueRecord> = {}): IssueRecord {
   };
 }
 
-const config: TrackerConfig = { prefix: "BL", next: 9, states: ["backlog", "todo", "done"], closedStates: ["done"], labels: ["bug", "ui"], labelColors: {}, stateIcons: {}, stateColors: {} };
+const config: TrackerConfig = { prefix: "BL", next: 9, states: ["backlog", "todo", "done"], closedStates: ["done"], triageState: null, labels: ["bug", "ui"], labelColors: {}, stateIcons: {}, stateColors: {} };
 
 describe("query", () => {
   const issues = [
@@ -220,6 +220,19 @@ describe("state drawings", () => {
     expect([stateColor("backlog", cfg), stateColor("todo", cfg), stateColor("done", cfg), stateColor("canceled", cfg)]).toEqual([
       "var(--text-faint)", "var(--color-yellow)", "var(--interactive-accent)", "var(--text-faint)",
     ]);
+  });
+
+  it("draws the triage state apart from the workflow", async () => {
+    const { stateDrawing, stateColor } = await import("../src/store/states");
+    const triaged = { ...cfg, states: ["triage", ...cfg.states], triageState: "triage" };
+    expect(stateDrawing("triage", triaged)).toEqual({ kind: "lucide", name: "inbox" });
+    expect(stateColor("triage", triaged)).toBe("var(--color-orange)");
+    // The other states are drawn as they are without it.
+    for (const state of cfg.states) {
+      expect(stateDrawing(state, triaged), state).toEqual(stateDrawing(state, cfg));
+      expect(stateColor(state, triaged), state).toBe(stateColor(state, cfg));
+    }
+    expect(stateDrawing("triage", { ...triaged, stateIcons: { triage: "circle" } })).toEqual({ kind: "ring", dashed: false, fraction: 0 });
   });
 
   it("uses the icon and colour from the index", async () => {

@@ -80,8 +80,9 @@ and `lint` reports the others.
 bilinear: tracker
 prefix: BL
 next: 14
-states: [backlog, todo, in-progress, in-review, done, canceled]
+states: [triage, backlog, todo, in-progress, in-review, done, canceled]
 closed-states: [done, canceled]
+triage-state: triage
 labels: [bug, build, ui]
 ---
 
@@ -102,10 +103,18 @@ Free-form project notes. Never modified by the tools.
 | `next` | Next issue number to allocate; a positive integer |
 | `states` | Workflow states, in display order; not empty |
 | `closed-states` | Subset of `states` that count as closed |
+| `triage-state` | Optional. The one of the open `states` in which issues wait for the user to accept or reject them |
 | `labels` | Known labels; others produce a lint warning |
 | `label-colors` | Optional. Colours for labels, as a list of `name=color` |
 | `state-icons` | Optional. Icons for states, as a list of `name=icon` |
 | `state-colors` | Optional. Colours for states, as a list of `name=color` |
+
+An issue created without a status gets the first of `states` that is not the
+triage state. An issue reaches the triage state only when it is created or
+set there by name: it is for issues that somebody other than the user (a
+script, an agent) proposes. The user accepts one by moving it to another
+state and rejects one by closing or deleting it. A `triage-state` that is not
+one of the open states is ignored and reported by `lint`.
 
 A `label-colors` entry is split at its last `=`. The colour is one of `red`,
 `orange`, `yellow`, `green`, `cyan`, `blue`, `purple`, `pink`, `gray` (any
@@ -125,10 +134,11 @@ colour is as for labels. An icon is one of the shapes `dashed`, `circle`,
 `quarter`, `half`, `three-quarters`, `check`, `cross`, or the name of a Lucide
 icon such as `rocket` or `eye`: lower-case words joined by hyphens. A
 `lucide-` prefix and upper case are accepted when read and dropped when
-written. A state with no entry is drawn automatically by the plugin: a dashed
-ring for the first state, a ring that fills as the workflow advances for the
-other open states, a check for closed states and a cross for closed states
-whose name reads as "not done" (canceled, duplicate and the like). Entries
+written. A state with no entry is drawn automatically by the plugin: an inbox
+for the triage state, a dashed ring for the first of the other states, a ring
+that fills as the workflow advances for the open states after it, a check for
+closed states and a cross for closed states whose name reads as "not done"
+(canceled, duplicate and the like). Entries
 that do not parse, or that name something that is not a state, are kept and
 reported by `lint`.
 
@@ -362,6 +372,7 @@ of the two, then the tracker folder itself.
 | `multiple-trackers` | error | | Another note in the folder has `bilinear: tracker` |
 | `label-color-invalid` | warning | | A `label-colors` entry is not `name=color` with a known colour |
 | `state-style-invalid` | warning | | A `state-icons` or `state-colors` entry does not parse, or names no state |
+| `triage-state-invalid` | warning | | `triage-state` names no state, or a closed one |
 | `missing-section` | warning | | No `## Issues` section |
 | `duplicate-section` | warning | | A second `## Issues` or `## Archive` heading |
 | `duplicate-id` | warning | yes | ID listed more than once |
@@ -527,7 +538,7 @@ identity.
 | `label` | `name`, optional `color`: a colour sets it, `null` clears it, absent leaves it | |
 | `labels` | | `labels`: the known labels in order, each `{name, color}` with `null` for no colour |
 | `state` | `name`, optional `icon` and `color`: a value sets it, `null` clears it, absent leaves it | |
-| `states` | | `states`: the states in order, each `{name, icon, color, closed}` |
+| `states` | | `states`: the states in order, each `{name, icon, color, closed, triage}` |
 | `lint` | `fix` | `problems`: sorted list of `<code>:<id>`, with `-` for the index |
 | `list` | | `issues`: every issue, open and archived, in index order; each entry lists the fields to compare |
 

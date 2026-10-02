@@ -80,7 +80,7 @@ command's exact arguments.
 - \`move <ID> --top | --bottom | --before <ID> | --after <ID>\`: reorder; the order is the priority order the user sees
 - \`archive <ID>... | --closed\`, \`unarchive <ID>...\`: move issues out of and back into the open list
 - \`rm <ID>\`: delete an issue; its note goes to the vault's trash (outside a vault it needs \`--force\`)
-- \`state\`, \`label\`: list the tracker's states and labels
+- \`state\`, \`label\`: list the tracker's states (marking the closed ones and the triage state) and labels
 - \`lint [--fix]\`: check the tracker's consistency, and repair what is safe to
 
 Properties: \`title\`, \`status\` (one of the tracker's states), \`priority\`
@@ -107,6 +107,9 @@ bilinear set BL-12 status=done
   frontmatter by hand. The description is the body of the note
   (\`show <ID> --json\` gives its \`path\`); edit it as an ordinary Markdown file,
   above the \`## Comments\` section.
+- A tracker may have a triage state (\`state\` marks it): issues in it wait for
+  the user to accept or reject them. Do not work on them or move them out of
+  it. New issues do not start there unless \`--status\` says so.
 - Link issues with \`[[BL-7]]\` in a description, or with \`parent\` and
   \`blocked-by\`. An issue's progress counts its sub-issues and the issues its
   description links to.
@@ -139,8 +142,22 @@ export function trackerPath(tracker: string, root: string): string {
   return parts.join("/");
 }
 
+/** What `--followups` adds: nothing a task skips goes unrecorded, and doubtful follow-ups wait for the user. */
+function followups(triage: string): string {
+  return `
+Finish no task with gaps left unrecorded. Whatever the task asked for or
+needed that you skipped, put off, stubbed or did only in part becomes a
+follow-up issue before you close the task, and a comment on the task names it
+as \`[[ID]]\`. A follow-up that is plainly wanted is created like any issue. One
+you are not sure is wanted is created in the \`${triage}\` state
+(\`new "Title" --status ${triage}\`), with the reason for the doubt in its
+description: it waits there for the user to accept it, by moving it to
+another state, or to reject it. Do not work on an issue that is in \`${triage}\`.
+`;
+}
+
 /** The instructions for an agents file: which tracker the project's work is tracked in. */
-export function instructions(path: string): string {
+export function instructions(path: string, triage?: string): string {
   const where = nodePath.isAbsolute(path) ? "Its path:" : "Its path, from the root of the repository:";
   return `${START}
 ## Issue tracking
@@ -152,7 +169,7 @@ Work on this project is tracked in a Bilinear issue tracker. ${where}
 Track every piece of work there, from before it starts until it is finished,
 as the \`bilinear\` skill says. If the skill is not installed, read it with
 \`npx --yes obsidian-bilinear skill --print\`.
-${END}
+${triage === undefined ? "" : followups(triage)}${END}
 `;
 }
 

@@ -7,6 +7,8 @@ export interface TrackerChoice {
   indexPath: string;
   name: string;
   states: string[];
+  /** The status a new issue gets unless another is picked. */
+  defaultState: string;
   labels: string[];
 }
 
@@ -29,7 +31,7 @@ const current = computed(() => props.trackers.find((t) => t.indexPath === form.t
 watch(
   current,
   (t) => {
-    if (t && !t.states.includes(form.status)) form.status = t.states[0] ?? "";
+    if (t && !t.states.includes(form.status)) form.status = t.defaultState;
   },
   { immediate: true },
 );

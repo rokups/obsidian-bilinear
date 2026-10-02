@@ -7,37 +7,43 @@
         "name": "backlog",
         "icon": "dashed",
         "color": null,
-        "closed": false
+        "closed": false,
+        "triage": false
       },
       {
         "name": "todo",
         "icon": null,
         "color": null,
-        "closed": false
+        "closed": false,
+        "triage": false
       },
       {
         "name": "in-progress",
         "icon": null,
         "color": null,
-        "closed": false
+        "closed": false,
+        "triage": false
       },
       {
         "name": "in-review",
         "icon": "eye",
         "color": "purple",
-        "closed": false
+        "closed": false,
+        "triage": false
       },
       {
         "name": "done",
         "icon": "check",
         "color": "green",
-        "closed": true
+        "closed": true,
+        "triage": false
       },
       {
         "name": "canceled",
         "icon": null,
         "color": null,
-        "closed": true
+        "closed": true,
+        "triage": false
       }
     ]
   }

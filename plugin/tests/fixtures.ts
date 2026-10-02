@@ -31,6 +31,7 @@ export interface StateRow {
   icon: string | null;
   color: string | null;
   closed: boolean;
+  triage: boolean;
 }
 
 export interface Case {
@@ -121,7 +122,7 @@ export async function apply(t: Tracker, op: Op): Promise<Result> {
       const idx = await readIndex(t);
       const icons = idx.stateIcons;
       const colors = idx.stateColors;
-      return { states: idx.states.map((name) => ({ name, icon: icons[name] ?? null, color: colors[name] ?? null, closed: idx.closedStates.includes(name) })) };
+      return { states: idx.states.map((name) => ({ name, icon: icons[name] ?? null, color: colors[name] ?? null, closed: idx.closedStates.includes(name), triage: name === idx.triageState })) };
     }
     case "lint":
       return { problems: (await lint(t, !!a.fix)).map((p) => `${p.code}:${p.id ?? "-"}`).sort() };

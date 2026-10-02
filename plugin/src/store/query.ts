@@ -31,6 +31,8 @@ export interface TrackerConfig {
   next: number | null;
   states: string[];
   closedStates: string[];
+  /** The state for issues that wait to be accepted or rejected, if there is one. */
+  triageState: string | null;
   labels: string[];
   /** Colours set in the index: label name to a colour name or hex value. */
   labelColors: Record<string, string>;

@@ -14,7 +14,7 @@ import type { Index } from "../../plugin/src/format/index-note";
 import type { IssueRecord } from "../../plugin/src/format/record";
 import { Doc, type Value } from "../../plugin/src/format/yaml";
 import { OpError, type Tracker } from "../../plugin/src/ops/io";
-import { adoptIssue, archiveClosed, archiveIssues, commentIssue, createIssue, createTracker, deleteIssue, moveIssue, setLabel, setProps, setStateStyle, unarchiveIssues, type PropEdits } from "../../plugin/src/ops/issues";
+import { adoptIssue, archiveClosed, archiveIssues, commentIssue, createIssue, createTracker, deleteIssue, moveIssue, setLabel, setProps, setStateStyle, setTriageState, unarchiveIssues, type PropEdits } from "../../plugin/src/ops/issues";
 import { lint } from "../../plugin/src/ops/lint";
 import { LOCK_TIMES, LockTimeout } from "../../plugin/src/ops/lock-file";
 import { indexNotes, issueRecord, locked, notePath, readIndex, requireItem, resolveNote } from "../../plugin/src/ops/tracker";
@@ -401,9 +401,9 @@ const COMMANDS: Record<string, Command> = {
   },
 
   state: {
-    args: "[<name> [--icon ICON] [--color COLOR]] [--json]",
-    help: "list the states, or set a state's icon and colour",
-    options: { icon: { type: "string" }, color: { type: "string" }, json: { type: "boolean" } },
+    args: "[<name> [--icon ICON] [--color COLOR] [--triage]] [--json]",
+    help: "list the states, or set a state's icon and colour, or make it the triage state",
+    options: { icon: { type: "string" }, color: { type: "string" }, triage: { type: "boolean" }, json: { type: "boolean" } },
     takes: [0, 1],
     reads: (_values, positionals) => positionals.length === 0,
     async run({ values, positionals, out, tracker }) {
@@ -411,24 +411,27 @@ const COMMANDS: Record<string, Command> = {
       const icon = str(values["icon"]);
       const color = str(values["color"]);
       if (positionals.length) {
+        // --triage comes first: it may add the state that the style is for.
+        if (values["triage"]) await setTriageState(t, positionals[0]);
         if (icon === undefined && color === undefined) {
+          if (values["triage"]) return EXIT_OK;
           const idx = await locked(t, () => readIndex(t));
           if (!idx.states.includes(positionals[0])) throw new OpError(`unknown state '${positionals[0]}' (states: ${idx.states.join(", ")})`);
-          throw new OpError("give --icon, --color or both");
+          throw new OpError("give --icon, --color, --triage or several");
         }
         await setStateStyle(t, positionals[0], { icon: styleValue(icon), color: styleValue(color) });
         return EXIT_OK;
       }
-      if (icon !== undefined || color !== undefined) throw new OpError("--icon and --color need a state name");
+      if (icon !== undefined || color !== undefined || values["triage"]) throw new OpError("--icon, --color and --triage need a state name");
       const idx = await locked(t, () => readIndex(t));
-      const rows = idx.states.map((name) => ({ name, icon: idx.stateIcons[name] ?? null, color: idx.stateColors[name] ?? null, closed: idx.closedStates.includes(name) }));
+      const rows = idx.states.map((name) => ({ name, icon: idx.stateIcons[name] ?? null, color: idx.stateColors[name] ?? null, closed: idx.closedStates.includes(name), triage: name === idx.triageState }));
       if (values["json"]) {
         out(json(rows));
         return EXIT_OK;
       }
       const w = width(rows.map((r) => r.name));
       for (const r of rows) {
-        const parts = [r.icon ? `icon=${r.icon}` : "", r.color ? `color=${r.color}` : "", r.closed ? "(closed)" : ""].filter((p) => p);
+        const parts = [r.icon ? `icon=${r.icon}` : "", r.color ? `color=${r.color}` : "", r.closed ? "(closed)" : "", r.triage ? "(triage)" : ""].filter((p) => p);
         out(`${pad(r.name, w)}  ${parts.join("  ")}`.trimEnd());
       }
       return EXIT_OK;
@@ -474,9 +477,9 @@ const COMMANDS: Record<string, Command> = {
   },
 
   instructions: {
-    args: "[<file>] [--print]",
+    args: "[<file>] [--followups] [--print]",
     help: "add a section to AGENTS.md or CLAUDE.md that names this tracker as where work is tracked",
-    options: { print: { type: "boolean" } },
+    options: { followups: { type: "boolean" }, print: { type: "boolean" } },
     takes: [0, 1],
     reads: () => true,
     async run({ ctx, values, positionals, out, tracker }) {
@@ -484,7 +487,13 @@ const COMMANDS: Record<string, Command> = {
       const file = positionals.length ? nodePath.resolve(ctx.cwd, positionals[0]) : agentsFile(ctx.cwd);
       const folder = values["print"] ? ctx.cwd : nodePath.dirname(file);
       const root = repositoryRoot(fs.existsSync(folder) ? fs.realpathSync(folder) : folder);
-      const block = instructions(trackerPath(native(t.dir), root));
+      let triage: string | undefined;
+      if (values["followups"]) {
+        const idx = await locked(t, () => readIndex(t));
+        if (idx.triageState === null) throw new OpError("the tracker has no triage state for follow-ups to wait in; make one with: bilinear state triage --triage");
+        triage = idx.triageState;
+      }
+      const block = instructions(trackerPath(native(t.dir), root), triage);
       if (values["print"]) {
         out(block.trimEnd());
         return EXIT_OK;
@@ -513,7 +522,12 @@ function help(name?: string): string {
     if (name === "label" || name === "state") {
       text += `\nCOLOR is one of ${COLOR_NAMES.join(", ")}, #rgb or #rrggbb; 'none' clears it.\n`;
     }
-    if (name === "state") text += `ICON is one of ${STATE_SHAPES.join(", ")}, or a Lucide icon name; 'none' clears it.\n`;
+    if (name === "state") {
+      text +=
+        `ICON is one of ${STATE_SHAPES.join(", ")}, or a Lucide icon name; 'none' clears it.\n` +
+        "--triage makes the state the triage state, where new issues wait for the user to accept or\n" +
+        "reject them; a state the tracker does not have yet is added in front of the others.\n";
+    }
     if (name === "skill") {
       text +=
         "\nWrites bilinear/SKILL.md into .agents/skills/ of the working directory, for agents working in\n" +
@@ -527,7 +541,10 @@ function help(name?: string): string {
         "tracked. Without <file> it goes into AGENTS.md of the working directory, or CLAUDE.md if only\n" +
         "that exists. The rest of the file is kept; run again to refresh the section. The tracker is\n" +
         "named by its path from the root of the repository if it is inside the repository or one level\n" +
-        "above it, else by its absolute path. --print writes the section to standard output instead.\n";
+        "above it, else by its absolute path. --print writes the section to standard output instead.\n" +
+        "\n--followups adds the rule that whatever a task skips becomes a follow-up issue, and that a\n" +
+        "follow-up the agent is not sure is wanted waits in the tracker's triage state for the user to\n" +
+        "accept or reject.\n";
     }
     return text;
   }

@@ -90,10 +90,10 @@ bilinear lint --fix
 | `rm <ID> [--force]` | Remove the line; move the note to the vault's `.trash/` |
 | `adopt <ID>` | Add an index line for an orphan note |
 | `label [name] [--color COLOR]` | List the labels, or add one and set its colour (`none` clears it) |
-| `state [name] [--icon ICON] [--color COLOR]` | List the states, or set a state's icon and colour (`none` clears it) |
+| `state [name] [--icon ICON] [--color COLOR] [--triage]` | List the states, or set a state's icon and colour (`none` clears it), or make it the triage state |
 | `lint [--fix]` | Check and optionally repair consistency |
 | `skill [--global \| --dir DIR] [--print]` | Install a skill that tells an LLM agent how to track its work with the CLI |
-| `instructions [FILE] [--print]` | Add a section to `AGENTS.md` or `CLAUDE.md` that names this tracker as where work is tracked |
+| `instructions [FILE] [--followups] [--print]` | Add a section to `AGENTS.md` or `CLAUDE.md` that names this tracker as where work is tracked |
 
 - The tracker is taken from `--tracker PATH` (folder or index note), then
   `BILINEAR_TRACKER`, then a search upward from the working directory.
@@ -103,6 +103,10 @@ bilinear lint --fix
   their states; in JSON it is `progress: {done, total, issues}`.
 - Colours are `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `purple`,
   `pink`, `gray`, or a hex value such as `#7c5cff`.
+- A tracker has a triage state, `triage` in a new tracker: issues in it wait
+  for you to accept them, by moving them to another state, or to reject them.
+  New issues do not start there unless `--status` says so. An older tracker
+  gets one with `bilinear state triage --triage`.
 - State icons are one of the shapes `dashed`, `circle`, `quarter`, `half`,
   `three-quarters`, `check`, `cross`, or the name of any
   [Lucide](https://lucide.dev/icons) icon, such as `eye` or `rocket`.
@@ -151,6 +155,10 @@ bilinear --tracker Trackers/Bilinear instructions CLAUDE.md  # into the file nam
   otherwise. They sit between `<!-- bilinear:start -->` and
   `<!-- bilinear:end -->`; running the command again replaces that block and
   leaves the rest of the file alone.
+- `instructions --followups` adds a rule to the section: whatever a task
+  skips, puts off or does only in part becomes a follow-up issue before the
+  task is closed. A follow-up the agent is not sure is wanted is created in
+  the tracker's triage state, where it waits for you to accept or reject it.
 - `--print` writes either to standard output instead of a file.
 
 The CLI moves notes with a plain file move. Bare `[[BL-4]]` links survive;

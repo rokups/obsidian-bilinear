@@ -1,7 +1,9 @@
 import { trimBlank } from "./lines";
 
 export const PRIORITIES = ["none", "low", "medium", "high", "urgent"] as const;
-export const DEFAULT_STATES = ["backlog", "todo", "in-progress", "in-review", "done", "canceled"];
+export const DEFAULT_STATES = ["triage", "backlog", "todo", "in-progress", "in-review", "done", "canceled"];
+/** Of DEFAULT_STATES, the one for issues that wait for the user to accept or reject them. */
+export const DEFAULT_TRIAGE = "triage";
 export const DEFAULT_CLOSED = ["done", "canceled"];
 export const ISSUES = "Issues";
 export const ARCHIVE = "Archive";

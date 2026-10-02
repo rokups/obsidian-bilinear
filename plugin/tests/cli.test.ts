@@ -464,9 +464,11 @@ describe("state", () => {
     expect(text).toContain("state-icons: [in-review=eye, backlog=dashed]\n");
     expect(text).toContain("state-colors: [in-review=purple, done=#2da44e]\n");
     expect(await s().ok("state")).toBe(
-      "backlog      icon=dashed\ntodo\nin-progress\nin-review    icon=eye  color=purple\ndone         color=#2da44e  (closed)\ncanceled     (closed)\n",
+      "triage       (triage)\nbacklog      icon=dashed\ntodo\nin-progress\nin-review    icon=eye  color=purple\ndone         color=#2da44e  (closed)\ncanceled     (closed)\n",
     );
-    expect(JSON.parse(await s().ok("state", "--json"))[3]).toEqual({ name: "in-review", icon: "eye", color: "purple", closed: false });
+    const rows = JSON.parse(await s().ok("state", "--json"));
+    expect(rows[0]).toEqual({ name: "triage", icon: null, color: null, closed: false, triage: true });
+    expect(rows[4]).toEqual({ name: "in-review", icon: "eye", color: "purple", closed: false, triage: false });
     await s().ok("state", "in-review", "--icon", "none");
     await s().ok("state", "in-review", "--color", "auto");
     await s().ok("state", "done", "--color", "none");
@@ -481,6 +483,54 @@ describe("state", () => {
       expect(await s().code("state", ...argv), argv.join(" ")).toBe(1);
     }
     expect(s().read(s().index)).toBe(before);
+  });
+
+  it("keeps new issues out of the triage state unless it is asked for", async () => {
+    expect(s().read(s().index)).toContain("states: [triage, backlog, todo, in-progress, in-review, done, canceled]\nclosed-states: [done, canceled]\ntriage-state: triage\n");
+    await s().ok("new", "A");
+    await s().ok("new", "B", "--status", "triage");
+    expect(await s().ok("list")).toBe("BL-1  backlog  none  A\nBL-2  triage   none  B\n");
+    fs.unlinkSync(s().note("BL-1"));
+    s().edit(s().index, "- [[BL-1]] A", "- [[BL-1]] A\n- [[BL-9]] gone");
+    expect(await s().run("lint")).toMatchObject({ code: 2 });
+  });
+
+  it("makes a state the triage state, adding it if the tracker lacks it", async () => {
+    s().edit(s().index, "states: [triage, backlog,", "states: [backlog,");
+    s().edit(s().index, "triage-state: triage\n", "");
+    expect(await s().ok("state")).not.toContain("triage");
+    await s().ok("new", "A");
+
+    await s().ok("state", "inbox", "--triage", "--color", "orange");
+    const text = s().read(s().index);
+    expect(text).toContain("states: [inbox, backlog, todo, in-progress, in-review, done, canceled]\n");
+    expect(text).toContain("triage-state: inbox\n");
+    expect(text).toContain("state-colors: [inbox=orange]\n");
+    expect(await s().ok("state")).toContain("inbox        color=orange  (triage)\n");
+    expect(await s().ok("new", "B")).toBe("BL-2\n");
+    expect(JSON.parse(await s().ok("show", "BL-2", "--json")).status).toBe("backlog");
+
+    // An existing open state can take over; a closed one cannot.
+    await s().ok("state", "todo", "--triage");
+    expect(s().read(s().index)).toContain("triage-state: todo\n");
+    expect(s().read(s().index)).toContain("states: [inbox, backlog, todo,");
+    const before = s().read(s().index);
+    for (const argv of [["done", "--triage"], ["--triage"], ["  ", "--triage"]]) expect(await s().code("state", ...argv), argv.join(" ")).toBe(1);
+    expect(s().read(s().index)).toBe(before);
+    expect(await s().run("lint")).toMatchObject(CLEAN);
+  });
+
+  it("has a triage state that is no open state reported by lint", async () => {
+    s().edit(s().index, "triage-state: triage", "triage-state: done");
+    let r = await s().run("lint");
+    expect(r.code).toBe(2);
+    expect(r.out).toContain("triage-state 'done' is not one of the open states [triage-state-invalid]");
+    s().edit(s().index, "triage-state: done", "triage-state: nope");
+    r = await s().run("lint");
+    expect(r.out).toContain("triage-state 'nope' is not one of the open states [triage-state-invalid]");
+    // An unusable triage state is no triage state: new issues take the first state.
+    await s().ok("new", "A");
+    expect(await s().ok("list")).toBe("BL-1  triage  none  A\n");
   });
 
   it("has unusable entries reported by lint", async () => {
@@ -549,6 +599,33 @@ describe("for LLM agents", () => {
     fs.writeFileSync(agents, "# Project\n\n<!-- bilinear:start -->\nold text\n<!-- bilinear:end -->\n\n## After\n");
     await s().ok("--tracker", s().dir, "instructions");
     expect(s().read(agents)).toBe(`# Project\n\n${block("Trackers/Bilinear")}\n## After\n`);
+  });
+
+  it("adds the rule about follow-ups, naming the tracker's triage state", async () => {
+    s().cwd = s().vault;
+    const plain = await s().ok("--tracker", s().dir, "instructions", "--print");
+    const text = await s().ok("--tracker", s().dir, "instructions", "--followups", "--print");
+    expect(plain).not.toContain("follow-up");
+    expect(text.startsWith(plain.replace("<!-- bilinear:end -->\n", ""))).toBe(true);
+    expect(text.endsWith("<!-- bilinear:end -->\n")).toBe(true);
+    expect(text).toContain("becomes a\nfollow-up issue before you close the task");
+    expect(text).toContain('(`new "Title" --status triage`)');
+    expect(text).toContain("Do not work on an issue that is in `triage`.");
+
+    await s().ok("--tracker", s().dir, "state", "inbox", "--triage");
+    expect(await s().ok("--tracker", s().dir, "instructions", "--followups", "--print")).toContain('(`new "Title" --status inbox`)');
+
+    // Writing it replaces a block that had no such rule, and the other way round.
+    const agents = join(s().vault, "AGENTS.md");
+    await s().ok("--tracker", s().dir, "instructions");
+    expect(s().read(agents)).toBe(plain);
+    expect(await s().ok("--tracker", s().dir, "instructions", "--followups")).toBe(`updated ${agents}\n`);
+    expect(s().read(agents)).toContain("--status inbox");
+
+    s().edit(s().index, "triage-state: inbox\n", "");
+    const r = await s().run("--tracker", s().dir, "instructions", "--followups");
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("bilinear state triage --triage");
   });
 
   it("picks the agents file that is there, or the one that is named", async () => {

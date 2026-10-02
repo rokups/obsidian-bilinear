@@ -1,7 +1,7 @@
 // The index note: frontmatter config plus the `## Issues` and `## Archive`
 // lists (spec/FORMAT.md 1.4). Edits touch only issue lines and config keys.
 
-import { ARCHIVE, DEFAULT_CLOSED, DEFAULT_STATES, ID_RE, ISSUES, PREFIX_RE, formatLine, idNumber, linkTarget, normalizeColor, normalizeIcon, parsePair, type Normalize } from "./ids";
+import { ARCHIVE, DEFAULT_CLOSED, DEFAULT_STATES, DEFAULT_TRIAGE, ID_RE, ISSUES, PREFIX_RE, formatLine, idNumber, linkTarget, normalizeColor, normalizeIcon, parsePair, type Normalize } from "./ids";
 import { chomp, hasEol, isBlank, splitLines } from "./lines";
 import { findSections } from "./markdown";
 import { Doc } from "./yaml";
@@ -87,6 +87,26 @@ export class Index {
     return this.doc.getList("labels");
   }
 
+  /**
+   * The state for issues that wait for the user to accept or reject them, if
+   * the tracker has one: an open state named by `triage-state`.
+   */
+  get triageState(): string | null {
+    const name = this.doc.getStr("triage-state");
+    return name !== null && this.states.includes(name) && !this.closedStates.includes(name) ? name : null;
+  }
+
+  /** The status of a new issue when none is given: the first state that is not the triage state. */
+  get defaultState(): string {
+    return this.states.find((s) => s !== this.triageState) ?? this.states[0];
+  }
+
+  /** Make a state the triage state, adding it in front of the others if it is new. */
+  setTriageState(name: string): void {
+    if (!this.states.includes(name)) this.doc.set("states", [name, ...this.states]);
+    if (this.doc.getStr("triage-state") !== name) this.doc.set("triage-state", name);
+  }
+
   // Styling keys are lists of `name=value`: label-colors, state-colors, state-icons.
 
   private pairs(key: string, normalize: Normalize): Record<string, string> {
@@ -149,6 +169,10 @@ export class Index {
       for (const name of Object.keys(this.pairs(key, normalize))) {
         if (!this.states.includes(name)) out.push(["state-style-invalid", `${key} names '${name}', which is not one of the states`]);
       }
+    }
+    const triage = this.doc.getStr("triage-state");
+    if (triage !== null && this.triageState === null) {
+      out.push(["triage-state-invalid", `triage-state '${triage}' is not one of the open states`]);
     }
     return out;
   }
@@ -305,6 +329,7 @@ export function newIndexText(prefix: string): string {
     "next: 1\n" +
     `states: [${DEFAULT_STATES.join(", ")}]\n` +
     `closed-states: [${DEFAULT_CLOSED.join(", ")}]\n` +
+    `triage-state: ${DEFAULT_TRIAGE}\n` +
     "labels: []\n" +
     "---\n" +
     "\n" +
