@@ -1,6 +1,7 @@
 // What the CLI hands to LLM coding agents: a skill that teaches the commands,
 // and a block of instructions for AGENTS.md or CLAUDE.md that names the
-// tracker a project's work is tracked in.
+// tracker a project's work is tracked in. The skill is the same for every
+// tracker and says how work is tracked; the instructions only say where.
 
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
@@ -10,7 +11,7 @@ export const SKILL_NAME = "bilinear";
 /** The skill, as a SKILL.md: frontmatter that says when to use it, then how. */
 export const SKILL = `---
 name: ${SKILL_NAME}
-description: Track work as issues in a Bilinear tracker, a folder of Markdown notes in an Obsidian vault, using the bilinear command-line client. Use when asked to create, find, update, comment on, reorder, archive or delete issues or tasks, when project instructions name a Bilinear tracker, or when a folder holds a note whose frontmatter marks it as a bilinear tracker.
+description: Track work as issues in a Bilinear tracker, a folder of Markdown notes in an Obsidian vault, using the bilinear command-line client. Use for all work in a project whose instructions name a Bilinear issue tracker, where every piece of work must be tracked as an issue from before it starts until it is finished, and whenever asked to create, find, update, comment on, reorder, archive or delete issues or tasks.
 ---
 
 # Bilinear
@@ -21,6 +22,41 @@ that lists the issues in order, and one Markdown note per issue in \`issues/\`
 have the same tracker open in Obsidian; the CLI and Obsidian can be used at the
 same time.
 
+## Tracking work
+
+When a project's instructions name a Bilinear issue tracker, every piece of
+work you do in that project is tracked in it, from before you start until
+after you finish. This is required, and it does not wait to be asked for.
+
+1. **Before starting**, find the issue for the work (\`list\`, \`show <ID>\`).
+   If there is none, create it with \`new "Title"\`, with a title that says
+   what is to be done, and write what is known into its description: what was
+   asked, the constraints, how to tell that it is done. Do not start work
+   that has no issue. One issue is one piece of work that can be finished on
+   its own; larger work is a parent issue with sub-issues (\`--parent <ID>\`).
+2. **On starting**, move the issue to the state that means it is being worked
+   on (\`set <ID> status=<state>\`; \`state\` lists the tracker's states).
+3. **While working**, comment (\`comment <ID> "text"\`) whenever you learn or
+   decide something a later reader needs: the cause you found, the approach
+   you chose or gave up, a change of plan. If the issue cannot go on until
+   another is done, say so with \`set <ID> blocked-by+=<other ID>\`; if it
+   waits for a person, comment with the question. Work that turns up along
+   the way and is not part of this issue gets an issue of its own, which the
+   comment names as \`[[ID]]\`.
+4. **When the work waits for review**, move the issue to the tracker's review
+   state if it has one.
+5. **On finishing**, comment what was done and how it was checked, then set
+   the issue to the closed state that means done. Work that is given up is
+   closed too: comment why, and set the closed state that means canceled.
+   Do not close an issue whose work was not checked.
+6. **On stopping before the work is finished**, comment what is done and what
+   is left, so that someone else can carry on from the issue alone. Leave it
+   in the working state only if the work is still going on; otherwise move it
+   back to the state for work that has not started.
+
+The status of an issue says what is true now. Archiving and deleting issues is
+the user's to do: do neither unless asked.
+
 ## Running the CLI
 
 \`\`\`sh
@@ -29,9 +65,10 @@ bilinear <command>                        # if installed with npm install -g obs
 \`\`\`
 
 The tracker is taken from \`--tracker PATH\` (the folder or its index note), then
-\`$BILINEAR_TRACKER\`, then a search upward from the working directory. Outside
-the tracker folder, pass \`--tracker\`. Run \`<command> --help\` for a command's
-exact arguments.
+\`$BILINEAR_TRACKER\`, then a search upward from the working directory. Pass
+\`--tracker\` with the path the project's instructions give; a relative path
+there is from the root of the repository. Run \`<command> --help\` for a
+command's exact arguments.
 
 ## Commands
 
@@ -73,8 +110,6 @@ bilinear set BL-12 status=done
 - Link issues with \`[[BL-7]]\` in a description, or with \`parent\` and
   \`blocked-by\`. An issue's progress counts its sub-issues and the issues its
   description links to.
-- Record what a later reader needs (what was found, what was decided, what is
-  left) as comments on the issue rather than in the chat alone.
 - Exit codes: 0 done; 1 bad arguments or no such issue (the message says
   which); 2 \`lint\` found problems; 3 the tracker was busy or a file changed
   underneath the command. On 3, run the command again.
@@ -83,47 +118,51 @@ bilinear set BL-12 status=done
 const START = "<!-- bilinear:start -->";
 const END = "<!-- bilinear:end -->";
 
-export interface TrackerFacts {
-  /** The tracker folder, as the instructions should name it. */
-  path: string;
-  prefix: string;
-  states: string[];
-  closedStates: string[];
+/** The folder with `.git` at or above a folder: the root of its repository. The folder itself if there is none. */
+export function repositoryRoot(folder: string): string {
+  for (let dir = folder; ; dir = nodePath.dirname(dir)) {
+    if (fs.existsSync(nodePath.join(dir, ".git"))) return dir;
+    if (dir === nodePath.dirname(dir)) return folder;
+  }
 }
 
-/** The instructions for an agents file: the tracker to use, and how. */
-export function instructions(t: TrackerFacts): string {
-  const open = t.states.filter((s) => !t.closedStates.includes(s));
-  const cli = `npx --yes obsidian-bilinear --tracker ${/\s/.test(t.path) ? `"${t.path}"` : t.path}`;
+/**
+ * How instructions name a tracker: by its path from the root of the
+ * repository when it is inside the repository or beside it (one level up),
+ * and by its absolute path when it is further away.
+ */
+export function trackerPath(tracker: string, root: string): string {
+  const relative = nodePath.relative(root, tracker);
+  if (relative === "") return ".";
+  const parts = relative.split(nodePath.sep);
+  if (nodePath.isAbsolute(relative) || parts.filter((part) => part === "..").length > 1) return tracker;
+  return parts.join("/");
+}
+
+/** The instructions for an agents file: which tracker the project's work is tracked in. */
+export function instructions(path: string): string {
+  const where = nodePath.isAbsolute(path) ? "Its path:" : "Its path, from the root of the repository:";
   return `${START}
 ## Issue tracking
 
-Work on this project is tracked in the Bilinear tracker at \`${t.path}\`, a
-folder of Markdown notes that the user may also have open in Obsidian. Issue
-IDs look like \`${t.prefix}-12\`. Use the \`bilinear\` CLI for every change to it:
+Work on this project is tracked in a Bilinear issue tracker. ${where}
 
-\`\`\`sh
-${cli} <command>
-\`\`\`
+    ${path}
 
-- Before starting a piece of work, find its issue with \`list\` or \`show <ID>\`,
-  or create one with \`new "Title"\`, and move it to the state that says it is
-  being worked on with \`set <ID> status=<state>\`.
-- States: ${open.map((s) => `\`${s}\``).join(", ")}${t.closedStates.length ? `; closed: ${t.closedStates.map((s) => `\`${s}\``).join(", ")}` : ""}.
-- Record findings, decisions and what is left as comments on the issue:
-  \`comment <ID> "text"\`.
-- When the work is finished, set the issue to a closed state. Work that turns
-  up along the way and is not done now gets its own issue.
-- Do not edit the tracker's index note or an issue's properties by hand.
-  \`--help\` lists the commands; the \`bilinear\` skill, if it is installed,
-  describes them.
+Track every piece of work there, from before it starts until it is finished,
+as the \`bilinear\` skill says. If the skill is not installed, read it with
+\`npx --yes obsidian-bilinear skill --print\`.
 ${END}
 `;
 }
 
-/** Where a skill goes: a project's or the user's Claude Code skills, or a skills folder that is named. */
+/**
+ * Where a skill goes: `.agents/skills`, the folder agents share, in the
+ * project or in the user's home, or a skills folder that is named (an agent
+ * that keeps its own, such as `.claude/skills`).
+ */
 export function skillPath(where: { dir?: string; global: boolean }, cwd: string, home: string): string {
-  const skills = where.dir !== undefined ? nodePath.resolve(cwd, where.dir) : nodePath.join(where.global ? home : cwd, ".claude", "skills");
+  const skills = where.dir !== undefined ? nodePath.resolve(cwd, where.dir) : nodePath.join(where.global ? home : cwd, ".agents", "skills");
   return nodePath.join(skills, SKILL_NAME, "SKILL.md");
 }
 

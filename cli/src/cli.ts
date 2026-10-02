@@ -20,7 +20,7 @@ import { LOCK_TIMES, LockTimeout } from "../../plugin/src/ops/lock-file";
 import { indexNotes, issueRecord, locked, notePath, readIndex, requireItem, resolveNote } from "../../plugin/src/ops/tracker";
 import { linkedProgress, type Progress } from "../../plugin/src/store/query";
 import { version } from "../package.json";
-import { SKILL, agentsFile, instructions, skillPath, withInstructions, writeFile } from "./agent";
+import { SKILL, agentsFile, instructions, repositoryRoot, skillPath, trackerPath, withInstructions, writeFile } from "./agent";
 import { ConflictError, NodeIO, slashed } from "./node-io";
 
 export const EXIT_OK = 0;
@@ -457,7 +457,7 @@ const COMMANDS: Record<string, Command> = {
 
   skill: {
     args: "[--global | --dir DIR] [--print]",
-    help: "install a skill that teaches an LLM agent to use this CLI",
+    help: "install a skill that tells an LLM agent how to track its work with this CLI",
     options: { global: { type: "boolean" }, dir: { type: "string" }, print: { type: "boolean" } },
     takes: [0, 0],
     async run({ ctx, values, out }) {
@@ -475,18 +475,16 @@ const COMMANDS: Record<string, Command> = {
 
   instructions: {
     args: "[<file>] [--print]",
-    help: "add instructions to AGENTS.md or CLAUDE.md to track work in this tracker",
+    help: "add a section to AGENTS.md or CLAUDE.md that names this tracker as where work is tracked",
     options: { print: { type: "boolean" } },
     takes: [0, 1],
     reads: () => true,
     async run({ ctx, values, positionals, out, tracker }) {
       const t = await tracker();
-      const idx = await locked(t, () => readIndex(t));
       const file = positionals.length ? nodePath.resolve(ctx.cwd, positionals[0]) : agentsFile(ctx.cwd);
-      // The tracker is named as it is reached from the folder of the file,
-      // which is where an agent that reads the file works.
-      const from = values["print"] ? ctx.cwd : nodePath.dirname(file);
-      const block = instructions({ path: slashed(nodePath.relative(from, native(t.dir))) || ".", prefix: idx.prefix!, states: idx.states, closedStates: idx.closedStates });
+      const folder = values["print"] ? ctx.cwd : nodePath.dirname(file);
+      const root = repositoryRoot(fs.existsSync(folder) ? fs.realpathSync(folder) : folder);
+      const block = instructions(trackerPath(native(t.dir), root));
       if (values["print"]) {
         out(block.trimEnd());
         return EXIT_OK;
@@ -518,15 +516,18 @@ function help(name?: string): string {
     if (name === "state") text += `ICON is one of ${STATE_SHAPES.join(", ")}, or a Lucide icon name; 'none' clears it.\n`;
     if (name === "skill") {
       text +=
-        "\nWrites bilinear/SKILL.md into .claude/skills/ of the working directory, where Claude Code\n" +
-        "finds it for this project. --global writes into ~/.claude/skills/ instead, for every project;\n" +
-        "--dir DIR into the skills folder of another agent. --print writes the skill to standard output.\n";
+        "\nWrites bilinear/SKILL.md into .agents/skills/ of the working directory, for agents working in\n" +
+        "this project. --global writes into ~/.agents/skills/ instead, for every project; --dir DIR into\n" +
+        "the skills folder of an agent that keeps its own, such as .claude/skills. --print writes the\n" +
+        "skill to standard output.\n";
     }
     if (name === "instructions") {
       text +=
-        "\nWrites a block that names this tracker and says how to track work in it. Without <file> it\n" +
-        "goes into AGENTS.md of the working directory, or CLAUDE.md if only that exists. The rest of the\n" +
-        "file is kept; run again to refresh the block. --print writes it to standard output instead.\n";
+        "\nWrites a section that names this tracker and refers to the bilinear skill for how work is\n" +
+        "tracked. Without <file> it goes into AGENTS.md of the working directory, or CLAUDE.md if only\n" +
+        "that exists. The rest of the file is kept; run again to refresh the section. The tracker is\n" +
+        "named by its path from the root of the repository if it is inside the repository or one level\n" +
+        "above it, else by its absolute path. --print writes the section to standard output instead.\n";
     }
     return text;
   }

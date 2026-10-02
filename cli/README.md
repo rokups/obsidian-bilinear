@@ -16,8 +16,9 @@ npx obsidian-bilinear lint --fix
 ```
 
 To have an LLM coding agent track its work in a tracker, `bilinear skill`
-installs a skill that teaches it the commands, and `bilinear instructions`
-adds a section naming the tracker to `AGENTS.md` or `CLAUDE.md`.
+installs a skill that says how, from opening an issue to closing it, and
+`bilinear instructions` adds a section to `AGENTS.md` or `CLAUDE.md` that says
+where: the path of the tracker.
 
 `npm install -g obsidian-bilinear` installs it as `bilinear`. It needs Node 20
 or later and has no dependencies. `bilinear --help` lists the commands; the

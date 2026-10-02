@@ -499,13 +499,13 @@ describe("for LLM agents", () => {
   it("installs the skill for the project, the user or a named skills folder", async () => {
     s().cwd = s().root;
     s().env["HOME"] = join(s().root, "home");
-    const project = skill(s().root, ".claude", "skills");
+    const project = skill(s().root, ".agents", "skills");
     expect(await s().ok("skill")).toBe(`created ${project}\n`);
     expect(await s().ok("skill")).toBe(`unchanged ${project}\n`);
     fs.writeFileSync(project, "an older version");
     expect(await s().ok("skill")).toBe(`updated ${project}\n`);
-    expect(await s().ok("skill", "--global")).toBe(`created ${skill(s().root, "home", ".claude", "skills")}\n`);
-    expect(await s().ok("skill", "--dir", join(".agents", "skills"))).toBe(`created ${skill(s().root, ".agents", "skills")}\n`);
+    expect(await s().ok("skill", "--global")).toBe(`created ${skill(s().root, "home", ".agents", "skills")}\n`);
+    expect(await s().ok("skill", "--dir", join(".claude", "skills"))).toBe(`created ${skill(s().root, ".claude", "skills")}\n`);
     expect(await s().code("skill", "--global", "--dir", "x")).toBe(1);
     expect(await s().ok("skill", "--print")).toBe(s().read(project));
   });
@@ -521,28 +521,34 @@ describe("for LLM agents", () => {
     for (const command of commands) expect(await s().code(command, "--help"), command).toBe(0);
   });
 
+  it("writes a skill that requires the whole life of an issue to be tracked", async () => {
+    const text = await s().ok("skill", "--print");
+    expect(text).toContain("## Tracking work");
+    for (const step of ["Before starting", "On starting", "While working", "When the work waits for review", "On finishing", "On stopping before the work is finished"]) {
+      expect(text, step).toContain(`**${step}**`);
+    }
+    expect(text).toContain("Do not start work\n   that has no issue.");
+    expect(text).not.toContain(s().dir);
+    expect(text).not.toContain("Trackers/Bilinear");
+  });
+
+  const block = (path: string, where = "Its path, from the root of the repository:") =>
+    `<!-- bilinear:start -->\n## Issue tracking\n\nWork on this project is tracked in a Bilinear issue tracker. ${where}\n\n    ${path}\n\n` +
+    "Track every piece of work there, from before it starts until it is finished,\nas the `bilinear` skill says. If the skill is not installed, read it with\n" +
+    "`npx --yes obsidian-bilinear skill --print`.\n<!-- bilinear:end -->\n";
+
   it("adds instructions that name the tracker, and refreshes them in place", async () => {
     s().cwd = s().vault;
     const agents = join(s().vault, "AGENTS.md");
     fs.writeFileSync(agents, "# Project\n\nSome rules.\n");
     expect(await s().ok("--tracker", s().dir, "instructions")).toBe(`updated ${agents}\n`);
-    let text = s().read(agents);
-    expect(text.startsWith("# Project\n\nSome rules.\n\n<!-- bilinear:start -->\n## Issue tracking\n")).toBe(true);
-    expect(text.endsWith("<!-- bilinear:end -->\n")).toBe(true);
-    expect(text).toContain("npx --yes obsidian-bilinear --tracker Trackers/Bilinear <command>");
-    expect(text).toContain("`BL-12`");
-    expect(text).toContain("- States: `backlog`, `todo`, `in-progress`, `in-review`; closed: `done`, `canceled`.");
+    expect(s().read(agents)).toBe(`# Project\n\nSome rules.\n\n${block("Trackers/Bilinear")}`);
     expect(await s().ok("--tracker", s().dir, "instructions")).toBe(`unchanged ${agents}\n`);
 
-    fs.writeFileSync(agents, `${text}\n## After\n`);
-    s().edit(s().index, "states: [backlog, todo, in-progress, in-review, done, canceled]", "states: [open, done]");
-    s().edit(s().index, "closed-states: [done, canceled]", "closed-states: [done]");
+    // An older block, wherever it is in the file, is replaced; the rest stays.
+    fs.writeFileSync(agents, "# Project\n\n<!-- bilinear:start -->\nold text\n<!-- bilinear:end -->\n\n## After\n");
     await s().ok("--tracker", s().dir, "instructions");
-    text = s().read(agents);
-    expect(text).toContain("- States: `open`; closed: `done`.");
-    expect(text.split("<!-- bilinear:start -->").length - 1).toBe(1);
-    expect(text.startsWith("# Project\n\nSome rules.\n\n<!-- bilinear:start -->")).toBe(true);
-    expect(text.endsWith("<!-- bilinear:end -->\n\n## After\n")).toBe(true);
+    expect(s().read(agents)).toBe(`# Project\n\n${block("Trackers/Bilinear")}\n## After\n`);
   });
 
   it("picks the agents file that is there, or the one that is named", async () => {
@@ -550,16 +556,50 @@ describe("for LLM agents", () => {
     const claude = join(s().vault, "CLAUDE.md");
     fs.writeFileSync(claude, "Rules.\r\n");
     expect(await s().ok("--tracker", s().dir, "instructions")).toBe(`updated ${claude}\n`);
-    expect(s().read(claude).startsWith("Rules.\r\n\r\n<!-- bilinear:start -->\r\n")).toBe(true);
+    expect(s().read(claude)).toBe(`Rules.\r\n\r\n${block("Trackers/Bilinear").replace(/\n/g, "\r\n")}`);
     fs.unlinkSync(claude);
     expect(await s().ok("--tracker", s().dir, "instructions")).toBe(`created ${join(s().vault, "AGENTS.md")}\n`);
-    const nested = join(s().vault, "docs", "CLAUDE.md");
-    expect(await s().ok("--tracker", s().dir, "instructions", join("docs", "CLAUDE.md"))).toBe(`created ${nested}\n`);
-    expect(s().read(nested)).toContain("--tracker ../Trackers/Bilinear <command>");
-    s().cwd = s().dir;
-    expect(await s().ok("instructions", "--print")).toContain("--tracker . <command>");
+    expect(await s().ok("--tracker", s().dir, "instructions", "CLAUDE.md")).toBe(`created ${claude}\n`);
     s().cwd = s().root;
     expect(await s().code("instructions")).toBe(1);
+  });
+
+  it("names the tracker from the root of the repository when it is in it or beside it, else in full", async () => {
+    const repo = join(s().vault, "code", "repo");
+    fs.mkdirSync(join(repo, ".git"), { recursive: true });
+    fs.mkdirSync(join(repo, "docs", "deep"), { recursive: true });
+    const printed = async (cwd: string, tracker: string) => {
+      s().cwd = cwd;
+      return s().ok("--tracker", tracker, "instructions", "--print");
+    };
+    const make = async (folder: string) => {
+      s().cwd = s().root;
+      await s().ok("init", folder, "--prefix", "IN");
+      return folder;
+    };
+
+    // Inside the repository: from its root, wherever the command or the file is.
+    const inside = await make(join(repo, "docs", "Tracker"));
+    expect(await printed(repo, inside)).toBe(block("docs/Tracker"));
+    expect(await printed(join(repo, "docs", "deep"), inside)).toBe(block("docs/Tracker"));
+    s().cwd = repo;
+    await s().ok("--tracker", inside, "instructions", join("docs", "deep", "AGENTS.md"));
+    expect(s().read(join(repo, "docs", "deep", "AGENTS.md"))).toBe(block("docs/Tracker"));
+    expect(await printed(inside, inside)).toBe(block("docs/Tracker"));
+
+    // One level above the repository: still relative.
+    const beside = await make(join(s().vault, "code", "Notes", "Tracker"));
+    expect(await printed(repo, beside)).toBe(block("../Notes/Tracker"));
+
+    // Further away: the absolute path.
+    expect(await printed(repo, s().dir)).toBe(block(s().dir, "Its path:"));
+
+    // The tracker folder is the repository.
+    fs.mkdirSync(join(beside, ".git"));
+    expect(await printed(beside, beside)).toBe(block("."));
+
+    // No repository: the folder of the file stands in for its root.
+    expect(await printed(s().vault, s().dir)).toBe(block("Trackers/Bilinear"));
   });
 });
 

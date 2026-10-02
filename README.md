@@ -92,8 +92,8 @@ bilinear lint --fix
 | `label [name] [--color COLOR]` | List the labels, or add one and set its colour (`none` clears it) |
 | `state [name] [--icon ICON] [--color COLOR]` | List the states, or set a state's icon and colour (`none` clears it) |
 | `lint [--fix]` | Check and optionally repair consistency |
-| `skill [--global \| --dir DIR] [--print]` | Install a skill that teaches an LLM agent to use the CLI |
-| `instructions [FILE] [--print]` | Add instructions to `AGENTS.md` or `CLAUDE.md` to track work in this tracker |
+| `skill [--global \| --dir DIR] [--print]` | Install a skill that tells an LLM agent how to track its work with the CLI |
+| `instructions [FILE] [--print]` | Add a section to `AGENTS.md` or `CLAUDE.md` that names this tracker as where work is tracked |
 
 - The tracker is taken from `--tracker PATH` (folder or index note), then
   `BILINEAR_TRACKER`, then a search upward from the working directory.
@@ -130,24 +130,27 @@ bilinear lint --fix
 
 ### For LLM agents
 
-Two commands set a coding agent up to use a tracker:
+Two commands set a coding agent up to track its work in a tracker:
 
 ```sh
-bilinear skill                                  # .claude/skills/bilinear/SKILL.md in this project
-bilinear skill --global                         # ~/.claude/skills/, for every project
-bilinear skill --dir .agents/skills             # another agent's skills folder
+bilinear skill                                  # .agents/skills/bilinear/SKILL.md in this project
+bilinear skill --global                         # ~/.agents/skills/, for every project
+bilinear skill --dir .claude/skills             # the skills folder of an agent that keeps its own
 bilinear --tracker Trackers/Bilinear instructions            # into AGENTS.md, or CLAUDE.md if only that exists
 bilinear --tracker Trackers/Bilinear instructions CLAUDE.md  # into the file named
 ```
 
-- The skill describes the commands, the properties and the exit codes, and
-  says when to use them. It is the same for every tracker.
-- The instructions name one tracker, by its path from the file they are in,
-  with its ID prefix and states, and tell the agent to track its work there:
-  find or create an issue before starting, comment on it, close it when done.
-  They sit between `<!-- bilinear:start -->` and `<!-- bilinear:end -->`;
-  running the command again replaces that block and leaves the rest of the
-  file alone.
+- The skill is the same for every tracker. It requires the agent to track the
+  whole life of each piece of work: an issue before starting, the working
+  state while it is in hand, comments on what is found and decided, review,
+  and closing with what was done and how it was checked. It also describes
+  the commands, the properties and the exit codes.
+- The instructions say only where: they name one tracker and refer to the
+  skill. The tracker is named by its path from the root of the repository if
+  it is inside the repository or one level above it, and by its absolute path
+  otherwise. They sit between `<!-- bilinear:start -->` and
+  `<!-- bilinear:end -->`; running the command again replaces that block and
+  leaves the rest of the file alone.
 - `--print` writes either to standard output instead of a file.
 
 The CLI moves notes with a plain file move. Bare `[[BL-4]]` links survive;
