@@ -41,8 +41,38 @@ function viewsMenu(e: MouseEvent): void {
   c.host.showMenu(e, entries);
 }
 
+/** A menu of one-of-many choices, with the current one ticked. */
+function chooseMenu<T extends string>(e: MouseEvent, keys: T[], current: T, set: (key: T) => void): void {
+  c.host.showMenu(e, keys.map((key) => ({ title: key, checked: key === current, action: () => set(key) })));
+}
+
+// On a phone the toolbar keeps only the filter box and the two actions; what
+// it hides is offered at the top of the "more" menu instead.
+const layoutSwitch = ref<HTMLElement | null>(null);
+/** Something hidden that way is narrowing or changing what the list shows. */
+const hiddenActive = computed(() => chips.value.length > 0 || c.showArchived.value || c.activeView.value !== null);
+
+function hiddenControls(e: MouseEvent): MenuEntry[] {
+  if (layoutSwitch.value?.offsetParent !== null) return [];
+  const board = c.spec.layout === "board";
+  return [
+    { title: board ? "List layout" : "Board layout", icon: board ? "list" : "columns-3", action: () => (c.spec.layout = board ? "list" : "board") },
+    { title: c.activeView.value ? `View: ${c.activeView.value}…` : "Views…", icon: "bookmark", action: () => viewsMenu(e) },
+    { separator: true },
+    ...facets.value.map((f): MenuEntry => {
+      const n = c.spec.filter[f.key].length;
+      return { title: `Filter by ${f.title.toLowerCase()}${n ? ` (${n})` : ""}…`, icon: "filter", action: () => facetMenu(e, f.key) };
+    }),
+    { title: `Group by: ${c.spec.groupBy}…`, icon: "rows-3", action: () => chooseMenu(e, GROUP_KEYS, c.spec.groupBy, (g) => (c.spec.groupBy = g)) },
+    { title: `Sort by: ${c.spec.sortBy}…`, icon: "arrow-up-down", action: () => chooseMenu(e, SORT_KEYS, c.spec.sortBy, (k) => (c.spec.sortBy = k)) },
+    { title: `Show archive (${c.snapshot.value.archived.length})`, icon: "archive", checked: c.showArchived.value, action: () => (c.showArchived.value = !c.showArchived.value) },
+    { separator: true },
+  ];
+}
+
 function moreMenu(e: MouseEvent): void {
   c.host.showMenu(e, [
+    ...hiddenControls(e),
     { title: "Archive closed issues", icon: "archive", action: () => void c.archiveAllClosed() },
     { title: "Lint tracker", icon: "stethoscope", action: () => c.host.lint() },
     { title: "Customize states and labels…", icon: "palette", action: () => c.host.customize() },
@@ -51,20 +81,15 @@ function moreMenu(e: MouseEvent): void {
   ]);
 }
 
-// In a narrow pane everything but the filter box folds away behind a toggle.
-const open = ref(false);
-/** Something folded away is narrowing or changing what the list shows. */
-const folded = computed(() => chips.value.length > 0 || c.showArchived.value || c.activeView.value !== null);
-
 function onText(): void {
   c.activeView.value = null;
 }
 </script>
 
 <template>
-  <div class="bl-toolbar" :class="{ 'is-open': open }">
+  <div class="bl-toolbar">
     <div class="bl-toolbar-row bl-toolbar-main">
-      <div class="bl-segment bl-fold" role="group" aria-label="Layout">
+      <div ref="layoutSwitch" class="bl-segment bl-fold" role="group" aria-label="Layout">
         <button :class="{ 'is-active': c.spec.layout === 'list' }" aria-label="List layout" @click="c.spec.layout = 'list'"><Icon name="list" /></button>
         <button :class="{ 'is-active': c.spec.layout === 'board' }" aria-label="Board layout" @click="c.spec.layout = 'board'"><Icon name="columns-3" /></button>
       </div>
@@ -73,8 +98,7 @@ function onText(): void {
         <Icon name="search" />
         <input v-model="c.spec.filter.text" class="bl-filter-input" type="search" placeholder="Filter issues" aria-label="Filter issues" spellcheck="false" @input="onText" @keydown.esc.stop="($event.target as HTMLElement).blur()" />
       </div>
-      <button class="bl-tool bl-fold-toggle" :class="{ 'is-on': folded }" aria-label="Layout, filters and sorting" :aria-expanded="open" @click="open = !open"><Icon name="sliders-horizontal" /></button>
-      <button class="clickable-icon" aria-label="More actions" @click="moreMenu($event)"><Icon name="more-horizontal" /></button>
+      <button class="clickable-icon bl-more" :class="{ 'is-on': hiddenActive }" aria-label="More actions" @click="moreMenu($event)"><Icon name="more-horizontal" /></button>
       <button class="mod-cta bl-new" aria-label="New issue" @click="c.host.newIssue({})"><Icon name="plus" /> <span class="bl-new-text">New issue</span></button>
     </div>
     <div class="bl-toolbar-row bl-toolbar-options">
