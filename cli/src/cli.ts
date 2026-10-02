@@ -20,7 +20,7 @@ import { LOCK_TIMES, LockTimeout } from "../../plugin/src/ops/lock-file";
 import { indexNotes, issueRecord, locked, notePath, readIndex, requireItem, resolveNote } from "../../plugin/src/ops/tracker";
 import { linkedProgress, type Progress } from "../../plugin/src/store/query";
 import { version } from "../package.json";
-import { SKILL, agentsFile, instructions, repositoryRoot, skillPath, trackerPath, withInstructions, writeFile } from "./agent";
+import { SKILL, SetupError, exclude, excludePatterns, instructions, isTracked, plan, realPath, repositoryRoot, trackerPath, withInstructions, writeFile } from "./agent";
 import { ConflictError, NodeIO, slashed } from "./node-io";
 
 export const EXIT_OK = 0;
@@ -462,48 +462,56 @@ const COMMANDS: Record<string, Command> = {
     },
   },
 
-  skill: {
-    args: "[--global | --dir DIR] [--print]",
-    help: "install a skill that tells an LLM agent how to track its work with this CLI",
-    options: { global: { type: "boolean" }, dir: { type: "string" }, print: { type: "boolean" } },
-    takes: [0, 0],
-    async run({ ctx, values, out }) {
-      if (values["print"]) {
-        out(SKILL.trimEnd());
-        return EXIT_OK;
-      }
-      if (values["global"] && values["dir"] !== undefined) throw new OpError("give either --global or --dir");
-      const home = ctx.env["HOME"] || ctx.env["USERPROFILE"] || os.homedir();
-      const path = skillPath({ dir: str(values["dir"]), global: values["global"] === true }, ctx.cwd, home);
-      out(`${writeFile(path, SKILL)} ${path}`);
-      return EXIT_OK;
-    },
-  },
-
-  instructions: {
-    args: "[<file>] [--followups] [--print]",
-    help: "add a section to AGENTS.md or CLAUDE.md that names this tracker as where work is tracked",
-    options: { followups: { type: "boolean" }, print: { type: "boolean" } },
-    takes: [0, 1],
+  "agent-setup": {
+    args: "<dir> [--codex] [--claude] [--local] [--followups]",
+    help: "set an LLM agent up to track its work here: a skill, and a section in CLAUDE.md or AGENTS.md",
+    options: { codex: { type: "boolean" }, claude: { type: "boolean" }, local: { type: "boolean" }, followups: { type: "boolean" } },
+    takes: [1, 1],
     reads: () => true,
     async run({ ctx, values, positionals, out, tracker }) {
-      const t = await tracker();
-      const file = positionals.length ? nodePath.resolve(ctx.cwd, positionals[0]) : agentsFile(ctx.cwd);
-      const folder = values["print"] ? ctx.cwd : nodePath.dirname(file);
-      const root = repositoryRoot(fs.existsSync(folder) ? fs.realpathSync(folder) : folder);
+      const home = ctx.env["HOME"] || ctx.env["USERPROFILE"] || os.homedir();
+      const local = values["local"] === true;
+      let p;
+      try {
+        p = plan(positionals[0], { cwd: ctx.cwd, home, claudeHome: ctx.env["CLAUDE_CONFIG_DIR"] || undefined, codexHome: ctx.env["CODEX_HOME"] || undefined }, { codex: values["codex"] === true, claude: values["claude"] === true, local, followups: values["followups"] === true });
+      } catch (e) {
+        throw e instanceof SetupError ? new UsageError(e.message) : e;
+      }
+      const real = realPath(p.dir);
+      const root = p.home ? null : repositoryRoot(real);
+      let where = "";
       let triage: string | undefined;
-      if (values["followups"]) {
-        const idx = await locked(t, () => readIndex(t));
-        if (idx.triageState === null) throw new OpError("the tracker has no triage state for follow-ups to wait in; make one with: bilinear state triage --triage");
-        triage = idx.triageState;
+      if (p.targets.some((target) => target.file !== null)) {
+        const t = await tracker();
+        if (values["followups"]) {
+          const idx = await locked(t, () => readIndex(t));
+          if (idx.triageState === null) throw new OpError("the tracker has no triage state for follow-ups to wait in; make one with: bilinear state triage --triage");
+          triage = idx.triageState;
+        }
+        where = root === null ? native(t.dir) : trackerPath(native(t.dir), root);
       }
-      const block = instructions(trackerPath(native(t.dir), root), triage);
-      if (values["print"]) {
-        out(block.trimEnd());
-        return EXIT_OK;
+      if (local && !p.home) {
+        for (const file of p.targets.flatMap((target) => [target.skill, target.file])) {
+          if (file === null || !isTracked(file, p.dir)) continue;
+          const codex = nodePath.basename(file) === "AGENTS.md" ? "; Codex has no local instructions file, and ~/.codex is the alternative" : "";
+          throw new OpError(`${file} is committed to git, so it cannot be kept local${codex}`);
+        }
       }
-      const old = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
-      out(`${writeFile(file, withInstructions(old, block))} ${file}`);
+      for (const { skill, file, ref } of p.targets) {
+        out(`${writeFile(skill, SKILL)} ${skill}`);
+        if (file === null) continue;
+        const old = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+        out(`${writeFile(file, withInstructions(old, instructions(where, ref, triage)))} ${file}`);
+      }
+      if (local && !p.home) {
+        const git = root === null ? "" : nodePath.join(root, ".git");
+        if (root === null) out(`not excluded: ${p.dir} is in no git repository`);
+        else if (!fs.statSync(git).isDirectory()) out(`not excluded: ${git} is not a folder`);
+        else {
+          const file = nodePath.join(git, "info", "exclude");
+          for (const pattern of exclude(file, excludePatterns(p.targets, p.dir, real, root))) out(`excluded ${pattern} in ${file}`);
+        }
+      }
       return EXIT_OK;
     },
   },
@@ -532,23 +540,33 @@ function help(name?: string): string {
         "--triage makes the state the triage state, where new issues wait for the user to accept or\n" +
         "reject them; a state the tracker does not have yet is added in front of the others.\n";
     }
-    if (name === "skill") {
+    if (name === "agent-setup") {
       text +=
-        "\nWrites bilinear/SKILL.md into .agents/skills/ of the working directory, for agents working in\n" +
-        "this project. --global writes into ~/.agents/skills/ instead, for every project; --dir DIR into\n" +
-        "the skills folder of an agent that keeps its own, such as .claude/skills. --print writes the\n" +
-        "skill to standard output.\n";
-    }
-    if (name === "instructions") {
-      text +=
-        "\nWrites a section that names this tracker and refers to the bilinear skill for how work is\n" +
-        "tracked. Without <file> it goes into AGENTS.md of the working directory, or CLAUDE.md if only\n" +
-        "that exists. The rest of the file is kept; run again to refresh the section. The tracker is\n" +
-        "named by its path from the root of the repository if it is inside the repository or one level\n" +
-        "above it, else by its absolute path. --print writes the section to standard output instead.\n" +
+        "\n<dir> is a project's folder, or one of ~/.claude, ~/.codex and ~/.agents. Each agent gets a skill,\n" +
+        "which teaches it how work is tracked, and a section in its instructions file that names this\n" +
+        "tracker and refers to the skill, where it reads them:\n" +
+        "\n" +
+        "  <dir>            instructions                 skill\n" +
+        "  ~/.claude        ~/.claude/CLAUDE.md          ~/.claude/skills/bilinear/SKILL.md\n" +
+        "  ~/.codex         ~/.codex/AGENTS.md           ~/.agents/skills/bilinear/SKILL.md\n" +
+        "  ~/.agents        none                         ~/.agents/skills/bilinear/SKILL.md\n" +
+        "  project --claude <dir>/CLAUDE.md              <dir>/.claude/skills/bilinear/SKILL.md\n" +
+        "  project --codex  <dir>/AGENTS.md              <dir>/.agents/skills/bilinear/SKILL.md\n" +
+        "\n" +
+        "The home folders mean their agent, so they need no option; CLAUDE_CONFIG_DIR and CODEX_HOME\n" +
+        "move the first two. ~/.agents is read by Codex and others, takes only the skill, and needs no\n" +
+        "tracker. For a project give --codex, --claude or both.\n" +
+        "\n--local keeps a project's files out of git: the instructions go to CLAUDE.local.md instead of\n" +
+        "CLAUDE.md (Codex has no local file, so AGENTS.md is used), and the files are added to the\n" +
+        "repository's .git/info/exclude. A file that is already committed is refused; in the home\n" +
+        "folders, which are in no project, --local does nothing. The rest of the\n" +
+        "instructions file is kept; run again to refresh the section. The tracker is named by its path\n" +
+        "from the root of the repository if it is inside the repository or one level above it, else by\n" +
+        "its absolute path, as it is when <dir> is in no repository, and always in a home folder.\n" +
         "\n--followups adds the rule that whatever a task skips becomes a follow-up issue, and that a\n" +
         "follow-up the agent is not sure is wanted waits in the tracker's triage state for the user to\n" +
-        "accept or reject.\n";
+        "accept or reject, assigned to the user and written with the ways to do it as options, which\n" +
+        "the user deletes down to one.\n";
     }
     return text;
   }

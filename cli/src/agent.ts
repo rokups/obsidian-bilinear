@@ -1,8 +1,11 @@
 // What the CLI hands to LLM coding agents: a skill that teaches the commands,
-// and a block of instructions for AGENTS.md or CLAUDE.md that names the
+// and a block of instructions for CLAUDE.md or AGENTS.md that names the
 // tracker a project's work is tracked in. The skill is the same for every
 // tracker and says how work is tracked; the instructions only say where.
+// The files go where Claude Code and Codex read them: in a project, or in
+// the folders they keep in the user's home.
 
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 
@@ -34,38 +37,99 @@ after you finish. This is required, and it does not wait to be asked for.
    what was asked, the constraints, how to tell that it is done. Do not start work
    that has no issue. One issue is one piece of work that can be finished on
    its own; larger work is a parent issue with sub-issues (\`--parent <ID>\`).
-2. **On starting**, assign the issue to yourself and move it to the state that
+2. **On choosing what to work on**, move the issue out of the backlog, before
+   anything is started. As soon as you intend to work on an issue, set it to
+   the state for work that is up next: the one between the state new issues
+   start in and the working state, \`todo\` in a new tracker (\`state\` lists
+   the tracker's states in order). Do this even when the work starts later
+   or after other issues, so that the user sees what is coming. A tracker
+   with no such state has nothing to move to here.
+3. **On starting**, assign the issue to yourself and move it to the state that
    means it is being worked on: \`set <ID> assignee=<your name> status=<state>\`
    (\`state\` lists the tracker's states). Do not take an issue that is
-   assigned to someone else unless you are asked to.
-3. **While working**, comment (\`--author <your name> comment <ID> "text"\`)
+   assigned to someone else unless you are asked to; an issue that bears
+   the user's name only because it waited for them is the exception, as
+   said below.
+4. **While working**, comment (\`--author <your name> comment <ID> "text"\`)
    whenever you learn or decide something a later reader needs: the cause you found, the approach
    you chose or gave up, a change of plan. If the issue cannot go on until
    another is done, say so with \`set <ID> blocked-by+=<other ID>\`; if it
-   waits for a person, comment with the question. Work that turns up along
+   waits for the user, comment with what you need from them and assign the
+   issue to them (\`set <ID> assignee=<the user's name>\`), and take it back
+   once they have answered. Work that turns up along
    the way and is not part of this issue gets an issue of its own, which the
    comment names as \`[[ID]]\`.
-4. **When the work waits for review**, move the issue to the tracker's review
+5. **When the work waits for review**, move the issue to the tracker's review
    state if it has one.
-5. **On finishing**, comment what was done and how it was checked, then set
+6. **On finishing**, comment what was done and how it was checked, then set
    the issue to the closed state that means done. Work that is given up is
    closed too: comment why, and set the closed state that means canceled.
    Do not close an issue whose work was not checked.
-6. **On stopping before the work is finished**, comment what is done and what
+7. **On stopping before the work is finished**, comment what is done and what
    is left, so that someone else can carry on from the issue alone. Leave it
-   in the working state only if the work is still going on; otherwise move it
-   back to the state for work that has not started and give up the
-   assignment (\`assignee=\`).
+   in the working state only if the work is still going on; otherwise give up
+   the assignment (\`assignee=\`) and move it back: to the state for work
+   that is up next if you intend to carry on with it, else to the backlog.
+   An issue that stops because it waits for the user is not given up: it
+   stays assigned to the user, in the state it is in.
 
 Your name, for assignments and comments, is the name of the agent you are,
 such as \`claude\` or \`codex\`: never the user's, and the same every time. The
 CLI signs a comment with the name of the user who is logged in unless it is
 told otherwise, so pass \`--author <your name>\` with every \`comment\`, or set
 \`BILINEAR_USER=<your name>\` for the commands you run. Issues you create for
-others to pick up stay unassigned.
+any agent to pick up stay unassigned.
+
+An issue that needs the user to act is assigned to the user, so that they
+see it as theirs: one that waits for their answer or decision, one that only
+they can do, one in the triage state. The user's name is their login name,
+\`$USER\`, which is what the CLI signs their comments with, unless issues in
+the tracker are already assigned to the user under another name.
+Once the user has acted, by answering or by moving the issue out of the
+triage state, the issue is free for you to take although it still bears
+their name. An issue whose work only the user can do is not: say in its
+description that the work is the user's, and leave such an issue to them.
 
 The status of an issue says what is true now. Archiving and deleting issues is
 the user's to do: do neither unless asked.
+
+## Relations between issues
+
+How issues depend on each other is part of the tracking, and it is required
+as the statuses are. Record a relation in the tracker when you create an
+issue and whenever you learn of one, and keep it true as the work changes. A
+relation that is only in your head, or only in the prose of a comment where
+a property is meant for it, is lost to whoever reads the tracker next.
+
+- **Part of larger work**: a sub-issue names its parent, with
+  \`new "Title" --parent <ID>\` or \`set <ID> parent=<ID>\`. Split work that
+  is too large to finish in one go into sub-issues of one parent, rather
+  than into issues that do not know of each other. A parent is closed as
+  done only when all of its sub-issues are closed.
+- **Has to wait for another issue**: \`set <ID> blocked-by+=<other ID>\`, or
+  \`--blocked-by <ID>\` with \`new\`. When issues have to be done in an order,
+  say so this way, each one blocked by the one before it. Do not start an
+  issue while one that blocks it is open: work on the blocker first.
+  Remove the entry (\`blocked-by-=<other ID>\`) if it turns out not to hold;
+  one whose blocker is closed may stay.
+- **Made up of other issues that are not its sub-issues**: link them as
+  \`[[ID]]\` in the description. An issue's progress counts its sub-issues
+  and the issues its description links to, so link there only what has to
+  be done for this issue to be done.
+- **Related in another way** (a follow-up, the same cause, a duplicate, one
+  that replaces another): comment on both issues, naming the other as
+  \`[[ID]]\` and saying what the relation is. A duplicate is then closed in
+  the state that means canceled, and what it knew is carried over to the
+  issue that stays.
+
+Before creating an issue, look through the open ones (\`list\`) for the issue
+it belongs under, the ones it has to wait for and the ones that have to wait
+for it, and set these when you create it. Before choosing what to work on,
+read the relations of the issue: \`show <ID>\` names its parent and its
+blockers, and lists its sub-issues and linked issues with their states;
+\`show\` the blockers for theirs. When a relation changes, because work is
+split, moved under another parent or no longer needed, change it in the
+tracker at once.
 
 ## Running the CLI
 
@@ -120,9 +184,23 @@ bilinear set BL-12 status=done
 - A tracker may have a triage state (\`state\` marks it): issues in it wait for
   the user to accept or reject them. Do not work on them or move them out of
   it. New issues do not start there unless \`--status\` says so.
-- Link issues with \`[[BL-7]]\` in a description, or with \`parent\` and
-  \`blocked-by\`. An issue's progress counts its sub-issues and the issues its
-  description links to.
+- Before you put an issue in the triage state, search the tracker for the
+  issues that have to do with it: \`list --all\` shows every issue, the
+  closed and the archived ones too, and the notes in the tracker's folder
+  can be searched for the words that matter. Add the issue only if it is
+  warranted. If an issue already covers it, comment there instead; if one
+  like it was rejected or canceled, do not propose it again unless something
+  has changed, and then say what. When you do add it, set its relations as
+  the section on relations says, so that the user sees what it belongs to.
+- Assign an issue that you put in the triage state to the user
+  (\`--assignee <the user's name>\`), and write it so that the user can accept
+  it with as few edits as possible: a title and a description that are ready
+  to work from as they stand. Where there is more than one way to do the
+  work, give each in the description as an option of its own, under its own
+  heading, with what speaks for it and against it, and the one you recommend
+  first. The user deletes the options they discard, leaves the one they
+  accept and moves the issue to the backlog. Do not ask a question where
+  options to keep or delete can stand for the answers.
 - Exit codes: 0 done; 1 bad arguments or no such issue (the message says
   which); 2 \`lint\` found problems; 3 the tracker was busy or a file changed
   underneath the command. On 3, run the command again.
@@ -131,11 +209,11 @@ bilinear set BL-12 status=done
 const START = "<!-- bilinear:start -->";
 const END = "<!-- bilinear:end -->";
 
-/** The folder with `.git` at or above a folder: the root of its repository. The folder itself if there is none. */
-export function repositoryRoot(folder: string): string {
+/** The folder with `.git` at or above a folder: the root of its repository. Null if there is none. */
+export function repositoryRoot(folder: string): string | null {
   for (let dir = folder; ; dir = nodePath.dirname(dir)) {
     if (fs.existsSync(nodePath.join(dir, ".git"))) return dir;
-    if (dir === nodePath.dirname(dir)) return folder;
+    if (dir === nodePath.dirname(dir)) return null;
   }
 }
 
@@ -157,17 +235,29 @@ function followups(triage: string): string {
   return `
 Finish no task with gaps left unrecorded. Whatever the task asked for or
 needed that you skipped, put off, stubbed or did only in part becomes a
-follow-up issue before you close the task, and a comment on the task names it
-as \`[[ID]]\`. A follow-up that is plainly wanted is created like any issue. One
+follow-up issue before you close the task, and comments on the task and on
+the follow-up name each other as \`[[ID]]\`. A follow-up that is plainly wanted is created like any issue. One
 you are not sure is wanted is created in the \`${triage}\` state
 (\`new "Title" --status ${triage}\`), with the reason for the doubt in its
 description: it waits there for the user to accept it, by moving it to
 another state, or to reject it. Do not work on an issue that is in \`${triage}\`.
+
+Before you create an issue in \`${triage}\`, search the tracker for the issues
+that have to do with it, the closed and the archived ones too, and create it
+only if it is warranted: none covers it already, and none like it was
+rejected. When you create it, set its relations to the issues you found.
+
+Assign an issue for \`${triage}\` to the user (\`--assignee <the user's name>\`),
+since it is theirs to act on, and write it so that the user can accept it
+with as few edits as possible. Where there is more than one way to do it,
+give each in the description as an option of its own, the one you recommend
+first: the user deletes the options they discard, leaves the one they accept
+and moves the issue to the backlog.
 `;
 }
 
-/** The instructions for an agents file: which tracker the project's work is tracked in. */
-export function instructions(path: string, triage?: string): string {
+/** The instructions for CLAUDE.md or AGENTS.md: which tracker the project's work is tracked in, and where the skill is. */
+export function instructions(path: string, skill: string, triage?: string): string {
   const where = nodePath.isAbsolute(path) ? "Its path:" : "Its path, from the root of the repository:";
   return `${START}
 ## Issue tracking
@@ -177,20 +267,15 @@ Work on this project is tracked in a Bilinear issue tracker. ${where}
     ${path}
 
 Track every piece of work there, from before it starts until it is finished,
-as the \`bilinear\` skill says. If the skill is not installed, read it with
-\`npx --yes obsidian-bilinear skill --print\`.
+as the \`bilinear\` skill says. The skill is in
+\`${skill}\`.
 ${triage === undefined ? "" : followups(triage)}${END}
 `;
 }
 
-/**
- * Where a skill goes: `.agents/skills`, the folder agents share, in the
- * project or in the user's home, or a skills folder that is named (an agent
- * that keeps its own, such as `.claude/skills`).
- */
-export function skillPath(where: { dir?: string; global: boolean }, cwd: string, home: string): string {
-  const skills = where.dir !== undefined ? nodePath.resolve(cwd, where.dir) : nodePath.join(where.global ? home : cwd, ".agents", "skills");
-  return nodePath.join(skills, SKILL_NAME, "SKILL.md");
+/** Where the skill goes in a folder that agents read skills from (`.claude`, `.agents`): `skills/bilinear/SKILL.md`. */
+export function skillPath(dir: string): string {
+  return nodePath.join(dir, "skills", SKILL_NAME, "SKILL.md");
 }
 
 /** Write a file, with its folders. Returns whether it was there, and whether it changed. */
@@ -202,14 +287,8 @@ export function writeFile(path: string, text: string): "created" | "updated" | "
   return old === null ? "created" : "updated";
 }
 
-/** The agents file to write when none is named: the one that is there, AGENTS.md if both or neither. */
-export function agentsFile(cwd: string): string {
-  const has = (name: string) => fs.existsSync(nodePath.join(cwd, name));
-  return nodePath.join(cwd, !has("AGENTS.md") && has("CLAUDE.md") ? "CLAUDE.md" : "AGENTS.md");
-}
-
 /**
- * Put the instructions into an agents file: in place of the block that is
+ * Put the instructions into an instructions file: in place of the block that is
  * there from an earlier run, else at the end. The rest of the file is kept.
  */
 export function withInstructions(old: string | null, block: string): string {
@@ -224,4 +303,115 @@ export function withInstructions(old: string | null, block: string): string {
     return old.slice(0, start) + text + old.slice(after);
   }
   return `${old.replace(/\s*$/, "")}${eol}${eol}${text}`;
+}
+
+/** Bad choice of folder or options for `agent-setup`. */
+export class SetupError extends Error {}
+
+/** One harness's files: the skill, the instructions file (none for a folder only skills are read from), and how the instructions name the skill. */
+export interface Target {
+  skill: string;
+  file: string | null;
+  ref: string;
+}
+
+/** Where `agent-setup` goes: the folder, whether it is one of the user's own, and the files to write, claude before codex. */
+export interface Plan {
+  dir: string;
+  home: boolean;
+  targets: Target[];
+}
+
+export interface Places {
+  cwd: string;
+  home: string;
+  claudeHome?: string;
+  codexHome?: string;
+}
+
+export interface Flags {
+  codex?: boolean;
+  claude?: boolean;
+  local?: boolean;
+  followups?: boolean;
+}
+
+const posix = (path: string): string => path.split(nodePath.sep).join("/");
+
+/**
+ * Decide what `agent-setup <arg>` writes. A project folder takes `--codex`,
+ * `--claude` or both; `~/.claude`, `~/.codex` and `~/.agents` (or where
+ * CLAUDE_CONFIG_DIR and CODEX_HOME put the first two) mean their harness,
+ * and `~/.agents` gets only the skill, which Codex also reads from there.
+ */
+export function plan(arg: string, at: Places, flags: Flags): Plan {
+  const home = nodePath.resolve(at.home);
+  const dir = nodePath.resolve(at.cwd, arg === "~" || arg.startsWith("~/") || arg.startsWith(`~${nodePath.sep}`) ? nodePath.join(home, arg.slice(1)) : arg);
+  const is = (...paths: (string | undefined)[]) => paths.some((p) => p !== undefined && nodePath.resolve(at.cwd, p) === dir);
+  const tilde = (path: string) => (path.startsWith(home + nodePath.sep) ? `~/${posix(nodePath.relative(home, path))}` : path);
+  const target = (base: string, file: string | null, ref: (skill: string) => string): Target => {
+    const skill = skillPath(base);
+    return { skill, file, ref: ref(skill) };
+  };
+  const inHome = (base: string, file: string | null) => target(base, file, tilde);
+  const agents = nodePath.join(home, ".agents");
+  const kind = is(at.claudeHome, nodePath.join(home, ".claude")) ? "claude" : is(at.codexHome, nodePath.join(home, ".codex")) ? "codex" : is(agents) ? "agents" : null;
+  const wrong = (flag: string, what: string) => new SetupError(`${flag} does not go with ${arg}: it is ${what}`);
+
+  if (kind === "claude") {
+    if (flags.codex) throw wrong("--codex", "Claude Code's folder");
+    return { dir, home: true, targets: [inHome(dir, nodePath.join(dir, "CLAUDE.md"))] };
+  }
+  if (kind === "codex") {
+    if (flags.claude) throw wrong("--claude", "Codex's folder");
+    return { dir, home: true, targets: [inHome(agents, nodePath.join(dir, "AGENTS.md"))] };
+  }
+  if (kind === "agents") {
+    if (flags.claude) throw wrong("--claude", "where only skills are kept, which Claude Code does not read");
+    if (flags.followups) throw new SetupError("--followups needs instructions, and there are none in ~/.agents: give ~/.codex or a project's folder");
+    return { dir, home: true, targets: [inHome(agents, null)] };
+  }
+  if ([".claude", ".codex", ".agents"].includes(nodePath.basename(dir))) {
+    throw new SetupError(`give the project's folder, not its ${nodePath.basename(dir)}, or one of the folders in your home to set up for all projects`);
+  }
+  if (!flags.claude && !flags.codex) throw new SetupError("give --codex, --claude or both");
+  const project = (base: string, file: string) => target(nodePath.join(dir, base), nodePath.join(dir, file), (skill) => posix(nodePath.relative(dir, skill)));
+  const targets: Target[] = [];
+  if (flags.claude) targets.push(project(".claude", flags.local ? "CLAUDE.local.md" : "CLAUDE.md"));
+  if (flags.codex) targets.push(project(".agents", "AGENTS.md"));
+  return { dir, home: false, targets };
+}
+
+/** A path with its links resolved as far as it exists. */
+export function realPath(path: string): string {
+  const rest: string[] = [];
+  let dir = path;
+  while (!fs.existsSync(dir) && dir !== nodePath.dirname(dir)) {
+    rest.unshift(nodePath.basename(dir));
+    dir = nodePath.dirname(dir);
+  }
+  return nodePath.join(fs.realpathSync(dir), ...rest);
+}
+
+/** Whether git has a file committed or staged. False when it says no or cannot say. */
+export function isTracked(file: string, cwd: string): boolean {
+  return fs.existsSync(file) && spawnSync("git", ["ls-files", "--error-unmatch", "--", file], { cwd, stdio: "ignore" }).status === 0;
+}
+
+/** What to exclude from git for a project's files: the instructions files and the skill folders, from the repository's root. `real` is `dir` with its links resolved. */
+export function excludePatterns(targets: Target[], dir: string, real: string, root: string): string[] {
+  const from = (path: string) => `/${posix(nodePath.relative(root, nodePath.join(real, nodePath.relative(dir, path))))}`;
+  return targets.flatMap(({ skill, file }) => [...(file === null ? [] : [from(file)]), `${from(nodePath.dirname(skill))}/`]);
+}
+
+/** Add patterns to a git exclude file, keeping what is there. Returns those that were not there yet. */
+export function exclude(file: string, patterns: string[]): string[] {
+  const old = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+  const lines = new Set(old.split(/\r?\n/));
+  const added = patterns.filter((p) => !lines.has(p));
+  if (added.length) {
+    fs.mkdirSync(nodePath.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `${old}${old === "" || old.endsWith("\n") ? "" : "\n"}${added.join("\n")}\n`);
+  }
+  return added;
 }

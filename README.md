@@ -92,8 +92,7 @@ bilinear lint --fix
 | `label [name] [--color COLOR]` | List the labels, or add one and set its colour (`none` clears it) |
 | `state [name] [--icon ICON] [--color COLOR] [--triage]` | List the states, or set a state's icon and colour (`none` clears it), or make it the triage state |
 | `lint [--fix]` | Check and optionally repair consistency |
-| `skill [--global \| --dir DIR] [--print]` | Install a skill that tells an LLM agent how to track its work with the CLI |
-| `instructions [FILE] [--followups] [--print]` | Add a section to `AGENTS.md` or `CLAUDE.md` that names this tracker as where work is tracked |
+| `agent-setup <dir> [--codex] [--claude] [--local] [--followups]` | Set an LLM agent up to track its work here: install a skill, and add a section to `CLAUDE.md` or `AGENTS.md` that names this tracker as where work is tracked |
 
 - The tracker is taken from `--tracker PATH` (folder or index note), then
   `BILINEAR_TRACKER`, then a search upward from the working directory.
@@ -134,33 +133,73 @@ bilinear lint --fix
 
 ### For LLM agents
 
-Two commands set a coding agent up to track its work in a tracker:
+One command sets a coding agent up to track its work in a tracker. `<dir>` is
+a project's folder, or one of the folders the agents keep in your home:
 
 ```sh
-bilinear skill                                  # .agents/skills/bilinear/SKILL.md in this project
-bilinear skill --global                         # ~/.agents/skills/, for every project
-bilinear skill --dir .claude/skills             # the skills folder of an agent that keeps its own
-bilinear --tracker Trackers/Bilinear instructions            # into AGENTS.md, or CLAUDE.md if only that exists
-bilinear --tracker Trackers/Bilinear instructions CLAUDE.md  # into the file named
+bilinear --tracker Trackers/Bilinear agent-setup . --claude          # a project, for Claude Code
+bilinear --tracker Trackers/Bilinear agent-setup . --codex           # a project, for Codex
+bilinear --tracker Trackers/Bilinear agent-setup . --claude --local  # a project, kept out of git
+bilinear --tracker Trackers/Bilinear agent-setup ~/.claude           # for Claude Code, in all projects
+bilinear --tracker Trackers/Bilinear agent-setup ~/.codex            # for Codex, in all projects
+bilinear agent-setup ~/.agents                                       # the skill only, for agents that read it
 ```
 
+It writes the skill and the instructions where each agent reads them:
+
+| `<dir>` | Instructions | Skill |
+| --- | --- | --- |
+| a project, `--claude` | `<dir>/CLAUDE.md` | `<dir>/.claude/skills/bilinear/SKILL.md` |
+| a project, `--codex` | `<dir>/AGENTS.md` | `<dir>/.agents/skills/bilinear/SKILL.md` |
+| `~/.claude` | `~/.claude/CLAUDE.md` | `~/.claude/skills/bilinear/SKILL.md` |
+| `~/.codex` | `~/.codex/AGENTS.md` | `~/.agents/skills/bilinear/SKILL.md` |
+| `~/.agents` | none | `~/.agents/skills/bilinear/SKILL.md` |
+
+A project takes `--claude`, `--codex` or both. The folders in your home mean
+their agent, so they need no option, and refuse the other one. `~/.agents` is
+read by Codex and other agents that take skills from there; it gets only the
+skill, so it needs no tracker and does not take `--followups`.
+`CLAUDE_CONFIG_DIR` and `CODEX_HOME` move the first two.
+
+`--local` keeps a project's files out of git, as far as that can be done (it
+does nothing in the folders of your home): the instructions go to
+`CLAUDE.local.md` instead of `CLAUDE.md`, and the files are added to the
+repository's `.git/info/exclude`. Codex has no local instructions file, so
+`AGENTS.md` itself is excluded; if it is already committed, use `~/.codex`
+instead. A file that is already committed is
+refused, as excluding it would do nothing. Where there is no repository, or
+its `.git` is a file (a worktree or a submodule), the files are written and
+the command says that nothing was excluded.
+
 - The skill is the same for every tracker. It requires the agent to track the
-  whole life of each piece of work: an issue before starting, assigned to the
-  agent under its own name and in the working state while it is in hand,
-  comments signed with that name on what is found and decided, review, and
-  closing with what was done and how it was checked. It also describes
-  the commands, the properties and the exit codes.
+  whole life of each piece of work: an issue before starting, moved out of
+  the backlog to the state for work that is up next as soon as the agent
+  intends to work on it, assigned to the agent under its own name and in the
+  working state while it is in hand, comments signed with that name on what
+  is found and decided, review, and closing with what was done and how it
+  was checked. An issue that needs you to act, such as one that waits for
+  your answer, is assigned to you. It requires the relations between
+  issues to be recorded and kept true: parents and sub-issues, what blocks
+  what, the issues a description links to, and comments that name related
+  issues. It also describes the commands, the properties and the exit codes.
 - The instructions say only where: they name one tracker and refer to the
-  skill. The tracker is named by its path from the root of the repository if
-  it is inside the repository or one level above it, and by its absolute path
-  otherwise. They sit between `<!-- bilinear:start -->` and
-  `<!-- bilinear:end -->`; running the command again replaces that block and
-  leaves the rest of the file alone.
-- `instructions --followups` adds a rule to the section: whatever a task
-  skips, puts off or does only in part becomes a follow-up issue before the
-  task is closed. A follow-up the agent is not sure is wanted is created in
-  the tracker's triage state, where it waits for you to accept or reject it.
-- `--print` writes either to standard output instead of a file.
+  skill. In a project the tracker is named by its path from the root of the
+  repository if it is inside the repository or one level above it, and by its
+  absolute path otherwise, or when `<dir>` is in no repository; in your home
+  folders it is always the absolute path. They sit between
+  `<!-- bilinear:start -->` and `<!-- bilinear:end -->`; running the command
+  again replaces that block and leaves the rest of the file alone.
+- `--followups` adds a rule to the section: whatever a task skips, puts off
+  or does only in part becomes a follow-up issue before the task is closed.
+  A follow-up the agent is not sure is wanted is created in the tracker's
+  triage state, where it waits for you to accept or reject it.
+- Before the agent puts an issue in the triage state it searches the tracker
+  for related issues, adds the issue only if none covers it, and links it to
+  the ones it found. The issue is assigned to you and written to need as few
+  edits from you as possible. Where there is more than one
+  way to do the work, the description gives each as an option: delete the
+  ones you discard, leave the one you accept, and move the issue to the
+  backlog.
 
 The CLI moves notes with a plain file move. Bare `[[BL-4]]` links survive;
 path-style links in other notes are only rewritten when the plugin does the
