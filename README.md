@@ -92,6 +92,8 @@ bilinear lint --fix
 | `label [name] [--color COLOR]` | List the labels, or add one and set its colour (`none` clears it) |
 | `state [name] [--icon ICON] [--color COLOR]` | List the states, or set a state's icon and colour (`none` clears it) |
 | `lint [--fix]` | Check and optionally repair consistency |
+| `skill [--global \| --dir DIR] [--print]` | Install a skill that teaches an LLM agent to use the CLI |
+| `instructions [FILE] [--print]` | Add instructions to `AGENTS.md` or `CLAUDE.md` to track work in this tracker |
 
 - The tracker is taken from `--tracker PATH` (folder or index note), then
   `BILINEAR_TRACKER`, then a search upward from the working directory.
@@ -125,6 +127,28 @@ bilinear lint --fix
   `BILINEAR_LOCK_TIMEOUT` (seconds) to change that. `spec/FORMAT.md`
   section 3.2 has the details, and what is and is not covered when you type
   in a note while a script edits it.
+
+### For LLM agents
+
+Two commands set a coding agent up to use a tracker:
+
+```sh
+bilinear skill                                  # .claude/skills/bilinear/SKILL.md in this project
+bilinear skill --global                         # ~/.claude/skills/, for every project
+bilinear skill --dir .agents/skills             # another agent's skills folder
+bilinear --tracker Trackers/Bilinear instructions            # into AGENTS.md, or CLAUDE.md if only that exists
+bilinear --tracker Trackers/Bilinear instructions CLAUDE.md  # into the file named
+```
+
+- The skill describes the commands, the properties and the exit codes, and
+  says when to use them. It is the same for every tracker.
+- The instructions name one tracker, by its path from the file they are in,
+  with its ID prefix and states, and tell the agent to track its work there:
+  find or create an issue before starting, comment on it, close it when done.
+  They sit between `<!-- bilinear:start -->` and `<!-- bilinear:end -->`;
+  running the command again replaces that block and leaves the rest of the
+  file alone.
+- `--print` writes either to standard output instead of a file.
 
 The CLI moves notes with a plain file move. Bare `[[BL-4]]` links survive;
 path-style links in other notes are only rewritten when the plugin does the

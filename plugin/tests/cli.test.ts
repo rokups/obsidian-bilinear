@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Worker } from "node:worker_threads";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { parse } from "yaml";
 import { NodeIO } from "../../cli/src/node-io";
 import { withFileLock } from "../src/ops/lock-file";
 import { sandbox } from "./cli";
@@ -488,6 +489,77 @@ describe("state", () => {
     expect(r.code).toBe(2);
     expect(r.out).toContain("state-icons names 'gone', which is not one of the states [state-style-invalid]");
     expect(r.out).toContain("state-colors entry 'done=mauve' is not of the form name=color [state-style-invalid]");
+  });
+});
+
+describe("for LLM agents", () => {
+  const s = sandbox();
+  const skill = (...under: string[]) => join(...under, "bilinear", "SKILL.md");
+
+  it("installs the skill for the project, the user or a named skills folder", async () => {
+    s().cwd = s().root;
+    s().env["HOME"] = join(s().root, "home");
+    const project = skill(s().root, ".claude", "skills");
+    expect(await s().ok("skill")).toBe(`created ${project}\n`);
+    expect(await s().ok("skill")).toBe(`unchanged ${project}\n`);
+    fs.writeFileSync(project, "an older version");
+    expect(await s().ok("skill")).toBe(`updated ${project}\n`);
+    expect(await s().ok("skill", "--global")).toBe(`created ${skill(s().root, "home", ".claude", "skills")}\n`);
+    expect(await s().ok("skill", "--dir", join(".agents", "skills"))).toBe(`created ${skill(s().root, ".agents", "skills")}\n`);
+    expect(await s().code("skill", "--global", "--dir", "x")).toBe(1);
+    expect(await s().ok("skill", "--print")).toBe(s().read(project));
+  });
+
+  it("writes a skill whose frontmatter is valid and whose commands exist", async () => {
+    const text = await s().ok("skill", "--print");
+    const frontmatter = parse(text.split("---\n")[1]) as { name: string; description: string };
+    expect(frontmatter.name).toBe("bilinear");
+    expect(frontmatter.description.length).toBeGreaterThan(80);
+    expect(frontmatter.description.length).toBeLessThan(1024);
+    const commands = [...text.matchAll(/^- `([a-z]+) ?[^`]*`[^:]*: /gm)].map((m) => m[1]);
+    expect(commands.length).toBeGreaterThan(8);
+    for (const command of commands) expect(await s().code(command, "--help"), command).toBe(0);
+  });
+
+  it("adds instructions that name the tracker, and refreshes them in place", async () => {
+    s().cwd = s().vault;
+    const agents = join(s().vault, "AGENTS.md");
+    fs.writeFileSync(agents, "# Project\n\nSome rules.\n");
+    expect(await s().ok("--tracker", s().dir, "instructions")).toBe(`updated ${agents}\n`);
+    let text = s().read(agents);
+    expect(text.startsWith("# Project\n\nSome rules.\n\n<!-- bilinear:start -->\n## Issue tracking\n")).toBe(true);
+    expect(text.endsWith("<!-- bilinear:end -->\n")).toBe(true);
+    expect(text).toContain("npx --yes obsidian-bilinear --tracker Trackers/Bilinear <command>");
+    expect(text).toContain("`BL-12`");
+    expect(text).toContain("- States: `backlog`, `todo`, `in-progress`, `in-review`; closed: `done`, `canceled`.");
+    expect(await s().ok("--tracker", s().dir, "instructions")).toBe(`unchanged ${agents}\n`);
+
+    fs.writeFileSync(agents, `${text}\n## After\n`);
+    s().edit(s().index, "states: [backlog, todo, in-progress, in-review, done, canceled]", "states: [open, done]");
+    s().edit(s().index, "closed-states: [done, canceled]", "closed-states: [done]");
+    await s().ok("--tracker", s().dir, "instructions");
+    text = s().read(agents);
+    expect(text).toContain("- States: `open`; closed: `done`.");
+    expect(text.split("<!-- bilinear:start -->").length - 1).toBe(1);
+    expect(text.startsWith("# Project\n\nSome rules.\n\n<!-- bilinear:start -->")).toBe(true);
+    expect(text.endsWith("<!-- bilinear:end -->\n\n## After\n")).toBe(true);
+  });
+
+  it("picks the agents file that is there, or the one that is named", async () => {
+    s().cwd = s().vault;
+    const claude = join(s().vault, "CLAUDE.md");
+    fs.writeFileSync(claude, "Rules.\r\n");
+    expect(await s().ok("--tracker", s().dir, "instructions")).toBe(`updated ${claude}\n`);
+    expect(s().read(claude).startsWith("Rules.\r\n\r\n<!-- bilinear:start -->\r\n")).toBe(true);
+    fs.unlinkSync(claude);
+    expect(await s().ok("--tracker", s().dir, "instructions")).toBe(`created ${join(s().vault, "AGENTS.md")}\n`);
+    const nested = join(s().vault, "docs", "CLAUDE.md");
+    expect(await s().ok("--tracker", s().dir, "instructions", join("docs", "CLAUDE.md"))).toBe(`created ${nested}\n`);
+    expect(s().read(nested)).toContain("--tracker ../Trackers/Bilinear <command>");
+    s().cwd = s().dir;
+    expect(await s().ok("instructions", "--print")).toContain("--tracker . <command>");
+    s().cwd = s().root;
+    expect(await s().code("instructions")).toBe(1);
   });
 });
 
