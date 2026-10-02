@@ -4,7 +4,7 @@
 // file that goes untouched for LOCK_STALE was left by a program that died,
 // and is taken over.
 
-import { OpError } from "../ops/io";
+import { OpError } from "./io";
 
 export const LOCK_FILE = ".bilinear.lock";
 export const WAIT_FILE = ".bilinear.lock.wait";
@@ -35,6 +35,9 @@ export interface LockFs {
     unlink(path: string): Promise<void>;
   };
 }
+
+/** The lock was not had within the time allowed. */
+export class LockTimeout extends OpError {}
 
 function code(e: unknown): string | undefined {
   return (e as { code?: string } | null)?.code;
@@ -106,7 +109,7 @@ export async function withFileLock<T>(fs: LockFs, folder: string, fn: () => Prom
         if ((await seen()) === current) await remove(fs, path);
         continue;
       }
-      if (now - started >= times.timeout) throw new OpError("the tracker is in use by another program (the bilinear CLI?); try again");
+      if (now - started >= times.timeout) throw new LockTimeout("the tracker is in use by another program; try again");
       waiting = true;
       await fs.promises.appendFile(wait, "");
       await fs.promises.utimes(wait, new Date(), new Date()).catch(() => {});

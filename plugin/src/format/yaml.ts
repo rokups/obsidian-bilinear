@@ -1,6 +1,5 @@
 // The YAML subset of spec/FORMAT.md section 1.6, with a frontmatter editor
-// that rewrites only the lines of the key being changed. Mirrors the parser in
-// cli/bilinear.py; the shared fixtures keep the two in step.
+// that rewrites only the lines of the key being changed.
 
 import { chomp, detectEol, hasEol, splitLines, trimBlank } from "./lines";
 

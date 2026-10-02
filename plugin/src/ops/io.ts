@@ -34,6 +34,8 @@ export interface Tracker {
   /** Tracker folder; "" for the vault root. */
   dir: string;
   indexPath: string;
+  /** Told of things that are allowed but probably a mistake, such as a label the tracker does not list. */
+  warn?(message: string): void;
 }
 
 /** An operation refused: bad arguments, unknown issue, invalid tracker. */

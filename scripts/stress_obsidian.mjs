@@ -2,6 +2,7 @@
 //
 //   node scripts/stress_obsidian.mjs --vault <vault dir> [--port 9333] [--seconds 8] [--keep] [phase ...]
 //
+// Build first (`pnpm build` in plugin/): the script runs cli/dist/bilinear.js.
 // Obsidian must be running on that vault with the plugin enabled and
 // --remote-debugging-port=<port>. Each phase makes a tracker `Stress-...` in
 // the vault and removes it afterwards (--keep leaves it). The vault must not
@@ -25,7 +26,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect } from "./cdp.mjs";
 
-const CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "cli", "bilinear.py");
+const CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "cli", "dist", "bilinear.js");
 const PHASES = ["plugin-writes", "cli-writes", "both-write", "editor", "editor-plugin"];
 const TODAY = "2026-10-02";
 const SEEDS = 6;
@@ -42,6 +43,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else usage(`unknown argument ${a}`);
 }
 if (!opts.vault) usage("--vault is required");
+if (!existsSync(CLI)) usage(`${CLI} is not built; run pnpm build in plugin/`);
 if (!opts.phases.length) opts.phases = PHASES;
 
 function usage(problem) {
@@ -74,14 +76,14 @@ class Run {
 
   cli(...args) {
     return new Promise((done) => {
-      execFile("python3", [CLI, "--tracker", this.dir, ...args], { env: { ...process.env, BILINEAR_USER: "cli", BILINEAR_TODAY: TODAY } }, (error, out, err) => {
+      execFile(process.execPath, [CLI, "--tracker", this.dir, ...args], { env: { ...process.env, BILINEAR_USER: "cli", BILINEAR_TODAY: TODAY } }, (error, out, err) => {
         done({ code: error ? (error.code ?? -1) : 0, out, err: err.trim() });
       });
     });
   }
 
   async setup() {
-    const made = await new Promise((done) => execFile("python3", [CLI, "init", this.dir, "--prefix", "ST"], (e, out, err) => done(e ? err : "")));
+    const made = await new Promise((done) => execFile(process.execPath, [CLI, "init", this.dir, "--prefix", "ST"], (e, out, err) => done(e ? err : "")));
     if (made) throw new Error(`init failed: ${made}`);
     for (let i = 1; i <= SEEDS; i++) {
       const r = await this.cli("new", `seed ${i}`);

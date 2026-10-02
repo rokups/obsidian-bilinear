@@ -5,22 +5,12 @@ on:
   pull_request:
 
 jobs:
-  cli:
+  test:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: python -m unittest discover -s cli/tests -v
-      - run: python scripts/check_version.py
-
-  plugin:
-    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: plugin
@@ -35,6 +25,11 @@ jobs:
           cache: pnpm
           cache-dependency-path: plugin/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm test
       - run: pnpm build
+      - run: pnpm test
+      - run: node ../scripts/check_version.mjs
+      - name: The packed CLI runs
+        run: |
+          npm pack ../cli
+          npx --yes --package="$PWD"/obsidian-bilinear-*.tgz -- bilinear --version
+        shell: bash

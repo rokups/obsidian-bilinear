@@ -1,8 +1,10 @@
 name: Release
 
 # Pushing a tag that is exactly the plugin version (0.2.0, no "v") builds the
-# plugin and publishes a GitHub release with main.js, manifest.json and
-# styles.css attached. Obsidian and BRAT install from those three files.
+# plugin and the CLI and publishes a GitHub release with main.js,
+# manifest.json, styles.css and bilinear.js attached. Obsidian and BRAT
+# install from the first three. With an NPM_TOKEN secret the CLI is also
+# published to npm, where `npx obsidian-bilinear` finds it.
 on:
   push:
     tags:
@@ -14,29 +16,37 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - name: Check that the tag matches every version number
-        run: python3 scripts/check_version.py "$GITHUB_REF_NAME"
+        run: node scripts/check_version.mjs "$GITHUB_REF_NAME"
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: plugin/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          registry-url: https://registry.npmjs.org
           cache: pnpm
           cache-dependency-path: plugin/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: plugin
-      - run: pnpm test
-        working-directory: plugin
       - run: pnpm build
         working-directory: plugin
-      - run: python3 -m unittest discover -s cli/tests
+      - run: pnpm test
+        working-directory: plugin
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create "$GITHUB_REF_NAME"
-          plugin/dist/main.js plugin/dist/manifest.json plugin/dist/styles.css cli/bilinear.py
+          plugin/dist/main.js plugin/dist/manifest.json plugin/dist/styles.css cli/dist/bilinear.js
           --title "$GITHUB_REF_NAME" --generate-notes
+      - name: Publish the CLI to npm
+        if: env.NPM_TOKEN != ''
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+        working-directory: cli

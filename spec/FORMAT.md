@@ -1,8 +1,9 @@
 # Bilinear format
 
 This is the normative description of how a Bilinear tracker is stored. The
-Obsidian plugin (`plugin/`) and the CLI (`cli/bilinear.py`) both implement it,
-and both are tested against the cases in `spec/fixtures/`.
+Obsidian plugin (`plugin/`) and the CLI (`cli/`) both implement it, sharing
+the code for the format and the operations, and both are tested against the
+cases in `spec/fixtures/`.
 
 The words "must" and "must not" are requirements on the tools. Hand-edited
 files that break a rule are tolerated wherever this document says how.
@@ -399,9 +400,8 @@ plugin operation.
 - The file holds one line of JSON, `{"by": "cli", "pid": 4711, "token":
   "9f1c…"}`. Only `token` matters: a holder deletes the file on release only
   if it still holds its own token.
-- A holder keeps the file's modification time moving while it works: the
-  plugin touches it every 2 seconds, the CLI before each file it writes. A
-  lock file that a waiting program has seen
+- A holder touches the file (sets its modification time) every 2 seconds
+  while it works. A lock file that a waiting program has seen
   unchanged, contents and modification time, for 8 seconds was left by a
   program that died; the waiter deletes it and tries again. The 8 seconds are
   measured on the waiter's own clock.
@@ -420,10 +420,6 @@ plugin operation.
 
 Besides the lock file:
 
-- CLI against CLI: where the platform has `flock`, a command first takes it
-  on the tracker folder, then the lock file. The kernel releases `flock` when
-  a process dies, so CLI processes never depend on the 8-second rule among
-  themselves.
 - A CLI command that only reads goes ahead without the lock if the lock file
   cannot be created (a read-only folder). Its output is written after the
   lock is released, so a slow reader of that output does not hold the
@@ -450,8 +446,8 @@ writes in place: the file is emptied, then filled.
 - The CLI writes like this: read the file; work out the new contents; write
   them to a temp file in the same directory and `fsync` it; read the file
   again; if it changed, redo the operation on the new contents (up to three
-  attempts, then exit code 3); otherwise `os.replace` the temp file into
-  place. A reader sees the old contents or the new, never part of each. A
+  attempts, then exit code 3); otherwise rename the temp file over the
+  file. A reader sees the old contents or the new, never part of each. A
   file that is moved or deleted after the command has found it also ends the
   command with exit code 3; running it again works on what is there.
 - The editor saves its whole text two seconds after a keystroke, and would
@@ -499,11 +495,11 @@ Each directory in `spec/fixtures/` is one case:
   after/      the tracker folder expected afterwards
 ```
 
-Both test suites copy `before/`, apply the operation with their own
-implementation, and require the result to equal `after/` byte for byte (same
-set of files, same contents; empty directories are not compared). Trashed
-notes leave the tracker folder and are not compared. Both suites also check
-that parsing and re-serializing every `.md` file under `spec/fixtures/` is the
+The tests copy `before/`, apply the operation, once to the operations in
+memory and once through the command line on disk, and require the result to
+equal `after/` byte for byte (same set of files, same contents; empty
+directories are not compared). Trashed notes leave the tracker folder and are
+not compared. They also check that parsing and re-serializing every `.md` file under `spec/fixtures/` is the
 identity.
 
 `op.json`:

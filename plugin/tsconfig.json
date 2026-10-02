@@ -12,7 +12,8 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "noEmit": true,
+    "resolveJsonModule": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "tests/**/*.ts", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.vue", "tests/**/*.ts", "../cli/src/**/*.ts", "vite.config.ts", "vite.cli.config.ts"]
 }

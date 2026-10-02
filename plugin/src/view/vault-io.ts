@@ -1,6 +1,6 @@
 import { FileSystemAdapter, Platform, TFile, type App, type EventRef } from "obsidian";
 import type { TrackerIO } from "../ops/io";
-import { inTurn, inUse, withFileLock, type LockFs } from "./file-lock";
+import { inTurn, inUse, withFileLock, type LockFs } from "../ops/lock-file";
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 

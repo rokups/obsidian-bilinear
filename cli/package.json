@@ -1,0 +1,27 @@
+{
+  "name": "obsidian-bilinear",
+  "version": "0.1.0",
+  "description": "Command-line client for Bilinear, the Markdown issue tracker for Obsidian",
+  "type": "module",
+  "bin": {
+    "bilinear": "dist/bilinear.js"
+  },
+  "files": [
+    "dist/bilinear.js"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "obsidian",
+    "issue-tracker",
+    "markdown",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rokups/obsidian-bilinear.git",
+    "directory": "cli"
+  },
+  "homepage": "https://github.com/rokups/obsidian-bilinear#cli"
+}

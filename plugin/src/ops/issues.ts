@@ -24,7 +24,8 @@ export interface NewIssue {
 /** Property edits. null or [] removes a key; `parent` and `blocked-by` take IDs. */
 export type PropEdits = Record<string, Value>;
 
-function checkProps(idx: Index, props: PropEdits, selfId: string | null): void {
+/** Check values about to be written. Labels the tracker does not list only warn. */
+function checkProps(idx: Index, props: PropEdits, selfId: string | null, warn?: (message: string) => void): void {
   const str = (key: string) => (typeof props[key] === "string" ? (props[key] as string) : null);
   if ("title" in props && !str("title")) throw new OpError("title must not be empty");
   if ("status" in props) {
@@ -38,6 +39,10 @@ function checkProps(idx: Index, props: PropEdits, selfId: string | null): void {
   }
   for (const key of ["due", "created"]) {
     if (str(key) !== null && !validDate(str(key))) throw new OpError(`${key} must be a date in the form YYYY-MM-DD`);
+  }
+  const labels = props["labels"];
+  for (const label of Array.isArray(labels) ? labels : typeof labels === "string" ? [labels] : []) {
+    if (!idx.labels.includes(label)) warn?.(`warning: label '${label}' is not in the tracker's labels`);
   }
   const blocked = props["blocked-by"];
   const links = Array.isArray(blocked) ? [...blocked] : typeof blocked === "string" ? [blocked] : [];
@@ -79,7 +84,7 @@ export function createIssue(t: Tracker, args: NewIssue, today: string): Promise<
       parent: args.parent || null,
       created: today,
     };
-    checkProps(idx, props, null);
+    checkProps(idx, props, null, t.warn);
     if (props["parent"]) props["parent"] = makeLink(linkId(props["parent"] as string)!);
     const text = newNoteText(props);
 
@@ -110,33 +115,47 @@ export function createIssue(t: Tracker, args: NewIssue, today: string): Promise<
   });
 }
 
-export function setProps(t: Tracker, id: string, edits: PropEdits): Promise<void> {
+/**
+ * Change properties of an issue. The edits may be given as a function of the
+ * note as it is, for edits that depend on it (adding to a list).
+ */
+export function setProps(t: Tracker, id: string, edits: PropEdits | ((doc: Doc) => PropEdits)): Promise<void> {
   return locked(t, async () => {
     const idx = await readIndex(t);
     const item = requireItem(idx, id);
     const path = await resolveNote(t, id, item.archived);
     if (path === null) throw new OpError(`${id}: note missing`);
-    const props: PropEdits = { ...edits };
-    if (typeof props["title"] === "string") props["title"] = cleanTitle(props["title"]);
-    for (const [key, value] of Object.entries(props)) {
-      if (value === "" && key !== "title" && key !== "status") props[key] = null;
-    }
-    checkProps(idx, props, id);
-    if (typeof props["parent"] === "string") props["parent"] = makeLink(linkId(props["parent"])!);
-    const blocked = props["blocked-by"];
-    if (typeof blocked === "string") props["blocked-by"] = [makeLink(linkId(blocked)!)];
-    else if (Array.isArray(blocked)) props["blocked-by"] = blocked.map((v) => makeLink(linkId(v)!));
-
+    let title: string | null = null;
     await t.io.process(path, (text) => {
       const doc = new Doc(text);
+      const props: PropEdits = { ...(typeof edits === "function" ? edits(doc) : edits) };
+      if (typeof props["title"] === "string") props["title"] = cleanTitle(props["title"]);
+      for (const [key, value] of Object.entries(props)) {
+        if (value === "" && key !== "title" && key !== "status") props[key] = null;
+      }
+      const blocked = props["blocked-by"];
+      if (typeof blocked === "string") props["blocked-by"] = [blocked];
+      // Of the lists, only what this edit adds is checked: a link to an
+      // issue that has since been deleted must not stand in the way.
+      const added = (key: string, same: (a: string, b: string) => boolean): PropEdits => {
+        const value = props[key];
+        if (!Array.isArray(value)) return {};
+        const had = doc.getList(key);
+        return { [key]: value.filter((v) => !had.some((h) => same(h, v))) };
+      };
+      const sameLink = (a: string, b: string) => linkId(a) !== null && linkId(a) === linkId(b);
+      checkProps(idx, { ...props, ...added("labels", (a, b) => a === b), ...added("blocked-by", sameLink) }, id, t.warn);
+      if (typeof props["parent"] === "string") props["parent"] = makeLink(linkId(props["parent"])!);
+      if (Array.isArray(props["blocked-by"])) props["blocked-by"] = props["blocked-by"].map((v) => makeLink(linkId(v)!));
       for (const [key, value] of Object.entries(props)) {
         doc.set(key, Array.isArray(value) && value.length === 0 ? null : value);
       }
+      title = typeof props["title"] === "string" ? props["title"] : null;
       return doc.text();
     });
-    if (typeof props["title"] === "string") {
+    if (title !== null) {
       // Retitle: the note first, then the index line.
-      await updateIndex(t, () => {}, { known: new Map([[id, props["title"] as string]]) });
+      await updateIndex(t, () => {}, { known: new Map([[id, title]]) });
     }
   });
 }

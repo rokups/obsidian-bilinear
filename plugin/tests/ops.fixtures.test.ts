@@ -1,4 +1,5 @@
-// The shared cases of spec/fixtures, also run by cli/tests against the CLI.
+// The shared cases of spec/fixtures, against the operations in memory.
+// tests/cli.fixtures.test.ts runs the same cases through the command line.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";

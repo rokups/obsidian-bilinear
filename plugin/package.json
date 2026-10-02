@@ -7,9 +7,10 @@
   "packageManager": "pnpm@12.8.1",
   "scripts": {
     "dev": "vite build --watch --mode development",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "vue-tsc --noEmit && vite build && vite build --config vite.cli.config.ts",
     "typecheck": "vue-tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:cli": "vite build --config vite.cli.config.ts"
   },
   "engines": {
     "node": ">=22"

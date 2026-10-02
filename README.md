@@ -1,7 +1,7 @@
 # Bilinear
 
 A Linear-style issue tracker for Obsidian, stored as plain Markdown notes, with
-a Python CLI that works on the same files.
+a command-line client that works on the same files and runs through `npx`.
 
 A tracker is a folder: one index note that lists the issues in order, and one
 note per issue with its properties in frontmatter, kept in `issues/` while the
@@ -40,19 +40,29 @@ CLI are tested against the same cases in `spec/fixtures/`.
 | Path | Contents |
 |---|---|
 | `spec/` | `FORMAT.md` and the shared fixtures |
-| `cli/` | `bilinear.py` (single file, Python 3.12, stdlib only) and its tests |
-| `plugin/` | The Obsidian plugin: Vue 3, Vite, TypeScript |
+| `plugin/` | The Obsidian plugin (Vue 3, Vite, TypeScript), the format and operations code it shares with the CLI, and the tests of both |
+| `cli/` | The command-line client: `src/` and the npm package `obsidian-bilinear`. It builds to one file, `dist/bilinear.js`, with no dependencies |
 | `manifest.json`, `versions.json` | The plugin manifest and its version history, at the root where Obsidian tooling expects them |
 | `test-vault/` | A sample vault; the plugin build is linked into `.obsidian/plugins/bilinear` |
 | `docs/screenshots/` | Screenshots of `test-vault/` in Obsidian's dark theme |
 
 ## CLI
 
-Put it on your `PATH` as `bilinear`:
+The CLI needs Node 20 or later and nothing else. Run it without installing:
 
 ```sh
-ln -s "$PWD/cli/bilinear.py" ~/.local/bin/bilinear
+npx obsidian-bilinear list
 ```
+
+or install it once, which puts `bilinear` on your `PATH`:
+
+```sh
+npm install -g obsidian-bilinear
+```
+
+The examples below say `bilinear`; with `npx`, write `npx obsidian-bilinear`
+in its place. Each [release](https://github.com/rokups/obsidian-bilinear/releases)
+also carries the CLI as a single file, `bilinear.js`, that `node` runs as it is.
 
 ```sh
 bilinear init Trackers/Bilinear --prefix BL
@@ -136,15 +146,14 @@ and on the mobile apps:
 BRAT installs the latest [release](https://github.com/rokups/obsidian-bilinear/releases)
 and can keep it up to date. To install by hand instead, download `main.js`,
 `manifest.json` and `styles.css` from a release into
-`<vault>/.obsidian/plugins/bilinear/`. Each release also carries the CLI,
-`bilinear.py`.
+`<vault>/.obsidian/plugins/bilinear/`.
 
 ### Building
 
 ```sh
 cd plugin
 pnpm install
-pnpm build        # type check, then dist/main.js, styles.css, manifest.json
+pnpm build        # type check, then dist/main.js, styles.css, manifest.json and ../cli/dist/bilinear.js
 pnpm dev          # rebuild on change
 pnpm test
 ```
@@ -217,29 +226,32 @@ folder or when the vault has one tracker), `status`, `priority`, `label`,
 ## Releasing
 
 Set the new version in `manifest.json`, `plugin/package.json` and
-`cli/bilinear.py`, add it to `versions.json` with the minimum Obsidian version
-it needs, and check with `python3 scripts/check_version.py`. Commit, then tag
+`cli/package.json`, add it to `versions.json` with the minimum Obsidian version
+it needs, and check with `node scripts/check_version.mjs`. Commit, then tag
 the commit with the bare version and push the tag:
 
 ```sh
 git tag 0.2.0 && git push origin 0.2.0
 ```
 
-The release workflow tests and builds the plugin and publishes a GitHub release
-with the files attached.
+The release workflow tests and builds the plugin and the CLI, publishes a
+GitHub release with the files attached, and publishes the CLI to npm as
+`obsidian-bilinear` if the repository has an `NPM_TOKEN` secret.
 
 ## Testing
 
 ```sh
-python3 -m unittest discover -s cli/tests
-cd plugin && pnpm typecheck && pnpm test
+cd plugin && pnpm build && pnpm test
 ```
 
+The build comes first because one test runs several CLI processes at once
+from `cli/dist/bilinear.js`; it is skipped if that file is missing.
+
 Each case in `spec/fixtures/<case>/` is a `before/` tracker folder, an
-`op.json` describing one operation, and the `after/` folder expected. Both
-suites apply the operation with their own implementation and compare byte for
-byte; both also check that parsing and re-serializing every fixture file is
-the identity. The fixtures cover each operation, every row of the consistency
+`op.json` describing one operation, and the `after/` folder expected. The
+tests apply the operation twice, to the operations in memory and through the
+command line on disk, and compare byte for byte; they also check that parsing
+and re-serializing every fixture file is the identity. The fixtures cover each operation, every row of the consistency
 table, and the YAML variants Obsidian emits.
 
 `scripts/stress_obsidian.mjs` races the CLI against the plugin in a running
@@ -247,9 +259,9 @@ Obsidian: the plugin writing while the CLI reads, the reverse, both writing,
 and text being typed into a note while the CLI or the plugin edits it. Every
 edit carries its own marker, and the script reports each one that was
 acknowledged and is missing afterwards. It drives the plugin through
-`app.plugins.plugins.bilinear.ops`, the same operations the views use. Start
-Obsidian on a vault that has
-the plugin enabled with `--remote-debugging-port=9333`, then:
+`app.plugins.plugins.bilinear.ops`, the same operations the views use. Build
+first, start Obsidian on a vault that has the plugin enabled with
+`--remote-debugging-port=9333`, then:
 
 ```sh
 node scripts/stress_obsidian.mjs --vault /path/to/vault --seconds 20

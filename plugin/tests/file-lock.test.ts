@@ -1,12 +1,10 @@
-import { execFileSync, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { OpError } from "../src/ops/io";
-import { LOCK_FILE, WAIT_FILE, inTurn, withFileLock, type LockTimes } from "../src/view/file-lock";
+import { LOCK_FILE, WAIT_FILE, inTurn, withFileLock, type LockTimes } from "../src/ops/lock-file";
 
-const CLI = join(__dirname, "..", "..", "cli", "bilinear.py");
 const quick: LockTimes = { timeout: 300, stale: 150, heartbeat: 40, yield: 15, poll: 4 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -86,24 +84,8 @@ describe("the lock file", () => {
   });
 });
 
-describe("the lock file and the CLI", () => {
-  const cli = (timeout: string, ...args: string[]) =>
-    spawnSync("python3", [CLI, "--tracker", dir, ...args], { encoding: "utf8", env: { ...process.env, BILINEAR_LOCK_TIMEOUT: timeout } });
-
-  beforeEach(() => {
-    execFileSync("python3", [CLI, "init", dir, "--prefix", "BL"]);
-  });
-
-  it("keeps the CLI out, readers included, until it is released", async () => {
-    await withFileLock(fs, dir, async () => {
-      expect(cli("0.2", "new", "A").status).toBe(3);
-      expect(cli("0.2", "list").status).toBe(3);
-    });
-    expect(cli("0.2", "new", "A").stdout).toBe("BL-1\n");
-    expect(fs.existsSync(lockFile())).toBe(false);
-  });
-
-  it("waits for a lock file the CLI holds", async () => {
+describe("a lock file held by another program", () => {
+  it("is waited for", async () => {
     fs.writeFileSync(lockFile(), '{"by":"cli","pid":1,"token":"busy"}\n');
     setTimeout(() => fs.unlinkSync(lockFile()), 60);
     const started = Date.now();
