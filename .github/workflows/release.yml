@@ -1,15 +1,20 @@
 name: Release
 
-# Pushing a tag that is exactly the plugin version (0.2.0, no "v") builds the
-# plugin and the CLI and publishes a GitHub release with main.js,
-# manifest.json, styles.css and bilinear.js attached. Obsidian and BRAT
-# install from the first three. The CLI is also published to npm, where
-# `npx obsidian-bilinear` finds it. That uses npm's trusted publishing: npm
-# accepts the publish because it comes from this workflow in this repository
-# (set under the package's settings on npmjs.com), so there is no token.
+# Pushing a tag that is exactly the plugin version (0.2.0, no "v") builds and
+# tests the plugin and the CLI once, then publishes them in two jobs that do
+# not depend on each other:
 #
-# A release that stopped half way can be finished by running the workflow by
-# hand with the tag: steps that are already done are skipped.
+# - a GitHub release with main.js, manifest.json, styles.css and bilinear.js
+#   attached. Obsidian and BRAT install from the first three.
+# - the CLI on npm, where `npx obsidian-bilinear` finds it. That uses npm's
+#   trusted publishing: npm accepts the publish because it comes from this
+#   workflow in this repository (set under the package's settings on
+#   npmjs.com), so there is no token.
+#
+# Every step can be repeated. If one of the two fails, "Re-run failed jobs"
+# publishes what is missing from the same build. A tag from before this file
+# looked like this is finished by running the workflow by hand with the tag,
+# which uses this file rather than the one at the tag.
 on:
   push:
     tags:
@@ -20,15 +25,20 @@ on:
         description: The version tag to release, e.g. 0.2.0
         required: true
 
-permissions:
-  contents: write
-  id-token: write # lets npm verify that the publish comes from this workflow
+# One release of a tag at a time; a second run waits for the first.
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+
+permissions: {}
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
-    env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,7 +51,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
           cache: pnpm
           cache-dependency-path: plugin/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
@@ -50,21 +59,68 @@ jobs:
         working-directory: plugin
       - run: pnpm test
         working-directory: plugin
-      - name: Publish the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release view "$TAG" > /dev/null 2>&1 ||
-          gh release create "$TAG" --verify-tag
-          plugin/dist/main.js plugin/dist/manifest.json plugin/dist/styles.css cli/dist/bilinear.js
-          --title "$TAG" --generate-notes
-      - name: Publish the CLI to npm
-        # Trusted publishing needs npm 11.5.1 or later; Node 22 ships an older one.
+      - name: Collect what is published
         run: |
-          npm install -g npm@latest
+          mkdir release
+          cp plugin/dist/main.js plugin/dist/manifest.json plugin/dist/styles.css cli/dist/bilinear.js release/
+          (cd cli && npm pack --pack-destination ../release)
+          test -f "release/obsidian-bilinear-$TAG.tgz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: release/
+          if-no-files-found: error
+
+  github:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - name: Publish the release
+        # Made if it is not there yet; the files are attached either way, so
+        # a release that lost some of them is completed.
+        run: |
+          gh release view "$TAG" > /dev/null 2>&1 ||
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          gh release upload "$TAG" --clobber release/main.js release/manifest.json release/styles.css release/bilinear.js
+
+  npm:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # lets npm verify that the publish comes from this workflow
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Publish the CLI to npm
+        # Trusted publishing needs npm 11.5.1 or later; Node 22 ships an older
+        # one. The package is the one that was built and tested above.
+        run: |
+          npm install -g npm@11
           if npm view "obsidian-bilinear@$TAG" version > /dev/null 2>&1; then
             echo "obsidian-bilinear $TAG is already on npm"
           else
-            npm publish --access public
+            npm publish "release/obsidian-bilinear-$TAG.tgz" --access public
           fi
-        working-directory: cli
+      - name: Wait until npm serves it
+        # npm takes a few minutes to list a version it has accepted.
+        run: |
+          for attempt in $(seq 1 40); do
+            if [ "$(npm view "obsidian-bilinear@$TAG" version 2> /dev/null)" = "$TAG" ]; then exit 0; fi
+            sleep 15
+          done
+          echo "::warning::npm accepted obsidian-bilinear $TAG but does not list it after 10 minutes"

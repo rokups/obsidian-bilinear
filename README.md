@@ -258,13 +258,16 @@ the commit with the bare version and push the tag:
 git tag 0.2.0 && git push origin 0.2.0
 ```
 
-The release workflow tests and builds the plugin and the CLI, publishes a
-GitHub release with the files attached, and publishes the CLI to npm as
-`obsidian-bilinear`. The publish uses npm's trusted publishing, so there is no
-token to keep: on npmjs.com the package's settings name this repository and
-`release.yml` as its trusted publisher. If a release stops half way, run the
-workflow again by hand for the same tag (`gh workflow run release.yml -f
-tag=0.2.0`); what is already published is skipped.
+The release workflow builds and tests the plugin and the CLI once, then
+publishes them in two independent jobs: a GitHub release with the files
+attached, and the CLI on npm as `obsidian-bilinear`. The npm publish uses
+trusted publishing, so there is no token to keep: on npmjs.com the package's
+settings name this repository and `release.yml` as its trusted publisher.
+
+Every step can be repeated. If one of the two jobs fails, "Re-run failed jobs"
+publishes what is missing. The workflow can also be run by hand for a tag
+(`gh workflow run release.yml -f tag=0.2.0`); what is already published is
+skipped.
 
 ## Testing
 
