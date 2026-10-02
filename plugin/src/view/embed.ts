@@ -64,7 +64,10 @@ export class EmbedChild extends MarkdownRenderChild {
   private attach(opts: EmbedOptions): boolean {
     const file = this.resolve(opts.tracker);
     if (!file) {
-      this.state.error = opts.tracker
+      const several = this.candidates(opts.tracker);
+      this.state.error = several.length > 1
+        ? `Bilinear: "${opts.tracker ?? several[0].parent?.path}" holds several trackers; name one, such as 'tracker: ${several[0].path.replace(/\.md$/, "")}'`
+        : opts.tracker
         ? `Bilinear: no tracker found for "${opts.tracker}"`
         : "Bilinear: add a line such as 'tracker: Trackers/Bilinear', the path of an index note, to say which tracker to show";
       return false;
@@ -76,6 +79,15 @@ export class EmbedChild extends MarkdownRenderChild {
     this.unwatch = watch(store.snapshot, (snapshot) => (this.state.snapshot = snapshot), { immediate: true });
     store.start();
     return true;
+  }
+
+  /** The trackers a folder or a name could mean, or with no name those around the note. */
+  private candidates(name: string | null): TFile[] {
+    if (!name) return this.plugin.trackersAround(this.sourcePath);
+    const wanted = name.replace(/^\/+|\/+$/g, "").replace(/\.md$/, "");
+    const trackers = this.plugin.findTrackers();
+    const inFolder = trackers.filter((t) => folderOf(t) === wanted);
+    return inFolder.length ? inFolder : trackers.filter((t) => t.basename === wanted);
   }
 
   private resolve(name: string | null): TFile | null {
