@@ -116,11 +116,3 @@ jobs:
           else
             npm publish "./release/obsidian-bilinear-$TAG.tgz" --access public
           fi
-      - name: Wait until npm serves it
-        # npm takes a few minutes to list a version it has accepted.
-        run: |
-          for attempt in $(seq 1 40); do
-            if [ "$(npm view "obsidian-bilinear@$TAG" version 2> /dev/null)" = "$TAG" ]; then exit 0; fi
-            sleep 15
-          done
-          echo "::warning::npm accepted obsidian-bilinear $TAG but does not list it after 10 minutes"
