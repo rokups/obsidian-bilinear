@@ -398,9 +398,9 @@ button.bl-filter-chip {
   opacity: 0;
 }
 
-.bl-row:hover .bl-check,
-.bl-check.is-on,
-.bl-check:focus-visible {
+.bl-root .bl-row:hover button.bl-check,
+.bl-root button.bl-check.is-on,
+.bl-root button.bl-check:focus-visible {
   opacity: 1;
 }
 
