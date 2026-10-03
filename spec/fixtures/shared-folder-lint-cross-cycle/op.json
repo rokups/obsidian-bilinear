@@ -1,0 +1,12 @@
+{
+  "op": "lint",
+  "tracker": "Tracker.md",
+  "args": {
+    "fix": true
+  },
+  "expect": {
+    "problems": [
+      "blocked-by-cycle:BL-9"
+    ]
+  }
+}

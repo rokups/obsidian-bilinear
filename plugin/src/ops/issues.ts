@@ -8,7 +8,7 @@ import { addComment, newNoteText } from "../format/issue-note";
 import { Doc, type Value } from "../format/yaml";
 import { reaches } from "../store/query";
 import { OpError, basename, dirname, joinPath, type Tracker, type TrackerIO } from "./io";
-import { allRecords, folderOf, found, issueRecord, locked, moveNote, noteIds, notePath, otherTrackers, ownerOf, pathIn, readIndex, requireItem, resolveNote, trackersIn, updateIndex } from "./tracker";
+import { allRecords, folderOf, found, issueRecord, linkTargets, listedIn, locked, moveNote, noteIds, notePath, otherTrackers, ownerOf, pathIn, readIndex, requireItem, resolveNote, trackersIn, updateIndex, usableSiblings, type Sibling } from "./tracker";
 
 export interface NewIssue {
   title: string;
@@ -29,8 +29,8 @@ export interface NewIssue {
 /** Property edits. null or [] removes a key; `blocked-by` and `related-to` take IDs, and a string for a list is a list of one. */
 export type PropEdits = Record<string, Value>;
 
-/** Check values about to be written. Labels the tracker does not list only warn. */
-function checkProps(idx: Index, props: PropEdits, selfId: string | null, warn?: (message: string) => void): void {
+/** Check values about to be written. Labels the tracker does not list only warn. `linked` says which IDs a link may name. */
+function checkProps(idx: Index, props: PropEdits, selfId: string | null, linked: (id: string) => boolean, warn?: (message: string) => void): void {
   const str = (key: string) => (typeof props[key] === "string" ? (props[key] as string) : null);
   if ("title" in props && !str("title")) throw new OpError("title must not be empty");
   if ("status" in props) {
@@ -57,7 +57,7 @@ function checkProps(idx: Index, props: PropEdits, selfId: string | null, warn?: 
     const target = linkId(link);
     if (target === null) throw new OpError(`'${link}' is not an issue ID`);
     if (target === selfId) throw new OpError(`${target}: an issue cannot refer to itself`);
-    if (!idx.find(target)) throw new OpError(`${target}: no such issue`);
+    if (!linked(target)) throw new OpError(`${target}: no such issue`);
   }
 }
 
@@ -104,7 +104,7 @@ export function createIssue(t: Tracker, args: NewIssue, today: string): Promise<
       "related-to": args.relatedTo ?? [],
       created: today,
     };
-    checkProps(idx, props, null, t.warn);
+    checkProps(idx, props, null, await linkTargets(t, idx), t.warn);
     for (const key of LINK_LIST_KEYS) props[key] = (props[key] as string[]).map((v) => makeLink(linkId(v)!));
     // No cycle check: nothing can link to an issue that does not exist yet.
     const text = newNoteText(props, args.description);
@@ -136,9 +136,9 @@ export function createIssue(t: Tracker, args: NewIssue, today: string): Promise<
   });
 }
 
-/** Drop `other` from the `related-to` of `id`'s note, if the note names it. A missing note is skipped. */
-async function dropRelated(t: Tracker, idx: Index, id: string, other: string): Promise<void> {
-  const item = idx.find(id);
+/** Drop `other` from the `related-to` of `id`'s note, if the note names it. `id` may belong to one of the sibling trackers. A missing note is skipped. */
+async function dropRelated(t: Tracker, idx: Index, siblings: Sibling[], id: string, other: string): Promise<void> {
+  const item = idx.find(id) ?? siblings.find((s) => s.index.find(id) !== undefined)?.index.find(id);
   if (!item) return;
   const path = await resolveNote(t, id, item.archived);
   if (path === null) return;
@@ -169,6 +169,11 @@ export function setProps(t: Tracker, id: string, edits: PropEdits | ((doc: Doc) 
     const first = await t.io.read(path);
     if (first === null) throw new OpError(`${id}: note missing`);
 
+    // The other trackers are read only for edits that name links, and then once.
+    const peek = typeof edits === "function" ? edits(new Doc(first)) : edits;
+    const others = LINK_LIST_KEYS.some((key) => key in peek) ? await otherTrackers(t) : null;
+    const linked = others === null ? (id: string) => idx.find(id) !== undefined : listedIn(idx, others);
+
     // What the edits make of a note's text; run on the text as read, to check
     // before anything is written, and on the text as it is when writing.
     const plan = (text: string, warn?: (message: string) => void) => {
@@ -191,7 +196,7 @@ export function setProps(t: Tracker, id: string, edits: PropEdits | ((doc: Doc) 
       };
       const sameLink = (a: string, b: string) => linkId(a) !== null && linkId(a) === linkId(b);
       const addedLinks = Object.assign({}, ...LINK_LIST_KEYS.map((key) => added(key, sameLink)));
-      checkProps(idx, { ...props, ...added("labels", (a, b) => a === b), ...addedLinks }, id, warn);
+      checkProps(idx, { ...props, ...added("labels", (a, b) => a === b), ...addedLinks }, id, linked, warn);
       const newBlockers: string[] = ((addedLinks["blocked-by"] as string[] | undefined) ?? []).map((v) => linkId(v)!);
       for (const key of LINK_LIST_KEYS) {
         if (Array.isArray(props[key])) props[key] = props[key].map((v) => makeLink(linkId(v)!));
@@ -205,9 +210,9 @@ export function setProps(t: Tracker, id: string, edits: PropEdits | ((doc: Doc) 
 
     const planned = plan(first, t.warn);
     if (planned.newBlockers.length) {
-      const { records } = await allRecords(t, idx);
+      const { records, foreign } = await allRecords(t, idx, others ?? undefined);
       for (const b of planned.newBlockers) {
-        if (reaches(records, b, id)) throw new OpError(`${id}: would block itself through ${b}`);
+        if (reaches(records, b, id, foreign)) throw new OpError(`${id}: would block itself through ${b}`);
       }
     }
 
@@ -222,7 +227,10 @@ export function setProps(t: Tracker, id: string, edits: PropEdits | ((doc: Doc) 
       unrelated = gone;
       return doc.text();
     });
-    for (const other of unrelated) await dropRelated(t, idx, other, id);
+    if (unrelated.length) {
+      const siblings = usableSiblings(idx, others ?? (await otherTrackers(t)));
+      for (const other of unrelated) await dropRelated(t, idx, siblings, other, id);
+    }
     if (title !== null) {
       // Retitle: the note first, then the index line.
       await updateIndex(t, () => {}, { known: new Map([[id, title]]) });
@@ -235,8 +243,9 @@ export function unrelate(t: Tracker, id: string, other: string): Promise<void> {
   return locked(t, async () => {
     const idx = await readIndex(t);
     requireItem(idx, id);
-    await dropRelated(t, idx, id, other);
-    await dropRelated(t, idx, other, id);
+    const siblings = usableSiblings(idx, await otherTrackers(t));
+    await dropRelated(t, idx, siblings, id, other);
+    await dropRelated(t, idx, siblings, other, id);
   });
 }
 
@@ -295,7 +304,8 @@ export function archiveClosed(t: Tracker): Promise<string[]> {
 
 /**
  * Delete an issue: first clear `blocked-by` and `related-to`
- * entries naming it from the other notes (those that do not are not
+ * entries naming it from the other notes, those of the sibling
+ * trackers too (those that do not name it are not
  * touched; `[[ID]]` mentions in descriptions stay), then trash the note
  * (wherever it is) and remove the index line.
  */
@@ -303,10 +313,10 @@ export function deleteIssue(t: Tracker, id: string): Promise<void> {
   return locked(t, async () => {
     const idx = await readIndex(t);
     requireItem(idx, id);
-    const { records } = await allRecords(t, idx);
+    const { records, foreign } = await allRecords(t, idx);
     // The note goes first: if this stops halfway, lint reports what is left.
     for (const where of await found(t, id)) await t.io.trash(pathIn(t, id, where));
-    for (const r of records) {
+    for (const r of [...records, ...foreign]) {
       if (r.id === id || r.path === null) continue;
       if (!r.blockedBy.includes(id) && !r.relatedTo.includes(id)) continue;
       await t.io.process(r.path, (text) => {

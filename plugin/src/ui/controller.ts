@@ -5,7 +5,7 @@ import { COLOR_NAMES, PRIORITIES, todayIso } from "../format/ids";
 import type { IssueRecord } from "../format/record";
 import type { Tracker } from "../ops/io";
 import { archiveClosed, archiveIssues, commentIssue, deleteIssue, moveIssue, recreateNote, setLabel, setProps, unarchiveIssues, unrelate, type PropEdits } from "../ops/issues";
-import { applyFilter, groupIssues, groupProperty, issueRelations, linkedProgress, sortIssues, type Filter, type GroupKey, type ViewSpec } from "../store/query";
+import { applyFilter, groupIssues, groupProperty, issueRelations, linkedProgress, makeClosed, sortIssues, type Filter, type GroupKey, type TrackerConfig, type ViewSpec } from "../store/query";
 import { labelColorName } from "../store/labels";
 import type { Snapshot } from "../store/snapshot";
 import type { SavedView } from "../store/views";
@@ -64,6 +64,26 @@ export function createController(store: StoreLike, host: Host, initial: ViewSpec
   const config = computed(() => snapshot.value.config);
   const all = computed(() => [...snapshot.value.issues, ...snapshot.value.archived]);
   const byId = computed(() => new Map(all.value.map((i) => [i.id, i])));
+  /** Issues of the sibling trackers, open and archived: only to look links up in, never acted on. */
+  const foreign = computed(() => snapshot.value.siblings.flatMap((s) => [...s.issues, ...s.archived]));
+  /** Own issues and sibling ones by ID, for what a link names; an own issue wins. */
+  const linkable = computed(() => new Map([...foreign.value, ...all.value].map((i) => [i.id, i])));
+  /** Whether an issue is in a closed state of the tracker it belongs to. */
+  const isClosed = computed(() => makeClosed(config.value.prefix, config.value.closedStates, snapshot.value.siblings.map((s) => ({ ...s.config, listed: new Set([...s.issues, ...s.archived].map((i) => i.id)) }))));
+  /** The sibling tracker each foreign issue belongs to, by ID; an ID an own issue has is not in it. */
+  const siblingOf = computed(() => {
+    const out = new Map<string, Snapshot["siblings"][number]>();
+    for (const s of snapshot.value.siblings) for (const i of [...s.issues, ...s.archived]) if (!out.has(i.id) && !byId.value.has(i.id)) out.set(i.id, s);
+    return out;
+  });
+  /** The name of the sibling tracker a linked issue belongs to; null for an own issue or an unknown ID. */
+  function trackerOf(id: string): string | null {
+    return siblingOf.value.get(id)?.name ?? null;
+  }
+  /** The config of the tracker a linked issue belongs to (its states, colours and icons); this one's if unknown. */
+  function configOf(id: string): TrackerConfig {
+    return siblingOf.value.get(id)?.config ?? config.value;
+  }
   const source = computed(() => (showArchived.value ? snapshot.value.archived : snapshot.value.issues));
   const visible = computed(() => sortIssues(applyFilter(source.value, spec.filter), spec.sortBy));
   /** A board needs columns that stand for a property; fall back to status. */
@@ -72,8 +92,8 @@ export function createController(store: StoreLike, host: Host, initial: ViewSpec
   const order = computed<RowRef[]>(() =>
     groups.value.flatMap((g) => (spec.layout === "list" && collapsed.has(g.key) ? [] : g.issues.map((i) => ({ id: i.id, group: g.key })))),
   );
-  const progress = computed(() => linkedProgress(all.value, config.value.closedStates));
-  const relations = computed(() => issueRelations(all.value, config.value.closedStates));
+  const progress = computed(() => linkedProgress(all.value, isClosed.value, foreign.value));
+  const relations = computed(() => issueRelations(all.value, isClosed.value, foreign.value));
   const canReorder = computed(() => spec.sortBy === "manual" && !showArchived.value);
   const assignees = computed(() => [...new Set(all.value.map((i) => i.assignee).filter((a): a is string => !!a))].sort((a, b) => a.localeCompare(b)));
   const labels = computed(() => [...new Set([...config.value.labels, ...all.value.flatMap((i) => i.labels)])]);
@@ -405,7 +425,7 @@ export function createController(store: StoreLike, host: Host, initial: ViewSpec
 
   return {
     store, host, spec, showArchived, cursor, selected, collapsed, picker, dragging, dropHint, activeView, busy,
-    snapshot, config, all, byId, visible, groupBy, groups, order, progress, relations, canReorder, assignees, labels,
+    snapshot, config, all, byId, foreign, linkable, isClosed, trackerOf, configOf, visible, groupBy, groups, order, progress, relations, canReorder, assignees, labels,
     priorities: PRIORITIES as readonly string[],
     isCursor, setCursor, moveCursor, toggleSelect, selectRange, clearSelection, targets, cursorIssue, reveal,
     edit, openPicker, closePicker, allHaveLabel, allHaveRelation, pick, labelMenu,

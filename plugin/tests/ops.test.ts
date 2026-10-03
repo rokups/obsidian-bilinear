@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { OpError, type Tracker } from "../src/ops/io";
 import { adoptIssue, archiveIssues, commentIssue, createIssue, createTracker, deleteIssue, moveIssue, recreateNote, setLabel, setProps, unarchiveIssues, unrelate } from "../src/ops/issues";
 import { lint } from "../src/ops/lint";
-import { listIssues } from "../src/ops/tracker";
+import { allRecords, listIssues, readIndex } from "../src/ops/tracker";
 import { parseEmbed } from "../src/view/embed-options";
 import { MemoryIO } from "./memory-io";
 
@@ -77,6 +77,183 @@ describe("several trackers in one folder", () => {
     io.files.set("T/Bilinear/issues/XX-1.md", "---\ntitle: Stray\nstatus: todo\n---\n");
     await adoptIssue(t, "XX-1");
     expect(await problems(t)).toEqual(["warning:prefix-mismatch:XX-1"]);
+  });
+
+  describe("links between the trackers", () => {
+    beforeEach(async () => {
+      await createIssue(t, { title: "A" }, "2026-10-01");
+      await createIssue(t, { title: "B" }, "2026-10-01");
+      await createIssue(other, { title: "C" }, "2026-10-01");
+      await createIssue(other, { title: "D" }, "2026-10-01");
+    });
+    const note = (id: string) => io.files.get(`T/Bilinear/issues/${id}.md`)!;
+
+    it("accepts an issue of the other tracker in blocked-by and related-to, when creating and when setting", async () => {
+      const id = await createIssue(t, { title: "E", blockedBy: ["OT-1"], relatedTo: ["OT-2"] }, "2026-10-01");
+      expect(note(id)).toContain('blocked-by: ["[[OT-1]]"]');
+      expect(note(id)).toContain('related-to: ["[[OT-2]]"]');
+      await setProps(t, "BL-1", { "blocked-by": ["OT-1"], "related-to": "OT-2" });
+      expect(note("BL-1")).toContain('blocked-by: ["[[OT-1]]"]');
+      expect(note("BL-1")).toContain('related-to: ["[[OT-2]]"]');
+      await setProps(other, "OT-2", { "blocked-by": ["BL-2"], "related-to": ["BL-1"] });
+      expect(note("OT-2")).toContain('blocked-by: ["[[BL-2]]"]');
+    });
+
+    it("still refuses an ID that no tracker of the folder lists, and an issue linked to itself", async () => {
+      await expect(createIssue(t, { title: "E", blockedBy: ["OT-9"] }, "2026-10-01")).rejects.toThrow(/OT-9: no such issue/);
+      await expect(createIssue(t, { title: "E", relatedTo: ["XX-1"] }, "2026-10-01")).rejects.toThrow(/XX-1: no such issue/);
+      await expect(setProps(t, "BL-1", { "blocked-by": ["OT-9"] })).rejects.toThrow(/OT-9: no such issue/);
+      await expect(setProps(t, "BL-1", { "related-to": ["OT-9"] })).rejects.toThrow(/OT-9: no such issue/);
+      await expect(setProps(t, "BL-1", { "blocked-by": ["BL-1"] })).rejects.toThrow(/cannot refer to itself/);
+    });
+
+    it("refuses a cycle that passes through the other tracker, whichever tracker the edit is made in", async () => {
+      await setProps(t, "BL-1", { "blocked-by": ["OT-1"] });
+      await expect(setProps(other, "OT-1", { "blocked-by": ["BL-1"] })).rejects.toThrow(/OT-1: would block itself through BL-1/);
+      await setProps(other, "OT-2", { "blocked-by": ["BL-2"] });
+      await expect(setProps(t, "BL-2", { "blocked-by": ["OT-2"] })).rejects.toThrow(/BL-2: would block itself through OT-2/);
+      await setProps(t, "BL-2", { "blocked-by": ["BL-1"] });
+      await expect(setProps(other, "OT-1", { "blocked-by": ["OT-2"] })).rejects.toThrow(/would block itself/);
+      expect(note("OT-1")).not.toContain("blocked-by");
+    });
+
+    it("judges a blocker of the other tracker by that tracker's closed states", async () => {
+      io.files.set(other.indexPath, io.files.get(other.indexPath)!.replace(/^closed-states:.*$/m, "closed-states: [shipped]").replace(/^states:.*$/m, "states: [todo, shipped, done]"));
+      await setProps(other, "OT-1", { status: "done" });
+      await setProps(other, "OT-2", { status: "shipped" });
+      await setProps(t, "BL-1", { "blocked-by": ["OT-1"] });
+      await setProps(t, "BL-2", { "blocked-by": ["OT-2"] });
+      const own = await allRecords(t, await readIndex(t));
+      expect(own.foreign.map((r) => r.id)).toEqual(["OT-1", "OT-2"]);
+      expect(own.relations.get("BL-1")!.blocked).toBe(true);
+      expect(own.relations.get("BL-2")!.blocked).toBe(false);
+      expect(own.progress.get("BL-1")).toMatchObject({ done: 0, total: 1 });
+      expect(own.progress.get("BL-2")).toMatchObject({ done: 1, total: 1 });
+      expect(own.records.map((r) => r.id)).toEqual(["BL-1", "BL-2"]);
+      expect(own.closed(own.foreign[1])).toBe(true);
+      const theirs = await allRecords(other, await readIndex(other));
+      expect(theirs.relations.get("OT-2")!.blocks).toEqual(["BL-2"]);
+    });
+
+    it("scans the folder for the other trackers only for an edit that names links, and once per call", async () => {
+      let scans = 0;
+      const listNotes = io.listNotes.bind(io);
+      io.listNotes = async (dir: string) => (scans++, listNotes(dir));
+      await setProps(t, "BL-1", { status: "done" });
+      expect(scans).toBe(0);
+      await setProps(t, "BL-1", { "blocked-by": ["OT-1"] });
+      expect(scans).toBe(1);
+      scans = 0;
+      await setProps(t, "BL-2", { "related-to": ["OT-2"] });
+      await setProps(t, "BL-2", { "related-to": [] });
+      expect(scans).toBe(2);
+    });
+
+    it("judges an own issue with a mismatched prefix by this tracker's closed states", async () => {
+      io.files.set("T/Bilinear/issues/XX-1.md", "---\ntitle: Stray\nstatus: todo\n---\n");
+      await adoptIssue(t, "XX-1");
+      await setProps(t, "XX-1", { status: "done" });
+      await setProps(t, "BL-1", { "blocked-by": ["XX-1"] });
+      const own = await allRecords(t, await readIndex(t));
+      expect(own.relations.get("BL-1")!.blocked).toBe(false);
+      expect(own.progress.get("BL-1")).toMatchObject({ done: 1, total: 1 });
+    });
+
+    it("judges an issue another tracker adopted with a mismatched prefix by that tracker's closed states", async () => {
+      io.files.set(other.indexPath, io.files.get(other.indexPath)!.replace(/^closed-states:.*$/m, "closed-states: [shipped]").replace(/^states:.*$/m, "states: [todo, shipped, done]"));
+      io.files.set("T/Bilinear/issues/XX-1.md", "---\ntitle: Stray\nstatus: done\n---\n");
+      await adoptIssue(other, "XX-1");
+      await setProps(t, "BL-1", { "blocked-by": ["XX-1"] });
+      const own = await allRecords(t, await readIndex(t));
+      expect(own.relations.get("BL-1")!.blocked).toBe(true);
+      expect(own.progress.get("BL-1")).toMatchObject({ done: 0, total: 1 });
+    });
+
+    it("unrelate reaches the note of an issue another tracker adopted with a mismatched prefix", async () => {
+      io.files.set("T/Bilinear/issues/XX-1.md", '---\ntitle: Stray\nstatus: todo\nrelated-to: ["[[BL-1]]"]\n---\n');
+      await adoptIssue(other, "XX-1");
+      await unrelate(t, "BL-1", "XX-1");
+      expect(note("XX-1")).not.toContain("related-to");
+    });
+
+    it("lints an ID that no tracker of the folder lists as unknown, and one of the other tracker as fine", async () => {
+      io.files.set("T/Bilinear/issues/BL-1.md", note("BL-1").replace("created:", 'blocked-by: ["[[OT-1]]", "[[OT-9]]"]\nrelated-to: ["[[OT-2]]", "[[XX-1]]"]\ncreated:'));
+      expect((await lint(t, false)).map((p) => `${p.code}:${p.id}:${p.message}`)).toEqual([
+        "blocked-by-unknown:BL-1:blocked-by OT-9 is not in the index",
+        "related-to-unknown:BL-1:related-to XX-1 is not in the index",
+      ]);
+      expect(await problems(other)).toEqual([]);
+    });
+
+    it("reports a cycle through the other tracker on this tracker's issues only", async () => {
+      io.files.set("T/Bilinear/issues/BL-1.md", note("BL-1").replace("created:", 'blocked-by: ["[[OT-1]]"]\ncreated:'));
+      io.files.set("T/Bilinear/issues/OT-1.md", note("OT-1").replace("created:", 'blocked-by: ["[[BL-1]]"]\ncreated:'));
+      io.files.set("T/Bilinear/issues/BL-2.md", note("BL-2").replace("created:", 'blocked-by: ["[[OT-1]]"]\ncreated:'));
+      expect(await problems(t)).toEqual(["error:blocked-by-cycle:BL-1"]);
+      expect(await problems(other)).toEqual(["error:blocked-by-cycle:OT-1"]);
+    });
+
+    it("removing a related-to of the other tracker, by editing or by unrelate, removes the reciprocal entry", async () => {
+      await setProps(t, "BL-1", { "related-to": ["OT-1", "BL-2"] });
+      await setProps(other, "OT-1", { "related-to": ["BL-1", "OT-2"] });
+      await setProps(t, "BL-1", { "related-to": ["BL-2"] });
+      expect(note("BL-1")).not.toContain("OT-1");
+      expect(note("OT-1")).toContain('related-to: ["[[OT-2]]"]');
+      await setProps(t, "BL-1", { "related-to": ["OT-1"] });
+      await setProps(other, "OT-1", { "related-to": ["BL-1", "OT-2"] });
+      await setProps(other, "OT-1", { "related-to": ["OT-2"] });
+      expect(note("BL-1")).not.toContain("related-to");
+      await setProps(t, "BL-1", { "related-to": ["OT-1"] });
+      await setProps(other, "OT-1", { "related-to": ["BL-1"] });
+      await unrelate(t, "BL-1", "OT-1");
+      expect(note("BL-1")).not.toContain("related-to");
+      expect(note("OT-1")).not.toContain("related-to");
+      await setProps(other, "OT-2", { "related-to": ["BL-2"] });
+      await unrelate(other, "OT-2", "BL-2");
+      expect(note("OT-2")).not.toContain("related-to");
+    });
+
+    it("removing a related-to that only the other tracker's note declares edits that note", async () => {
+      await setProps(other, "OT-1", { "related-to": ["BL-1"] });
+      await setProps(t, "BL-1", { "related-to": ["OT-2"] });
+      await setProps(t, "BL-1", { "related-to": null });
+      expect(note("OT-1")).toContain('related-to: ["[[BL-1]]"]');
+      await setProps(other, "OT-1", { "related-to": null });
+      expect(note("OT-1")).not.toContain("related-to");
+      expect(note("OT-2")).not.toContain("BL-1");
+      await setProps(other, "OT-2", { "related-to": ["BL-1"] });
+      await unrelate(t, "BL-1", "OT-2");
+      expect(note("OT-2")).not.toContain("related-to");
+    });
+
+    it("deleting an issue clears the links to it from the other tracker's notes, and writes no other", async () => {
+      await setProps(other, "OT-1", { "blocked-by": ["BL-1", "BL-2"], "related-to": ["BL-1"] });
+      await setProps(other, "OT-2", { "related-to": ["BL-2"] });
+      await archiveIssues(other, ["OT-2"]);
+      await setProps(other, "OT-2", { "blocked-by": ["BL-1"] });
+      const before = new Map(io.files);
+      await deleteIssue(t, "BL-1");
+      expect(note("OT-1")).toContain('blocked-by: ["[[BL-2]]"]');
+      expect(note("OT-1")).not.toContain("related-to");
+      expect(io.files.get("T/Bilinear/archive/OT-2.md")).not.toContain("blocked-by");
+      expect(io.files.get("T/Bilinear/archive/OT-2.md")).toContain('related-to: ["[[BL-2]]"]');
+      for (const path of ["T/Bilinear/issues/OT-1.md", "T/Bilinear/archive/OT-2.md"]) expect(io.files.get(path)).not.toContain("BL-1");
+      expect(io.files.get("T/Bilinear/issues/BL-2.md")).toBe(before.get("T/Bilinear/issues/BL-2.md"));
+      await deleteIssue(other, "OT-1");
+      expect(await problems(t)).toEqual([]);
+    });
+
+    it("deleting leaves the other tracker's notes that do not name the issue as they are", async () => {
+      await setProps(other, "OT-1", { "blocked-by": ["BL-2"] });
+      const before = new Map(io.files);
+      await deleteIssue(t, "BL-1");
+      for (const path of ["T/Bilinear/issues/OT-1.md", "T/Bilinear/issues/OT-2.md"]) expect(io.files.get(path)).toBe(before.get(path));
+    });
+
+    it("leaves out a tracker whose prefix another also has", async () => {
+      io.files.set("T/Bilinear/Third.md", io.files.get(other.indexPath)!);
+      expect((await allRecords(t, await readIndex(t))).foreign).toEqual([]);
+    });
   });
 
   it("reports an issue listed in a tracker whose prefix is another's, and a prefix that two share", async () => {

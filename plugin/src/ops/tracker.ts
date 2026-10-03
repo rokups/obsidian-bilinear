@@ -4,7 +4,7 @@ import { ARCHIVE_DIR, ID_RE, ISSUES_DIR, LOCATIONS, cleanTitle, type Location } 
 import { Index, type Item } from "../format/index-note";
 import { recordFromDoc, type IssueRecord } from "../format/record";
 import { Doc } from "../format/yaml";
-import { issueRelations, linkedProgress, type Progress, type Relations } from "../store/query";
+import { issueRelations, linkedProgress, makeClosed, type ClosedFn, type Progress, type Relations } from "../store/query";
 import { OpError, joinPath, type Tracker } from "./io";
 
 export function place(archived: boolean): Location {
@@ -153,17 +153,54 @@ export function listIssues(t: Tracker): Promise<IssueRecord[]> {
   });
 }
 
-/** A record for every issue, open and archived, and the progress and relations of each. To be called holding the lock. */
-export async function allRecords(t: Tracker, idx: Index): Promise<{ records: IssueRecord[]; progress: Map<string, Progress>; relations: Map<string, Relations> }> {
+/**
+ * A record for every issue, open and archived, and the progress and relations of each. To be called holding the lock.
+ * `foreign` holds the issues of the other trackers of the folder, which this one's issues may link to; `closed`
+ * judges any of them by the `closed-states` of the tracker they belong to. `others` are the other trackers of the folder, if already read.
+ */
+export async function allRecords(
+  t: Tracker,
+  idx: Index,
+  others?: Sibling[],
+): Promise<{ records: IssueRecord[]; foreign: IssueRecord[]; closed: ClosedFn; progress: Map<string, Progress>; relations: Map<string, Relations> }> {
   const records: IssueRecord[] = [];
   for (const it of idx.unique()) records.push(await issueRecord(t, it));
-  return { records, progress: linkedProgress(records, idx.closedStates), relations: issueRelations(records, idx.closedStates) };
+  const usable = usableSiblings(idx, others ?? (await otherTrackers(t)));
+  const foreign = await siblingRecords(t, usable);
+  const closed = makeClosed(idx.prefix, idx.closedStates, usable.map((s) => ({ prefix: s.prefix, closedStates: s.index.closedStates, listed: new Set(s.index.unique().map((it) => it.id)) })));
+  return { records, foreign, closed, progress: linkedProgress(records, closed, foreign), relations: issueRelations(records, closed, foreign) };
 }
 
-/** An index note of a folder, and its prefix: null if it has none that is valid. */
+/** The trackers among these whose issues this one's may link to as theirs: those whose prefix is valid, is not this one's and is not shared. */
+export function usableSiblings(idx: Index, others: Sibling[]): Sibling[] {
+  const siblings = others.filter((s) => s.prefix !== null && s.prefix !== idx.prefix);
+  return siblings.filter((s) => siblings.filter((other) => other.prefix === s.prefix).length === 1);
+}
+
+/** The records, archived included, of the issues of these trackers. */
+export async function siblingRecords(t: Tracker, siblings: Sibling[]): Promise<IssueRecord[]> {
+  const out: IssueRecord[] = [];
+  for (const s of siblings) {
+    for (const it of s.index.unique()) out.push(await issueRecord(t, it));
+  }
+  return out;
+}
+
+/** Whether an ID may be linked to from this tracker's issues: the index of this tracker or of another in its folder lists it. */
+export async function linkTargets(t: Tracker, idx: Index): Promise<(id: string) => boolean> {
+  return listedIn(idx, await otherTrackers(t));
+}
+
+/** Whether an ID is listed by this index or by one of these trackers. */
+export function listedIn(idx: Index, others: Sibling[]): (id: string) => boolean {
+  return (id) => idx.find(id) !== undefined || others.some((s) => s.index.find(id) !== undefined);
+}
+
+/** An index note of a folder, its prefix (null if it has none that is valid) and the index itself. */
 export interface Sibling {
   path: string;
   prefix: string | null;
+  index: Index;
 }
 
 /** The trackers of a folder: its top-level notes that carry `bilinear: tracker`, the folder-named note first, then by name. */
@@ -175,7 +212,7 @@ export async function trackersIn(io: Tracker["io"], dir: string): Promise<Siblin
     const text = await io.read(path);
     if (text === null) continue;
     const idx = new Index(text);
-    if (idx.isTracker()) found.push({ path, prefix: idx.prefix });
+    if (idx.isTracker()) found.push({ path, prefix: idx.prefix, index: idx });
   }
   const folderName = dir.slice(dir.lastIndexOf("/") + 1);
   const rank = (s: Sibling) => (s.path === joinPath(dir, `${folderName}.md`) ? 0 : 1);

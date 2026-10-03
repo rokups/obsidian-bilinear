@@ -1,0 +1,10 @@
+{
+  "op": "lint",
+  "tracker": "Tracker.md",
+  "args": {
+    "fix": true
+  },
+  "expect": {
+    "problems": []
+  }
+}

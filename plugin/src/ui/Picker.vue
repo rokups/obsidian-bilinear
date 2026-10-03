@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onMounted, ref, watch } from "vue";
+import { linkTargetLabel, linkTargets } from "../store/query";
 import { CTRL, type PickerState } from "./controller";
 import LabelChip from "./LabelChip.vue";
 import PriorityIcon from "./PriorityIcon.vue";
@@ -51,9 +52,9 @@ const options = computed<Option[]>(() => {
   } else if (kind === "labels") {
     all = c.labels.value.map((l) => ({ value: l, label: l, checked: c.allHaveLabel(props.state.ids, l) }));
   } else if (kind === "blocked-by" || kind === "related-to") {
-    all = c.all.value
-      .filter((i) => !props.state.ids.includes(i.id))
-      .map((i) => ({ value: i.id, label: `${i.id} ${i.title}`, checked: c.allHaveRelation(kind, props.state.ids, i.id) }));
+    all = linkTargets(c.all.value, c.snapshot.value.siblings, props.state.ids).map((t) => ({
+      value: t.issue.id, label: linkTargetLabel(t), checked: c.allHaveRelation(kind, props.state.ids, t.issue.id),
+    }));
   } else {
     const cur = shared((i) => i.assignee);
     all = [{ value: null, label: "Unassigned", checked: cur === null }, ...c.assignees.value.map((a) => ({ value: a, label: a, checked: a === cur }))];
@@ -120,7 +121,7 @@ onMounted(() => {
         >
           <StatusIcon v-if="state.kind === 'status'" :status="o.value" :config="c.config.value" />
           <PriorityIcon v-else-if="state.kind === 'priority'" :priority="o.value ?? 'none'" />
-          <StatusIcon v-else-if="o.value !== null && (state.kind === 'blocked-by' || state.kind === 'related-to')" :status="c.byId.value.get(o.value)?.status ?? null" :config="c.config.value" />
+          <StatusIcon v-else-if="o.value !== null && (state.kind === 'blocked-by' || state.kind === 'related-to')" :status="c.linkable.value.get(o.value)?.status ?? null" :config="c.configOf(o.value)" />
           <LabelChip v-else-if="state.kind === 'labels' && o.value !== null" :label="o.value" :colors="c.config.value.labelColors" dot-only />
           <span class="bl-option-label">{{ o.label }}</span>
           <span v-if="o.checked" class="bl-option-check">✓</span>

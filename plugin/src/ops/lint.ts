@@ -6,7 +6,7 @@ import { recordFromDoc, type IssueRecord } from "../format/record";
 import { Doc } from "../format/yaml";
 import { reaches } from "../store/query";
 import { basename, type Tracker } from "./io";
-import { describe, found, locked, moveNote, noteIds, otherTrackers, ownerOf, pathIn, place, readIndexRaw, resolveNote, updateIndex } from "./tracker";
+import { describe, found, listedIn, locked, moveNote, noteIds, otherTrackers, ownerOf, pathIn, place, readIndexRaw, resolveNote, siblingRecords, updateIndex, usableSiblings } from "./tracker";
 
 export interface Problem {
   severity: "error" | "warning";
@@ -20,7 +20,8 @@ export interface Problem {
 
 type Add = (severity: Problem["severity"], code: string, id: string | null, message: string, fixable?: boolean) => void;
 
-function checkNote(idx: Index, id: string, doc: Doc, add: Add): void {
+/** `listed` says whether an ID is in the index of this tracker or of another in its folder. */
+function checkNote(idx: Index, listed: (id: string) => boolean, id: string, doc: Doc, add: Add): void {
   for (const p of doc.problems()) {
     add(p.endsWith("unquoted wikilink") ? "warning" : "error", "note-yaml", id, p);
   }
@@ -43,7 +44,7 @@ function checkNote(idx: Index, id: string, doc: Doc, add: Add): void {
   for (const [key, value] of refs) {
     const target = linkId(value);
     if (target === null || target === id) add("error", `${key}-invalid`, id, `${key} '${value}' is not a link to another issue`);
-    else if (!idx.find(target)) add("error", `${key}-unknown`, id, `${key} ${target} is not in the index`);
+    else if (!listed(target)) add("error", `${key}-unknown`, id, `${key} ${target} is not in the index`);
   }
 }
 
@@ -69,6 +70,7 @@ export function lint(t: Tracker, fix: boolean): Promise<Problem[]> {
       add("warning", "duplicate-section", null, `more than one '## ${name}' section; only the first is used`);
     }
 
+    const listed = listedIn(idx, siblings);
     const prefix = idx.prefix;
     const seen = new Map<string, Item>();
     const records: IssueRecord[] = [];
@@ -100,16 +102,18 @@ export function lint(t: Tracker, fix: boolean): Promise<Problem[]> {
       }
       const path = (await resolveNote(t, it.id, it.archived))!;
       const doc = new Doc((await t.io.read(path)) ?? "");
-      checkNote(idx, it.id, doc, add);
+      checkNote(idx, listed, it.id, doc, add);
       records.push(recordFromDoc(it, doc, path));
       const title = cleanTitle(doc.getStr("title"));
       if (title && title !== it.title) add("warning", "title-mismatch", it.id, "index line title differs from the title property", true);
     }
 
-    // A link to itself is `blocked-by-invalid` already, not a cycle as well.
+    // A link to itself is `blocked-by-invalid` already, not a cycle as well. A cycle may pass through the other
+    // trackers of the folder; only the issues of this one on it are reported, the others' own lint reports theirs.
     const others = records.map((r) => ({ ...r, blockedBy: r.blockedBy.filter((b) => b !== r.id) }));
+    const foreign = await siblingRecords(t, usableSiblings(idx, siblings));
     for (const r of others) {
-      if (reaches(others, r.id, r.id)) add("error", "blocked-by-cycle", r.id, "blocked-by leads back to the issue itself");
+      if (reaches(others, r.id, r.id, foreign)) add("error", "blocked-by-cycle", r.id, "blocked-by leads back to the issue itself");
     }
 
     let highest = idx.highest();

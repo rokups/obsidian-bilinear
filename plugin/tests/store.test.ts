@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 import { Doc } from "../src/format/yaml";
 import type { IssueRecord } from "../src/format/record";
-import { applyFilter, defaultSpec, issueRelations, linkedProgress, emptyFilter, groupIssues, normalizeSpec, reaches, sortIssues, type TrackerConfig } from "../src/store/query";
-import { buildSnapshot } from "../src/store/snapshot";
+import { applyFilter, defaultSpec, issueRelations, linkedProgress, emptyFilter, groupIssues, linkedLine, linkTargetLabel, linkTargets, makeClosed, normalizeSpec, reaches, sortIssues, type TrackerConfig } from "../src/store/query";
+import { buildSiblings, buildSnapshot, touches, type Surroundings } from "../src/store/snapshot";
 import { readViews, writeViews, type SavedView } from "../src/store/views";
 import { bodyLinks } from "../src/format/issue-note";
 import { TRACKER_DIR, cases, openTracker, toFixtureRecords } from "./fixtures";
@@ -64,6 +64,89 @@ describe("snapshot from the metadata cache", () => {
     const index = "---\nbilinear: tracker\nprefix: BL\nnext: 2\nstates: [todo]\n---\n## Issues\n- [[BL-1]] line title\n";
     const snap = buildSnapshot(index, "T", (p) => (p === "T/BL-1.md" ? { frontmatter: { title: 42, status: true, labels: "solo", assignee: null, "blocked-by": "[[BL-7]]" }, links: ["archive/BL-4|x", "BL-1", "Note", "BL-4"] } : undefined));
     expect(snap.issues[0]).toMatchObject({ title: "42", status: "true", labels: ["solo"], assignee: null, blockedBy: ["BL-7"], links: ["BL-4"], path: "T/BL-1.md" });
+  });
+});
+
+describe("sibling trackers in the snapshot", () => {
+  const tracker = (prefix: string, lines: string, closed = "done") => `---\nbilinear: tracker\nprefix: ${prefix}\nnext: 9\nstates: [todo, done]\nclosed-states: [${closed}]\n---\n${lines}`;
+  const own = buildSnapshot(tracker("BL", "## Issues\n- [[BL-1]] a\n"), "T", () => undefined).config;
+  const notes = (text: Record<string, string>) => Object.entries(text).map(([path, t]) => ({ path, text: t }));
+  const lookup = (path: string) => (path.endsWith(".md") && path !== "T/Nope.md" ? { frontmatter: { status: "todo" }, links: [] } : undefined);
+
+  it("holds the other tracker's config, open and archived issues", () => {
+    const other = tracker("OT", "## Issues\n- [[OT-1]] x\n\n## Archive\n- [[OT-2]] y\n", "shipped");
+    const sibs = buildSiblings(own, "T", notes({ "T/Other.md": other }), lookup);
+    expect(sibs).toHaveLength(1);
+    expect(sibs[0]).toMatchObject({ name: "Other", path: "T/Other.md" });
+    expect(sibs[0].config).toMatchObject({ prefix: "OT", closedStates: ["shipped"], states: ["todo", "done"] });
+    expect(sibs[0].issues.map((i) => i.id)).toEqual(["OT-1"]);
+    expect(sibs[0].archived.map((i) => i.id)).toEqual(["OT-2"]);
+    expect(sibs[0].issues[0].path).toBe("T/issues/OT-1.md");
+  });
+
+  it("is empty for a lone tracker", () => {
+    expect(buildSiblings(own, "T", [], lookup)).toEqual([]);
+    expect(buildSnapshot(tracker("BL", ""), "T", lookup).siblings).toEqual([]);
+  });
+
+  it("leaves out a tracker without a valid prefix, with this one's, or with one shared with another sibling", () => {
+    const sibs = buildSiblings(
+      own,
+      "T",
+      notes({
+        "T/Bad.md": "---\nbilinear: tracker\nprefix: bad\n---\n",
+        "T/Same.md": tracker("BL", ""),
+        "T/A.md": tracker("AA", ""),
+        "T/B.md": tracker("ZZ", ""),
+        "T/C.md": tracker("ZZ", ""),
+        "T/Good.md": tracker("GD", ""),
+      }),
+      lookup,
+    );
+    expect(sibs.map((s) => s.config.prefix)).toEqual(["AA", "GD"]);
+  });
+
+  it("puts the folder-named note first, then the rest by path", () => {
+    const sibs = buildSiblings(own, "P/T", notes({ "P/T/B.md": tracker("BB", ""), "P/T/T.md": tracker("TT", ""), "P/T/A.md": tracker("AA", "") }), lookup);
+    expect(sibs.map((s) => s.name)).toEqual(["T", "A", "B"]);
+  });
+});
+
+describe("which changes reload a tracker", () => {
+  const s: Surroundings = {
+    dir: "T",
+    indexPath: "T/Own.md",
+    prefix: "BL",
+    siblingPrefixes: ["OT"],
+    listed: new Set(["BL-1", "OT-7", "X-1"]),
+    siblingPaths: new Set(["T/Other.md"]),
+    isTracker: (p) => p === "T/Fresh.md",
+  };
+
+  it("reloads for the index, a sibling's index and a note that has become a tracker", () => {
+    expect(touches("T/Own.md", s)).toBe(true);
+    expect(touches("T/Other.md", s)).toBe(true);
+    expect(touches("T/Fresh.md", s)).toBe(true);
+    expect(touches("T/Plain.md", s)).toBe(false);
+  });
+
+  it("reloads for this tracker's and a sibling's issue notes in every location", () => {
+    for (const dir of ["T/issues", "T/archive", "T"]) {
+      expect(touches(`${dir}/BL-5.md`, s)).toBe(true);
+      expect(touches(`${dir}/OT-7.md`, s)).toBe(true);
+      expect(touches(`${dir}/OT-8.md`, s)).toBe(true);
+      expect(touches(`${dir}/X-1.md`, s)).toBe(true);
+      expect(touches(`${dir}/ZZ-1.md`, s)).toBe(false);
+    }
+  });
+
+  it("ignores notes outside the folder", () => {
+    for (const path of ["U/issues/OT-7.md", "U/archive/BL-1.md", "BL-1.md", "T/sub/OT-7.md", "U/Other.md", "T/issues/deep/BL-1.md"]) expect(touches(path, s)).toBe(false);
+  });
+
+  it("reloads for every issue folder note while this tracker has no valid prefix", () => {
+    expect(touches("T/issues/ZZ-1.md", { ...s, prefix: null })).toBe(true);
+    expect(touches("U/issues/ZZ-1.md", { ...s, prefix: null })).toBe(false);
   });
 });
 
@@ -205,6 +288,79 @@ describe("relations", () => {
   it("is not blocked by unknown issues or by itself", () => {
     expect(rel.get("BL-6")!.blocked).toBe(false);
     expect(issueRelations([issue("BL-1", { blockedBy: ["BL-1", "BL-9"] })], closed).get("BL-1")).toEqual({ blocks: [], related: [], blockedBy: [], blocked: false });
+  });
+
+  describe("issues of a sibling tracker", () => {
+    // BL closes on "done"; WEB closes on "shipped" and has "done" as an open state.
+    const closedFn = makeClosed("BL", ["done"], [{ prefix: "WEB", closedStates: ["shipped"] }]);
+    const own = (over: Partial<IssueRecord> = {}) => [issue("BL-1", { blockedBy: ["WEB-1"], ...over })];
+
+    it("makes closed-ness the owning tracker's call, and an ID nobody claims this tracker's", () => {
+      expect(closedFn(issue("BL-2", { status: "done" }))).toBe(true);
+      expect(closedFn(issue("BL-2", { status: "shipped" }))).toBe(false);
+      expect(closedFn(issue("WEB-2", { status: "shipped" }))).toBe(true);
+      expect(closedFn(issue("WEB-2", { status: "done" }))).toBe(false);
+      expect(closedFn(issue("OPS-2", { status: "done" }))).toBe(true);
+      expect(closedFn(issue("OPS-2", { status: "shipped" }))).toBe(false);
+      expect(closedFn(issue("WEB-2", { status: null }))).toBe(false);
+    });
+
+    it("judges an ID by the sibling that lists it, whatever its prefix", () => {
+      const listing = makeClosed("BL", ["done"], [{ prefix: "WEB", closedStates: ["shipped"], listed: new Set(["XX-1"]) }]);
+      expect(listing(issue("XX-1", { status: "shipped" }))).toBe(true);
+      expect(listing(issue("XX-1", { status: "done" }))).toBe(false);
+      expect(listing(issue("XX-2", { status: "done" }))).toBe(true);
+    });
+
+    it("is blocked by an open foreign blocker, and not by one its own tracker closed", () => {
+      const rel = (status: string) => issueRelations(own(), closedFn, [issue("WEB-1", { status })]).get("BL-1")!;
+      expect(rel("todo")).toMatchObject({ blockedBy: ["WEB-1"], blocked: true });
+      expect(rel("shipped").blocked).toBe(false);
+      // "done" closes issues of BL, the viewing tracker, but not of WEB.
+      expect(rel("done").blocked).toBe(true);
+      expect(issueRelations(own(), closedFn, [issue("WEB-1", { status: null, missing: true })]).get("BL-1")!.blocked).toBe(true);
+    });
+
+    it("ignores foreign issues unless they are passed", () => {
+      expect(issueRelations(own(), closedFn).get("BL-1")).toEqual({ blocks: [], related: [], blockedBy: [], blocked: false });
+    });
+
+    it("keeps foreign issues out of the map, and own issues over foreign ones with the same ID", () => {
+      const rel = issueRelations(own(), closedFn, [issue("WEB-1"), issue("BL-1", { blockedBy: [] })]);
+      expect([...rel.keys()]).toEqual(["BL-1"]);
+      expect(rel.get("BL-1")!.blockedBy).toEqual(["WEB-1"]);
+    });
+
+    it("derives blocks from a foreign issue blocked by an own one", () => {
+      const all = [issue("BL-1"), issue("BL-2")];
+      const rel = issueRelations(all, closedFn, [issue("WEB-1", { blockedBy: ["BL-1"] })]);
+      expect(rel.get("BL-1")!.blocks).toEqual(["WEB-1"]);
+      expect(rel.get("BL-2")!.blocks).toEqual([]);
+    });
+
+    it("relates from the foreign side alone", () => {
+      const all = [issue("BL-1"), issue("BL-2")];
+      const rel = issueRelations(all, closedFn, [issue("WEB-1", { relatedTo: ["BL-1"] })]);
+      expect(rel.get("BL-1")!.related).toEqual(["WEB-1"]);
+      expect(rel.get("BL-2")!.related).toEqual([]);
+      expect(issueRelations(all.map((i) => (i.id === "BL-2" ? { ...i, relatedTo: ["WEB-1"] } : i)), closedFn, [issue("WEB-1")]).get("BL-2")!.related).toEqual(["WEB-1"]);
+    });
+
+    it("counts foreign blockers in the progress, by the closed states of their own tracker", () => {
+      const all = [issue("BL-1", { blockedBy: ["WEB-1", "WEB-2", "BL-2", "WEB-9"] }), issue("BL-2", { status: "done" })];
+      const foreign = [issue("WEB-1", { status: "shipped" }), issue("WEB-2", { status: "done" })];
+      expect(linkedProgress(all, closedFn, foreign)).toEqual(new Map([["BL-1", { done: 2, total: 3, issues: ["WEB-1", "WEB-2", "BL-2"] }]]));
+      expect(linkedProgress(all, closedFn)).toEqual(new Map([["BL-1", { done: 1, total: 1, issues: ["BL-2"] }]]));
+    });
+
+    it("finds a path, and so a cycle, through a foreign issue", () => {
+      const all = [issue("BL-1", { blockedBy: ["WEB-1"] }), issue("BL-2", { blockedBy: ["BL-1"] })];
+      const foreign = [issue("WEB-1", { blockedBy: ["BL-2"] })];
+      expect(reaches(all, "BL-1", "BL-2", foreign)).toBe(true);
+      expect(reaches(all, "BL-1", "BL-1", foreign)).toBe(true);
+      expect(reaches(all, "BL-1", "BL-2")).toBe(false);
+      expect(reaches(all, "BL-2", "WEB-1", foreign)).toBe(true);
+    });
   });
 
   describe("reaches", () => {
@@ -358,5 +514,27 @@ describe("description links from the metadata cache", () => {
     ).toEqual(["BL-1#Notes", "BL-3", "BL-5"]);
     expect(descriptionLinks(null)).toEqual([]);
     expect(descriptionLinks({ links: [{ link: "BL-2", position: at(3, 5) }] })).toEqual(["BL-2"]);
+  });
+});
+
+describe("linking to issues of sibling trackers", () => {
+  const sibling = { name: "Other", issues: [issue("OT-1", { title: "Open one" })], archived: [issue("OT-2", { status: "done", archived: true, title: "Old" }), issue("BL-1", { title: "Same id" })] };
+  const own = [issue("BL-1", { title: "Mine" }), issue("BL-2", { title: "Also mine" })];
+
+  it("offers own issues first, then the siblings', tagged with the tracker", () => {
+    const targets = linkTargets(own, [sibling], ["BL-2"]);
+    expect(targets.map((t) => t.issue.id)).toEqual(["BL-1", "OT-1", "OT-2"]);
+    expect(targets.map((t) => t.tracker)).toEqual([null, "Other", "Other"]);
+    expect(targets.map(linkTargetLabel)).toEqual(["BL-1 Mine", "OT-1 Open one (Other)", "OT-2 Old (Other)"]);
+  });
+
+  it("offers nothing extra for a lone tracker", () => {
+    expect(linkTargets(own, []).map((t) => t.issue.id)).toEqual(["BL-1", "BL-2"]);
+  });
+
+  it("words a tooltip line, naming the sibling tracker", () => {
+    expect(linkedLine("BL-2", own[1], null)).toBe("BL-2  todo  Also mine");
+    expect(linkedLine("OT-1", sibling.issues[0], "Other")).toBe("OT-1  todo  Open one  (Other)");
+    expect(linkedLine("BL-9", undefined, null)).toBe("BL-9  note missing");
   });
 });

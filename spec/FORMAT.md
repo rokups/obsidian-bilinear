@@ -244,13 +244,14 @@ A new note has the properties above in the order of the table, omitting those
 with no value, and an empty body.
 
 **Progress.** An issue's progress is counted over the issues it is
-`blocked-by`, each once and in the order named. Only issues in the index
-count, open or archived; an issue is never counted for itself. Links in the
-description and `related-to` do not count.
+`blocked-by`, each once and in the order named. Only issues in the index of
+this tracker or of another tracker in the same folder count, open or
+archived; an issue is never counted for itself. Links in the description and
+`related-to` do not count.
 
 An issue's *progress* is the number of those issues whose `status` is one of
-the `closed-states`, out of how many there are. A blocker whose note is
-missing counts as not closed. An issue with no `blocked-by` issues has no
+the `closed-states` of the tracker whose index lists them, out of how many
+there are. A blocker whose note is missing counts as not closed. An issue with no `blocked-by` issues has no
 progress. Progress is derived every time it is shown; nothing is stored.
 
 **Relations.** `blocked-by` and `related-to` relate issues; everything below
@@ -258,11 +259,16 @@ is derived each time it is shown, and nothing but the two properties is
 stored. An issue *blocks* the issues that name it in `blocked-by`. An issue
 is *blocked* while an issue it is `blocked-by` has a `status` that is not one
 of the `closed-states`, or has no note; whether the blocker is archived does
-not matter. Two issues are *related* when the `related-to` of either names
-the other: one entry is enough, and tools show the relation on both. Links
-that name no issue in the index, and an issue naming itself, are ignored
-here and reported by `lint`. `blocked-by` must not lead back to the issue it
-starts from; `related-to` has no such rule.
+not matter. The linked issues may belong to this tracker or to another
+tracker in the same folder (the IDs are unique in a folder, since the
+prefixes differ); an issue of another tracker is closed when its `status` is
+one of the `closed-states` of that tracker, not of this one. Two issues are
+*related* when the `related-to` of either names the other, also across
+trackers: one entry is enough, and tools show the relation on both. Links
+that name no issue in the index of a tracker in the folder, and an issue
+naming itself, are ignored here and reported by `lint`. `blocked-by` must not
+lead back to the issue it starts from, also through the issues of the other
+trackers; `related-to` has no such rule.
 
 The description is the note body outside the `## Comments` section. A link in
 it is a wikilink or an embed, `[[BL-3]]` or `![[BL-3]]`, reduced to an ID the
@@ -330,13 +336,13 @@ operation leaves the index correct and at worst a stray note.
 |---|---|
 | Create tracker | Create the folder, `issues/` and `archive/` as far as they are missing; create the index note. Refused if a tracker in the folder has the prefix |
 | Create | Allocate ID; create note in `issues/`; add line to `## Issues` and raise `next` |
-| Edit property | Write the issue note only. An edit that would close a `blocked-by` cycle is refused |
-| Unrelate | Remove the link from the `related-to` of both notes. Removing a `related-to` entry by editing the property does the same |
+| Edit property | Write the issue note only. `blocked-by` and `related-to` accept IDs of issues of other trackers in the folder. An edit that would close a `blocked-by` cycle, also through those trackers, is refused |
+| Unrelate | Remove the link from the `related-to` of both notes, also when the other issue belongs to another tracker in the folder, whose note is then edited too. Removing a `related-to` entry by editing the property does the same |
 | Retitle | Write `title` in the note; rewrite the index line |
 | Reorder | Move the line within `## Issues` |
 | Archive | Move note to `archive/`; move line to the end of `## Archive` |
 | Unarchive | Move note to `issues/`; move line to the end of `## Issues` |
-| Delete | Trash the note, wherever it is; remove the links to it from `blocked-by` and `related-to` of the other notes; remove the line |
+| Delete | Trash the note, wherever it is; remove the links to it from `blocked-by` and `related-to` of the other notes, those of the other trackers in the folder included; remove the line |
 | Comment | Append under `## Comments` in the issue note |
 | Adopt | Move a note lying in the tracker folder to `issues/`; add a line for it; raise `next` if needed. A note with the prefix of another tracker in the folder is refused |
 | Label | Add the label to `labels` if absent; set or clear its `label-colors` entry |
@@ -414,8 +420,8 @@ of the two, then the tracker folder itself.
 | `label-unknown` | warning | | Label not in the index `labels` |
 | `due-invalid`, `created-invalid` | error | | Not a real `YYYY-MM-DD` date |
 | `blocked-by-invalid`, `related-to-invalid` | error | | Not a link to an issue, or a link to itself |
-| `blocked-by-unknown`, `related-to-unknown` | error | | Linked issue has no index line |
-| `blocked-by-cycle` | error | | Following `blocked-by` from the issue leads back to it; reported for each issue on the cycle |
+| `blocked-by-unknown`, `related-to-unknown` | error | | Linked issue has no line in the index of this tracker or of another tracker in the same folder |
+| `blocked-by-cycle` | error | | Following `blocked-by` from the issue leads back to it, also through the other trackers of the same folder; reported for each issue of this tracker on the cycle |
 
 One problem is reported per occurrence. A problem's subject is an issue ID, or
 the index note.
@@ -578,3 +584,6 @@ text property is `null`, and each issue has `archived` and `missing` flags,
 the IDs related to the issue, whichever of the two notes names the other;
 `blocks` is the IDs of the issues that name it in `blocked-by`; `blocked` is
 true when some blocker is known and is not in a closed state or has no note.
+A blocker of another tracker in the folder is known, and closed by that
+tracker's `closed-states`; the entries of `list` are the issues of the
+tracker itself only.

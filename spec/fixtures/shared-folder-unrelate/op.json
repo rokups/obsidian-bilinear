@@ -1,0 +1,12 @@
+{
+  "op": "set",
+  "tracker": "Tracker.md",
+  "args": {
+    "id": "BL-9",
+    "props": {
+      "related-to": [
+        "BL-11"
+      ]
+    }
+  }
+}

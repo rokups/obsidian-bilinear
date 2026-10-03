@@ -1,7 +1,7 @@
 // Filtering, sorting and grouping. There is one flat global order (the
 // index); grouped views show each group in its relative index order.
 
-import { PRIORITIES } from "../format/ids";
+import { PRIORITIES, idNumber } from "../format/ids";
 import type { IssueRecord } from "../format/record";
 
 export type Layout = "list" | "board";
@@ -177,21 +177,64 @@ export interface Progress {
   issues: string[];
 }
 
+/** Whether an issue is in a closed state of the tracker that owns it. */
+export type ClosedFn = (i: IssueRecord) => boolean;
+
+/**
+ * What decides whether an issue is closed: one tracker's `closed-states`, or
+ * a function that can tell for issues of several trackers.
+ */
+export type Closed = string[] | ClosedFn;
+
+/**
+ * Closed-ness for issues of sibling trackers: an issue is closed when its
+ * status is in the `closed-states` of the tracker it belongs to, never in
+ * those of another. That is this tracker when the ID has its prefix; else the
+ * sibling whose index lists the ID (`listed`, whatever the ID's prefix), else
+ * the sibling whose prefix the ID has. An ID none of them claims is judged by
+ * this tracker, which lists it (an adopted issue with a mismatched prefix). An
+ * issue without a note is never closed. The viewing tracker comes first, so it
+ * wins over a sibling with the same prefix.
+ */
+export function makeClosed(
+  ownPrefix: string | null,
+  ownClosedStates: string[],
+  siblings: (Pick<TrackerConfig, "prefix" | "closedStates"> & { listed?: ReadonlySet<string> })[],
+): ClosedFn {
+  const has = (prefix: string | null, id: string) => prefix !== null && idNumber(id, prefix) !== null;
+  return (i) => {
+    if (i.status === null) return false;
+    const owner =
+      has(ownPrefix, i.id) ? undefined : (siblings.find((s) => s.listed?.has(i.id)) ?? siblings.find((s) => has(s.prefix, i.id)));
+    return (owner?.closedStates ?? ownClosedStates).includes(i.status);
+  };
+}
+
+function closedFn(closed: Closed): ClosedFn {
+  return typeof closed === "function" ? closed : (i) => i.status !== null && closed.includes(i.status);
+}
+
+/** The issues to look links up in: those of `all`, then the `foreign` ones with other IDs. */
+function withForeign(all: IssueRecord[], foreign: IssueRecord[]): IssueRecord[] {
+  if (!foreign.length) return all;
+  const own = new Set(all.map((i) => i.id));
+  return [...all, ...foreign.filter((f) => !own.has(f.id))];
+}
+
 /**
  * Progress of each issue, from the state of the issues it is `blocked-by`
  * (each counted once; descriptions and `related-to` do not count): how many of them are in a closed state. Issues with no blockers
- * are not in the map. `all` includes archived issues.
+ * are not in the map. `all` includes archived issues. `foreign` holds issues
+ * of sibling trackers: they can be blockers too, but get no entry.
  */
-export function linkedProgress(all: IssueRecord[], closedStates: string[]): Map<string, Progress> {
-  const byId = new Map(all.map((i) => [i.id, i]));
+export function linkedProgress(all: IssueRecord[], closed: Closed, foreign: IssueRecord[] = []): Map<string, Progress> {
+  const byId = new Map(withForeign(all, foreign).map((i) => [i.id, i]));
+  const isClosed = closedFn(closed);
   const out = new Map<string, Progress>();
   for (const i of all) {
     const issues = [...new Set(i.blockedBy)].filter((id) => id !== i.id && byId.has(id));
     if (!issues.length) continue;
-    const done = issues.filter((id) => {
-      const status = byId.get(id)!.status;
-      return status !== null && closedStates.includes(status);
-    }).length;
+    const done = issues.filter((id) => isClosed(byId.get(id)!)).length;
     out.set(i.id, { done, total: issues.length, issues });
   }
   return out;
@@ -212,21 +255,22 @@ export interface Relations {
  * Blocking and related issues of each issue; every issue in `all` is in the
  * map. IDs that name no issue are ignored, and so is an issue naming itself.
  * An issue is blocked while any issue blocking it is open, or its note is
- * missing; whether the blocker is archived does not matter.
+ * missing; whether the blocker is archived does not matter. `foreign` holds
+ * issues of sibling trackers: they take part in the relations of the issues
+ * of `all`, but get no entry themselves.
  */
-export function issueRelations(all: IssueRecord[], closedStates: string[]): Map<string, Relations> {
-  const byId = new Map(all.map((i) => [i.id, i]));
+export function issueRelations(all: IssueRecord[], closed: Closed, foreign: IssueRecord[] = []): Map<string, Relations> {
+  const lookup = withForeign(all, foreign);
+  const byId = new Map(lookup.map((i) => [i.id, i]));
+  const isClosed = closedFn(closed);
   const out = new Map<string, Relations>();
   for (const i of all) {
     const blockedBy = [...new Set(i.blockedBy)].filter((id) => id !== i.id && byId.has(id));
-    const blocked = blockedBy.some((id) => {
-      const status = byId.get(id)!.status;
-      return status === null || !closedStates.includes(status);
-    });
+    const blocked = blockedBy.some((id) => !isClosed(byId.get(id)!));
     out.set(i.id, { blocks: [], related: [], blockedBy, blocked });
   }
   for (const i of all) {
-    for (const other of all) {
+    for (const other of lookup) {
       if (other.id === i.id) continue;
       if (other.blockedBy.includes(i.id)) out.get(i.id)!.blocks.push(other.id);
       if (i.relatedTo.includes(other.id) || other.relatedTo.includes(i.id)) out.get(i.id)!.related.push(other.id);
@@ -237,10 +281,11 @@ export function issueRelations(all: IssueRecord[], closedStates: string[]): Map<
 
 /**
  * Whether following `blocked-by` from issue `from` reaches `to` in one or
- * more steps. Unknown IDs are dead ends; existing cycles end the walk.
+ * more steps. Unknown IDs are dead ends; existing cycles end the walk. The
+ * walk passes through `foreign` issues of sibling trackers as well.
  */
-export function reaches(all: IssueRecord[], from: string, to: string): boolean {
-  const byId = new Map(all.map((i) => [i.id, i]));
+export function reaches(all: IssueRecord[], from: string, to: string, foreign: IssueRecord[] = []): boolean {
+  const byId = new Map(withForeign(all, foreign).map((i) => [i.id, i]));
   const next = (id: string): string[] => byId.get(id)?.blockedBy ?? [];
   const seen = new Set<string>();
   const stack = [...next(from)];
@@ -257,4 +302,44 @@ export function reaches(all: IssueRecord[], from: string, to: string): boolean {
 /** The property a grouping stands for, if dropping into a group can set it. */
 export function groupProperty(groupBy: GroupKey): "status" | "priority" | "assignee" | null {
   return groupBy === "status" || groupBy === "priority" || groupBy === "assignee" ? groupBy : null;
+}
+
+/** An issue an issue may link to, and the sibling tracker it belongs to (`null` for the viewing tracker's own). */
+export interface LinkTarget {
+  issue: IssueRecord;
+  tracker: string | null;
+}
+
+/**
+ * The issues a `blocked-by` / `related-to` picker offers: those of the
+ * viewing tracker first (open, then archived), then those of each sibling
+ * tracker, tagged with its name. An ID the viewing tracker has is not offered
+ * again from a sibling, and `exclude` holds the issues being edited.
+ */
+export function linkTargets(
+  own: IssueRecord[],
+  siblings: { name: string; issues: IssueRecord[]; archived: IssueRecord[] }[],
+  exclude: string[] = [],
+): LinkTarget[] {
+  const seen = new Set(exclude);
+  const out: LinkTarget[] = [];
+  const add = (issue: IssueRecord, tracker: string | null) => {
+    if (seen.has(issue.id)) return;
+    seen.add(issue.id);
+    out.push({ issue, tracker });
+  };
+  for (const i of own) add(i, null);
+  for (const s of siblings) for (const i of [...s.issues, ...s.archived]) add(i, s.name);
+  return out;
+}
+
+/** The picker row of a link target: `ID Title`, with the sibling tracker's name after it. */
+export function linkTargetLabel(t: LinkTarget): string {
+  return `${t.issue.id} ${t.issue.title}${t.tracker === null ? "" : ` (${t.tracker})`}`;
+}
+
+/** One line of a tooltip listing linked issues: `ID  status  title`, and `(Tracker)` for a sibling's issue. */
+export function linkedLine(id: string, issue: IssueRecord | undefined, tracker: string | null): string {
+  const line = `${id}  ${issue?.status ?? "note missing"}  ${issue?.title ?? ""}`.trimEnd();
+  return tracker === null ? line : `${line}  (${tracker})`;
 }

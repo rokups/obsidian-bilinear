@@ -1,10 +1,9 @@
 import { type App, type EventRef, type TAbstractFile, type TFile } from "obsidian";
 import { ref, shallowRef } from "vue";
-import { ID_RE, LOCATIONS } from "../format/ids";
-import { folderOf as locationFolder } from "../ops/tracker";
+import { ID_RE } from "../format/ids";
 import type { Tracker } from "../ops/io";
 import { VaultIO } from "../view/vault-io";
-import { buildSnapshot, descriptionLinks, emptySnapshot, type Snapshot } from "./snapshot";
+import { buildSiblings, buildSnapshot, descriptionLinks, emptySnapshot, touches, type IndexNote, type NoteLookup, type Snapshot } from "./snapshot";
 import { writeViews, type SavedView } from "./views";
 
 export function folderOf(file: TFile): string {
@@ -27,6 +26,8 @@ export class TrackerStore {
   private stopped = false;
   /** The IDs on the index's lines, as last read. */
   private listed = new Set<string>();
+  /** Every index note of a sibling tracker, usable or not, as last read: a change to one of them can change which are usable. */
+  private indexNotes = new Set<string>();
 
   constructor(
     private app: App,
@@ -64,18 +65,25 @@ export class TrackerStore {
   }
 
   /**
-   * Is this path the index, or a note of this tracker in issues/, archive/
-   * or the tracker folder? Other trackers may keep their notes there too:
-   * a note is this tracker's if it has its prefix or is listed in it.
+   * Is this path the index, an index note of a sibling tracker, or a note of this tracker or a sibling in issues/,
+   * archive/ or the tracker folder? (A sibling's issue closing can clear a blocker here.)
    */
   private concerns(path: string): boolean {
-    if (path === this.indexFile.path) return true;
-    const slash = path.lastIndexOf("/");
-    const parent = slash < 0 ? "" : path.slice(0, slash);
-    if (!LOCATIONS.some((where) => parent === locationFolder(this.dir, where))) return false;
-    const { prefix } = this.snapshot.value.config;
-    const id = path.slice(slash + 1).replace(/\.md$/, "");
-    return prefix === null || ID_RE.exec(id)?.[1] === prefix || this.listed.has(id);
+    const { config, siblings } = this.snapshot.value;
+    return touches(path, {
+      dir: this.dir,
+      indexPath: this.indexFile.path,
+      prefix: config.prefix,
+      siblingPrefixes: siblings.map((s) => s.config.prefix!),
+      listed: this.listed,
+      siblingPaths: this.indexNotes,
+      isTracker: (p) => this.isTrackerNote(p),
+    });
+  }
+
+  private isTrackerNote(path: string): boolean {
+    const file = this.app.vault.getFileByPath(path);
+    return file !== null && this.app.metadataCache.getFileCache(file)?.frontmatter?.["bilinear"] === "tracker";
   }
 
   private touched(path: string): void {
@@ -95,14 +103,36 @@ export class TrackerStore {
       return; // The index note is gone; the view is about to close.
     }
     if (this.stopped) return;
-    this.snapshot.value = buildSnapshot(text, this.dir, (path) => {
+    const lookup: NoteLookup = (path) => {
       const file = this.app.vault.getFileByPath(path);
       if (!file) return undefined;
       const cache = this.app.metadataCache.getFileCache(file);
       return { frontmatter: cache?.frontmatter ?? null, links: descriptionLinks(cache) };
-    });
-    this.listed = new Set([...this.snapshot.value.issues, ...this.snapshot.value.archived].map((r) => r.id));
+    };
+    const snapshot = buildSnapshot(text, this.dir, lookup);
+    const others = await this.siblingIndexes();
+    if (this.stopped) return;
+    snapshot.siblings = buildSiblings(snapshot.config, this.dir, others, lookup);
+    this.snapshot.value = snapshot;
+    this.indexNotes = new Set(others.map((o) => o.path));
+    this.listed = new Set([snapshot, ...snapshot.siblings].flatMap((t) => [...t.issues, ...t.archived]).map((r) => r.id));
     this.loaded.value = true;
+  }
+
+  /** The other index notes of the folder: its top-level notes, not named like an issue, that carry `bilinear: tracker`. */
+  private async siblingIndexes(): Promise<IndexNote[]> {
+    const out: IndexNote[] = [];
+    for (const file of this.indexFile.parent?.children ?? []) {
+      const note = file as TFile;
+      if (note.extension !== "md" || note.path === this.indexFile.path || ID_RE.test(note.basename)) continue;
+      if (!this.isTrackerNote(note.path)) continue;
+      try {
+        out.push({ path: note.path, text: await this.app.vault.cachedRead(note) });
+      } catch {
+        // Gone since the cache was read.
+      }
+    }
+    return out;
   }
 
   async saveViews(views: SavedView[]): Promise<void> {

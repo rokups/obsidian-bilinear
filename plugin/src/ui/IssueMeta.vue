@@ -2,6 +2,7 @@
 import { computed, inject } from "vue";
 import type { IssueRecord } from "../format/record";
 import { todayIso } from "../format/ids";
+import { linkedLine } from "../store/query";
 import { CTRL } from "./controller";
 import LabelChip from "./LabelChip.vue";
 
@@ -13,17 +14,13 @@ const progress = computed(() => c.progress.value.get(props.issue.id));
 const closed = computed(() => props.issue.status !== null && c.config.value.closedStates.includes(props.issue.status));
 const overdue = computed(() => !!props.issue.due && !closed.value && props.issue.due < todayIso());
 const relations = computed(() => c.relations.value.get(props.issue.id));
-/** One line per issue, as `ID  status  title`. */
-const lines = (ids: string[]) =>
-  ids.map((id) => {
-    const i = c.byId.value.get(id);
-    return `${id}  ${i?.status ?? "note missing"}  ${i?.title ?? ""}`.trimEnd();
-  });
+/** One line per issue, as `ID  status  title`, and the tracker's name after a sibling's issue. */
+const lines = (ids: string[]) => ids.map((id) => linkedLine(id, c.linkable.value.get(id), c.trackerOf(id)));
 /** Blockers that are still open; a missing note counts as open. */
 const openBlockers = computed(() =>
   (relations.value?.blockedBy ?? []).filter((id) => {
-    const status = c.byId.value.get(id)?.status ?? null;
-    return status === null || !c.config.value.closedStates.includes(status);
+    const i = c.linkable.value.get(id);
+    return i === undefined || !c.isClosed.value(i);
   }),
 );
 const blockedTitle = computed(() => `Blocked by\n${lines(openBlockers.value).join("\n")}`);

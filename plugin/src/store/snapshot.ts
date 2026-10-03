@@ -1,9 +1,10 @@
 // What a tracker view shows: the index list resolved against the notes.
 
-import { COMMENTS } from "../format/ids";
+import { COMMENTS, ID_RE, LOCATIONS } from "../format/ids";
 import { Index } from "../format/index-note";
 import { recordFromFrontmatter, type IssueRecord } from "../format/record";
-import { pathIn, searchOrder } from "../ops/tracker";
+import { joinPath } from "../ops/io";
+import { folderOf, pathIn, searchOrder } from "../ops/tracker";
 import type { TrackerConfig } from "./query";
 import { readViews, type SavedView } from "./views";
 
@@ -16,6 +17,25 @@ export interface Snapshot {
   views: SavedView[];
   /** Why the index cannot be used, if it cannot. */
   problems: string[];
+  /** The other trackers of the folder whose issues this one's may link to; empty when this one is alone. */
+  siblings: SiblingSnapshot[];
+}
+
+/** Another tracker of the folder: its index note and its issues, open and archived. */
+export interface SiblingSnapshot {
+  /** The index note's name, for display. */
+  name: string;
+  /** The index note's path. */
+  path: string;
+  config: TrackerConfig;
+  issues: IssueRecord[];
+  archived: IssueRecord[];
+}
+
+/** The text of an index note. */
+export interface IndexNote {
+  path: string;
+  text: string;
 }
 
 /** What the metadata cache knows about a note. */
@@ -60,6 +80,7 @@ export function emptySnapshot(): Snapshot {
     archived: [],
     views: [],
     problems: [],
+    siblings: [],
   };
 }
 
@@ -94,4 +115,57 @@ export function buildSnapshot(indexText: string, dir: string, lookup: NoteLookup
     (item.archived ? snap.archived : snap.issues).push(rec);
   }
   return snap;
+}
+
+/**
+ * The trackers among these index notes (the other trackers of the folder) whose issues this one's may link to as
+ * theirs: those whose prefix is valid, is not this one's and is not shared. The folder-named note comes first, then by path.
+ */
+export function buildSiblings(own: TrackerConfig, dir: string, notes: IndexNote[], lookup: NoteLookup): SiblingSnapshot[] {
+  const built = notes.map((note) => ({ note, snap: buildSnapshot(note.text, dir, lookup) }));
+  const usable = built.filter(({ snap }) => snap.config.prefix !== null && snap.config.prefix !== own.prefix);
+  const folderNote = joinPath(dir, `${dir.slice(dir.lastIndexOf("/") + 1)}.md`);
+  const rank = (path: string) => (path === folderNote ? 0 : 1);
+  return usable
+    .filter(({ snap }) => usable.filter((other) => other.snap.config.prefix === snap.config.prefix).length === 1)
+    .sort((a, b) => rank(a.note.path) - rank(b.note.path) || (a.note.path < b.note.path ? -1 : a.note.path > b.note.path ? 1 : 0))
+    .map(({ note, snap }) => ({
+      name: note.path.slice(note.path.lastIndexOf("/") + 1).replace(/\.md$/, ""),
+      path: note.path,
+      config: snap.config,
+      issues: snap.issues,
+      archived: snap.archived,
+    }));
+}
+
+/** What `touches` knows about a tracker's surroundings. */
+export interface Surroundings {
+  dir: string;
+  indexPath: string;
+  /** This tracker's prefix: null while its index has none that is valid. */
+  prefix: string | null;
+  /** The prefixes of its siblings. */
+  siblingPrefixes: string[];
+  /** The IDs on the index lines of this tracker and its siblings. */
+  listed: Set<string>;
+  /** The index notes of the siblings, as last read. */
+  siblingPaths: Set<string>;
+  /** Whether the metadata cache says a note carries `bilinear: tracker`. */
+  isTracker: (path: string) => boolean;
+}
+
+/**
+ * Does a change to this path call for a reload? Yes for the index, for an index note of another tracker in the
+ * folder, and for a note of this tracker or a sibling in issues/, archive/ or the folder: a note is a tracker's if it
+ * has its prefix or is listed in it.
+ */
+export function touches(path: string, s: Surroundings): boolean {
+  if (path === s.indexPath || s.siblingPaths.has(path)) return true;
+  const slash = path.lastIndexOf("/");
+  const parent = slash < 0 ? "" : path.slice(0, slash);
+  if (parent === s.dir && path.endsWith(".md") && s.isTracker(path)) return true;
+  if (!LOCATIONS.some((where) => parent === folderOf(s.dir, where))) return false;
+  const id = path.slice(slash + 1).replace(/\.md$/, "");
+  const prefix = ID_RE.exec(id)?.[1];
+  return s.prefix === null || (prefix !== undefined && (prefix === s.prefix || s.siblingPrefixes.includes(prefix))) || s.listed.has(id);
 }
