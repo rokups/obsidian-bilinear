@@ -19,6 +19,7 @@ const hint = computed(() => {
 
 /** A click anywhere opens the issue; with Shift or Ctrl it selects instead. */
 function onClick(e: MouseEvent): void {
+  if (c.justSwept()) return;
   if (e.shiftKey) c.selectRange(props.issue.id, props.group);
   else if (e.ctrlKey || e.metaKey) c.toggleSelect(props.issue.id);
   else return open(false);
@@ -30,7 +31,20 @@ function open(focus: boolean): void {
   if (!props.issue.missing) c.host.openIssue(props.issue, focus);
 }
 
+/** Pressing the checkbox starts a sweep that does the toggling; only a keyboard click, which has no mouse press before it, toggles here. */
+function onCheckDown(e: MouseEvent): void {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  (e.currentTarget as HTMLElement).focus({ preventScroll: true });
+  c.sweepStart(props.issue.id, props.group, e.view ?? window);
+}
+
+function onCheckClick(e: MouseEvent): void {
+  if (e.detail === 0) c.toggleSelect(props.issue.id);
+}
+
 function onDragStart(e: DragEvent): void {
+  if (c.sweeping.value) return e.preventDefault();
   c.dragStart(props.issue.id);
   e.dataTransfer?.setData("text/plain", c.dragging.value.join(" "));
   if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
@@ -57,9 +71,9 @@ function onDrop(e: DragEvent): void {
     :data-id="issue.id" :data-group="group" role="row" :aria-selected="isSelected"
     :draggable="!issue.missing && !c.showArchived.value"
     @click="onClick" @dblclick="open(true)" @contextmenu.prevent="emit('menu', $event, issue)"
-    @dragstart="onDragStart" @dragend="c.dragEnd()" @dragover="onDragOver" @drop="onDrop"
+    @mouseenter="c.sweepTo(issue.id, group)" @dragstart="onDragStart" @dragend="c.dragEnd()" @dragover="onDragOver" @drop="onDrop"
   >
-    <button class="bl-check" :class="{ 'is-on': isSelected }" role="checkbox" :aria-checked="isSelected" :aria-label="`Select ${issue.id}`" @click.stop="c.toggleSelect(issue.id)"></button>
+    <button class="bl-check" :class="{ 'is-on': isSelected }" role="checkbox" :aria-checked="isSelected" :aria-label="`Select ${issue.id}`" @mousedown.stop="onCheckDown" @click.stop="onCheckClick"></button>
     <button class="bl-cell bl-cell-priority clickable-icon" :title="`Priority: ${issue.priority}`" :aria-label="`Priority: ${issue.priority}`" :disabled="issue.missing" @click.stop="c.openPicker('priority', [issue.id])">
       <PriorityIcon :priority="issue.priority" />
     </button>

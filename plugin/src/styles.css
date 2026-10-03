@@ -404,9 +404,31 @@ button.bl-filter-chip {
   opacity: 1;
 }
 
-.bl-root button.bl-check.is-on {
+.bl-root button.bl-check.is-on,
+.bl-root button.bl-check.is-on:hover,
+.bl-root button.bl-check.is-on:focus,
+.bl-root button.bl-check.is-on:active {
   background: var(--bl-accent);
   border-color: var(--bl-accent);
+  box-shadow: none;
+}
+
+/* The tick: a rotated corner, sized from the box and centred in it. */
+.bl-root button.bl-check {
+  position: relative;
+}
+
+.bl-check.is-on::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  box-sizing: border-box;
+  width: calc(var(--bl-check-size) * 0.3);
+  height: calc(var(--bl-check-size) * 0.55);
+  border: solid var(--text-on-accent);
+  border-width: 0 max(1.5px, calc(var(--bl-check-size) * 0.11)) max(1.5px, calc(var(--bl-check-size) * 0.11)) 0;
+  transform: translate(-50%, -62%) rotate(45deg);
 }
 
 .bl-root button.bl-cell {

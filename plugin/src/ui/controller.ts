@@ -32,6 +32,9 @@ export interface RowRef {
   group: string;
 }
 
+/** What a sweep needs of the window it listens in. */
+export type SweepWindow = Pick<Window, "addEventListener" | "removeEventListener">;
+
 export interface DropHint {
   group: string;
   id: string | null;
@@ -46,6 +49,16 @@ function cloneSpec(spec: ViewSpec): ViewSpec {
     sortBy: spec.sortBy,
     filter: { text: f.text, status: [...f.status], priority: [...f.priority], labels: [...f.labels], assignee: [...f.assignee] },
   };
+}
+
+/** The selection a sweep gives: `base`, with every ID of the rows from index `a` to `b` (either order) selected or deselected. */
+export function sweepSelection(base: ReadonlySet<string>, rows: readonly RowRef[], a: number, b: number, on: boolean): Set<string> {
+  const out = new Set(base);
+  for (let i = Math.min(a, b); i <= Math.max(a, b); i++) {
+    if (on) out.add(rows[i].id);
+    else out.delete(rows[i].id);
+  }
+  return out;
 }
 
 export function createController(store: StoreLike, host: Host, initial: ViewSpec) {
@@ -164,6 +177,49 @@ export function createController(store: StoreLike, host: Host, initial: ViewSpec
 
   function clearSelection(): void {
     selected.clear();
+  }
+
+  /** Dragging from a checkbox over other rows sets them all like the first one was not: selects, or deselects if it was selected. */
+  const sweeping = ref(false);
+  let swept = false;
+  let sweep: { anchor: RowRef; on: boolean; base: Set<string>; win: SweepWindow } | null = null;
+
+  function sweepStart(id: string, group: string, win: SweepWindow = window): void {
+    sweepEnd();
+    sweep = { anchor: { id, group }, on: !selected.has(id), base: new Set(selected), win };
+    sweeping.value = true;
+    win.addEventListener("mouseup", sweepEnd);
+    win.addEventListener("blur", sweepEnd);
+    sweepTo(id, group);
+  }
+
+  /** Apply the sweep to every row between where it began and this one; rows left out again get back what they had. */
+  function sweepTo(id: string, group: string): void {
+    if (!sweep) return;
+    const rows = order.value;
+    const a = rows.findIndex((r) => r.id === sweep!.anchor.id && r.group === sweep!.anchor.group);
+    const b = rows.findIndex((r) => r.id === id && r.group === group);
+    if (a < 0 || b < 0) return;
+    const shown = new Set(rows.map((r) => r.id));
+    const next = new Set([...sweepSelection(sweep.base, rows, a, b, sweep.on)].filter((x) => shown.has(x)));
+    for (const x of [...selected]) if (!next.has(x)) selected.delete(x);
+    for (const x of next) selected.add(x);
+    setCursor(id, group);
+  }
+
+  function sweepEnd(): void {
+    if (!sweep) return;
+    sweep.win.removeEventListener("mouseup", sweepEnd);
+    sweep.win.removeEventListener("blur", sweepEnd);
+    sweep = null;
+    sweeping.value = false;
+    swept = true;
+    setTimeout(() => (swept = false), 0);
+  }
+
+  /** Whether a sweep has just ended: the click that follows its mouseup is not meant for the row. */
+  function justSwept(): boolean {
+    return swept;
   }
 
   /** What a keyboard action applies to: the selection, else the cursor row. */
@@ -424,10 +480,10 @@ export function createController(store: StoreLike, host: Host, initial: ViewSpec
   }
 
   return {
-    store, host, spec, showArchived, cursor, selected, collapsed, picker, dragging, dropHint, activeView, busy,
+    store, host, spec, showArchived, cursor, selected, sweeping, collapsed, picker, dragging, dropHint, activeView, busy,
     snapshot, config, all, byId, foreign, linkable, isClosed, trackerOf, configOf, visible, groupBy, groups, order, progress, relations, canReorder, assignees, labels,
     priorities: PRIORITIES as readonly string[],
-    isCursor, setCursor, moveCursor, toggleSelect, selectRange, clearSelection, targets, cursorIssue, reveal,
+    isCursor, setCursor, moveCursor, toggleSelect, selectRange, clearSelection, sweepStart, sweepTo, sweepEnd, justSwept, targets, cursorIssue, reveal,
     edit, openPicker, closePicker, allHaveLabel, allHaveRelation, pick, labelMenu,
     archive, unarchive, archiveAllClosed, remove, recreate, comment, nudge,
     dragStart, dragEnd, drop,
