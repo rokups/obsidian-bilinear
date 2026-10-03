@@ -55,7 +55,7 @@ CLI are tested against the same cases in `spec/fixtures/`.
 The CLI needs Node 20 or later and nothing else. Run it without installing:
 
 ```sh
-npx obsidian-bilinear list
+npx obsidian-bilinear Trackers/Bilinear.md list
 ```
 
 or install it once, which puts `bilinear` on your `PATH`:
@@ -69,20 +69,22 @@ in its place. Each [release](https://github.com/rokups/obsidian-bilinear/release
 also carries the CLI as a single file, `bilinear.js`, that `node` runs as it is.
 
 ```sh
-bilinear init Trackers/Bilinear.md --prefix BL
-export BILINEAR_TRACKER=Trackers/Bilinear.md
-bilinear new "Fix flaky cache test" --priority high --label build,bug
+bilinear Trackers/Bilinear.md init --prefix BL
+bilinear Trackers/Bilinear.md new "Fix flaky cache test" --priority high --label build,bug
+bilinear Trackers/Bilinear.md list --status todo,in-progress
+bilinear Trackers/Bilinear.md set BL-1 status=in-progress assignee=rk labels+=ui due=2026-10-10
+bilinear Trackers/Bilinear.md comment BL-1 "reproduced on a clean cache"
+bilinear Trackers/Bilinear.md move BL-1 --top
+bilinear Trackers/Bilinear.md archive --closed
+bilinear Trackers/Bilinear.md lint --fix
+
+export BILINEAR_TRACKER=Trackers/Bilinear.md   # or set the board file once
 bilinear list --status todo,in-progress
-bilinear set BL-1 status=in-progress assignee=rk labels+=ui due=2026-10-10
-bilinear comment BL-1 "reproduced on a clean cache"
-bilinear move BL-1 --top
-bilinear archive --closed
-bilinear lint --fix
 ```
 
 | Command | Purpose |
 |---|---|
-| `init <index note> --prefix BL` | Create a tracker: the index note, and `issues/` and `archive/` beside it if they are not there. The prefix must be free in the folder |
+| `init --prefix BL` | Create a tracker: the index note, and `issues/` and `archive/` beside it if they are not there. The prefix must be free in the folder |
 | `new "Title" [--description ..] [--status ..] [--priority ..] [--label ..] [--assignee ..] [--due ..] [--blocked-by ..] [--related-to ..] [--top]` | Create an issue; prints the ID |
 | `list [--status ..] [--label ..] [--assignee ..] [--priority ..] [--blocked] [--blocked-by ID] [--related-to ID] [--archived] [--all]` | List in index order |
 | `show <ID>` | Print properties and body |
@@ -99,13 +101,17 @@ bilinear lint --fix
 | `agent-setup <dir> [--codex] [--claude] [--global-skill] [--local] [--followups]` | Set an LLM agent up to track its work here: install a skill, and add a section to `CLAUDE.md` or `AGENTS.md` that names this tracker as where work is tracked |
 | `agent-setup <dir> --update` | Refresh what an earlier `agent-setup` wrote in `<dir>`: the skill, and each section it finds, keeping the tracker each names and its follow-ups rule |
 
-- The tracker is taken from `--tracker PATH`, then `BILINEAR_TRACKER`, then a
-  search upward from the working directory. `PATH` is the index note, with
-  or without its `.md` (`Trackers/Bilinear`), or a folder.
-- A folder that holds several trackers stands for the one whose prefix the
-  command's issue has: in `Trackers/`, `bilinear set WEB-2 status=done` needs
-  nothing more. A command that names no issue (`list`, `new`, `lint`) must be
-  given the index note there, and says so.
+- The first argument is the board file: the tracker's index note, a path that
+  ends in `.md`. Exactly that tracker is used, and nothing is inferred: not
+  from the working directory, and not from the prefix of the issues a
+  command names. Options come after the command. If the first argument does
+  not end in `.md`, the board file is taken from `BILINEAR_TRACKER` (also the
+  path of the index note, ending in `.md`) and the command comes first; a board
+  file given on the command line wins. With neither, the command fails.
+  `agent-setup` needs no board file for `--update` (the tracker is read from the
+  existing section) or for `~/.agents` (which gets the skill only).
+- A folder may hold several trackers; each is named by its own index note:
+  `bilinear Trackers/Website.md set WEB-2 status=done`.
 - The comment author is `--author`, then `BILINEAR_USER`, then `$USER`.
 - `--json` on `list`, `show`, `new`, `label`, `state` and `lint`.
 - `list` shows progress as `[1/2]` and `show` names the blockers and their
@@ -118,6 +124,10 @@ bilinear lint --fix
   no note; `--blocked-by ID` those naming `ID` as a blocker; `--related-to ID`
   those related to `ID`. They combine with each other and with the other
   filters; an unknown `ID` is an error.
+- `blocked-by` and `related-to` also take the IDs of issues of other trackers
+  in the same folder (`set BL-3 blocked-by+=OT-7`). Such a blocker is closed
+  by the `closed-states` of its own tracker; an ID no tracker in the folder
+  lists is refused. `list` shows only the tracker's own issues.
 - JSON issues have `blocked-by` (as stored), `related`, `blocks` (lists of
   IDs) and `blocked` (true or false); `show --json` has the stored
   `related-to` under `properties`.
@@ -126,7 +136,7 @@ bilinear lint --fix
 - A tracker has a triage state, `triage` in a new tracker: issues in it wait
   for you to accept them, by moving them to another state, or to reject them.
   New issues do not start there unless `--status` says so. An older tracker
-  gets one with `bilinear state triage --triage`.
+  gets one with `bilinear Trackers/Bilinear.md state triage --triage`.
 - State icons are one of the shapes `dashed`, `circle`, `quarter`, `half`,
   `three-quarters`, `check`, `cross`, or the name of any
   [Lucide](https://lucide.dev/icons) icon, such as `eye` or `rocket`.
@@ -137,7 +147,7 @@ bilinear lint --fix
   is what `init` used to make, keeps working as it is, and its folder names
   it.
 - A tracker made before `issues/` existed, with open notes directly in the
-  tracker folder, keeps working as it is; `bilinear lint --fix` moves the
+  tracker folder, keeps working as it is; `bilinear Trackers/Bilinear.md lint --fix` moves the
   notes into `issues/`.
 - Filters accept repeated flags or comma-separated values.
 - `rm` finds the vault by searching upward for `.obsidian/`. Without one it
@@ -161,12 +171,12 @@ One command sets a coding agent up to track its work in a tracker. `<dir>` is
 a project's folder, or one of the folders the agents keep in your home:
 
 ```sh
-bilinear --tracker Trackers/Bilinear agent-setup . --claude          # a project, for Claude Code
-bilinear --tracker Trackers/Bilinear agent-setup . --codex           # a project, for Codex
-bilinear --tracker Trackers/Bilinear agent-setup . --claude --local  # a project, kept out of git
-bilinear --tracker Trackers/Bilinear agent-setup . --claude --global-skill  # a project, with the skill in your home
-bilinear --tracker Trackers/Bilinear agent-setup ~/.claude           # for Claude Code, in all projects
-bilinear --tracker Trackers/Bilinear agent-setup ~/.codex            # for Codex, in all projects
+bilinear Trackers/Bilinear.md agent-setup . --claude          # a project, for Claude Code
+bilinear Trackers/Bilinear.md agent-setup . --codex           # a project, for Codex
+bilinear Trackers/Bilinear.md agent-setup . --claude --local  # a project, kept out of git
+bilinear Trackers/Bilinear.md agent-setup . --claude --global-skill  # a project, with the skill in your home
+bilinear Trackers/Bilinear.md agent-setup ~/.claude           # for Claude Code, in all projects
+bilinear Trackers/Bilinear.md agent-setup ~/.codex            # for Codex, in all projects
 bilinear agent-setup ~/.agents                                       # the skill only, for agents that read it
 bilinear agent-setup . --update                                      # after upgrading bilinear: refresh what is there
 ```
@@ -199,8 +209,8 @@ it is. In the folders of your home, where the skill already is, the option
 does nothing.
 
 ```sh
-cd ~/code/website && bilinear --tracker ~/Notes/Trackers/Website agent-setup . --claude --global-skill
-cd ~/code/engine  && bilinear --tracker ~/Notes/Trackers/Engine  agent-setup . --claude --global-skill
+cd ~/code/website && bilinear ~/Notes/Trackers/Website.md agent-setup . --claude --global-skill
+cd ~/code/engine  && bilinear ~/Notes/Trackers/Engine.md   agent-setup . --claude --global-skill
 ```
 
 `--local` keeps a project's files out of git, as far as that can be done (it
@@ -224,8 +234,9 @@ the command says that nothing was excluded.
   checklists rather than prose, in short-form technical English. It
   requires the relations between issues to be recorded and kept true: what
   blocks what, with large work split into issues that the issue for the
-  whole is blocked by, and which issues are related. It also describes the
-  commands, the properties and the exit codes.
+  whole is blocked by, and which issues are related, also to issues of the
+  other trackers in the folder. It also describes the commands, the
+  properties and the exit codes.
 - The instructions say only where: they name one tracker, by the path of its
   index note, and refer to the skill. A folder of several trackers can so
   serve several projects, each with its own. In a project the path is from
@@ -308,7 +319,8 @@ or by sync, show up live.
   follows those issues' states. Hover it for the list. A "blocked" marker
   shows while a `blocked-by` issue is open, and markers count the issues it
   blocks and the ones it is related to. "Set blockers…" and "Set related…"
-  in an issue's menu change them.
+  in an issue's menu change them; their pickers also offer the issues of the
+  folder's other trackers, labelled with the tracker's name.
 - Bulk edit on a multi-selection.
 - "Note missing" rows with recreate and remove actions.
 

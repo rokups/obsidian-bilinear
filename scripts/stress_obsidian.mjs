@@ -76,7 +76,7 @@ class Run {
 
   cli(...args) {
     return new Promise((done) => {
-      execFile(process.execPath, [CLI, "--tracker", join(this.dir, `${this.name}.md`), ...args], { env: { ...process.env, BILINEAR_USER: "cli", BILINEAR_TODAY: TODAY } }, (error, out, err) => {
+      execFile(process.execPath, [CLI, join(this.dir, `${this.name}.md`), ...args], { env: { ...process.env, BILINEAR_USER: "cli", BILINEAR_TODAY: TODAY } }, (error, out, err) => {
         done({ code: error ? (error.code ?? -1) : 0, out, err: err.trim() });
       });
     });
@@ -85,10 +85,10 @@ class Run {
   async setup() {
     // A second tracker in the folder, as trackers usually share one: its notes lie among those under test.
     for (const [note, prefix] of [[`${this.name}.md`, "ST"], ["Neighbour.md", "NB"]]) {
-      const made = await new Promise((done) => execFile(process.execPath, [CLI, "init", join(this.dir, note), "--prefix", prefix], (e, out, err) => done(e ? err : "")));
+      const made = await new Promise((done) => execFile(process.execPath, [CLI, join(this.dir, note), "init", "--prefix", prefix], (e, out, err) => done(e ? err : "")));
       if (made) throw new Error(`init failed: ${made}`);
     }
-    const neighbour = await new Promise((done) => execFile(process.execPath, [CLI, "--tracker", join(this.dir, "Neighbour.md"), "new", "not under test"], (e, out, err) => done(e ? err : "")));
+    const neighbour = await new Promise((done) => execFile(process.execPath, [CLI, join(this.dir, "Neighbour.md"), "new", "not under test"], (e, out, err) => done(e ? err : "")));
     if (neighbour) throw new Error(`seeding the neighbour failed: ${neighbour}`);
     for (let i = 1; i <= SEEDS; i++) {
       const r = await this.cli("new", `seed ${i}`);

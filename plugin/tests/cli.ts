@@ -23,11 +23,17 @@ export class Sandbox {
 
   async init(): Promise<void> {
     fs.mkdirSync(join(this.vault, ".obsidian"), { recursive: true });
-    const made = await this.run("init", this.index, "--prefix", "BL");
+    const made = await this.raw(this.index, "init", "--prefix", "BL");
     if (made.code !== 0 || made.out !== `${this.index}\n`) throw new Error(`init failed: ${JSON.stringify(made)}`);
   }
 
+  /** Run a command against this tracker: its index note goes first, unless the arguments start with a board file. */
   async run(...argv: string[]): Promise<Ran> {
+    return this.raw(...(argv[0]?.endsWith(".md") ? [] : [this.index]), ...argv);
+  }
+
+  /** Run exactly these arguments. */
+  async raw(...argv: string[]): Promise<Ran> {
     let out = "";
     let err = "";
     const code = await main(argv, { env: this.env, cwd: this.cwd, stdout: (s) => (out += s), stderr: (s) => (err += s) });
@@ -45,8 +51,10 @@ export class Sandbox {
     return (await this.run(...argv)).code;
   }
 
+  /** The ids `list` gives, for a board file first if the arguments start with one. */
   async ids(...argv: string[]): Promise<string[]> {
-    return (JSON.parse(await this.ok("list", "--json", ...argv)) as Array<{ id: string }>).map((i) => i.id);
+    const board = argv[0]?.endsWith(".md") ? argv.splice(0, 1) : [];
+    return (JSON.parse(await this.ok(...board, "list", "--json", ...argv)) as Array<{ id: string }>).map((i) => i.id);
   }
 
   /** Every file under the tracker folder, as sorted relative paths. */

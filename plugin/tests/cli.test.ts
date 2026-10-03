@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { Worker } from "node:worker_threads";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
+import { instructions, shellWord } from "../../cli/src/agent";
 import { NodeIO } from "../../cli/src/node-io";
 import { withFileLock } from "../src/ops/lock-file";
 import { sandbox } from "./cli";
@@ -28,28 +29,28 @@ describe("init", () => {
   });
 
   it("refuses an existing tracker, a bad prefix and a path that is not a note's", async () => {
-    expect(await s().code("init", s().index, "--prefix", "BL")).toBe(1);
-    expect(await s().code("init", join(s().vault, "X", "X.md"), "--prefix", "bl")).toBe(1);
-    expect(await s().code("init", join(s().vault, "X", "X.md"))).toBe(1);
-    const r = await s().run("init", join(s().vault, "X"), "--prefix", "XX");
+    expect(await s().code(s().index, "init", "--prefix", "BL")).toBe(1);
+    expect(await s().code(join(s().vault, "X", "X.md"), "init", "--prefix", "bl")).toBe(1);
+    expect(await s().code(join(s().vault, "X", "X.md"), "init")).toBe(1);
+    const r = await s().raw(join(s().vault, "X"), "init", "--prefix", "XX");
     expect(r.code).toBe(1);
-    expect(r.err).toContain(`give the path of the index note, such as ${join(s().vault, "X")}.md`);
+    expect(r.err).toContain("no board file");
     expect(fs.existsSync(join(s().vault, "X"))).toBe(false);
   });
 
   it("takes a relative path", async () => {
     s().cwd = s().vault;
-    expect(await s().ok("init", join("Other", "Other.md"), "--prefix", "OT")).toBe(`${join("Other", "Other.md")}\n`);
-    expect(await s().ok("--tracker", "Other", "new", "A")).toBe("OT-1\n");
+    expect(await s().ok(join("Other", "Other.md"), "init", "--prefix", "OT")).toBe(`${join("Other", "Other.md")}\n`);
+    expect(await s().ok(join("Other", "Other.md"), "new", "A")).toBe("OT-1\n");
   });
 
   it("puts a second tracker in a folder, with a prefix of its own", async () => {
     const other = join(s().dir, "Other.md");
-    const taken = await s().run("init", other, "--prefix", "BL");
+    const taken = await s().run(other, "init", "--prefix", "BL");
     expect(taken.code).toBe(1);
     expect(taken.err).toContain("Bilinear, in the same folder, already has the prefix BL");
     expect(fs.existsSync(other)).toBe(false);
-    expect(await s().ok("init", other, "--prefix", "OT")).toBe(`${other}\n`);
+    expect(await s().ok(other, "init", "--prefix", "OT")).toBe(`${other}\n`);
     expect(s().entries()).toEqual(["Bilinear.md", "Other.md"]);
     expect(fs.existsSync(s().lockFile)).toBe(false);
   });
@@ -58,99 +59,250 @@ describe("init", () => {
 describe("finding the tracker", () => {
   const s = sandbox();
 
-  it("searches upward, then the environment, then the flag", async () => {
+  it("works on the board file given first, from wherever it is run", async () => {
     await s().ok("new", "One");
-    s().cwd = join(s().dir, "archive");
     expect(await s().ids()).toEqual(["BL-1"]);
     s().cwd = s().vault;
-    expect(await s().code("list")).toBe(1);
-    expect(await s().ids("--tracker", s().dir)).toEqual(["BL-1"]);
-    expect(await s().ids("--tracker", s().index)).toEqual(["BL-1"]);
-    expect(await s().ids("--tracker", join("Trackers", "Bilinear"))).toEqual(["BL-1"]);
-    s().env["BILINEAR_TRACKER"] = s().dir;
-    expect(await s().ids()).toEqual(["BL-1"]);
-    expect(await s().code("--tracker", s().index, "list", "--json")).toBe(0);
-    expect(await s().code("--tracker", s().vault, "list")).toBe(1);
-    expect(await s().code("--tracker", s().note("BL-1"), "list")).toBe(1);
+    expect(await s().ids(join("Trackers", "Bilinear", "Bilinear.md"))).toEqual(["BL-1"]);
+    s().cwd = join(s().dir, "archive");
+    expect(await s().ids(s().index)).toEqual(["BL-1"]);
+  });
+
+  it("takes nothing from the working folder, a folder, a partial name or a note", async () => {
+    const usage = "no board file; give the tracker's index note, ending in .md, as the first argument, or set BILINEAR_TRACKER to it";
+    // The tracker around the working folder is not looked for.
+    for (const cwd of [s().dir, s().vault]) {
+      s().cwd = cwd;
+      const r = await s().raw("list");
+      expect(r.code).toBe(1);
+      expect(r.err).toContain(usage);
+      expect(r.err).toContain("usage: bilinear <board.md> <command> [options]");
+    }
+    expect((await s().raw()).code).toBe(1);
+    expect((await s().raw("--json")).err).toContain(usage);
+    // The first argument ends in .md or it is not a board file; the others are not looked for.
+    for (const first of [s().dir, s().vault, join("Trackers", "Bilinear"), join(s().dir, "Bilinear"), "Bilinear"]) {
+      const r = await s().raw(first, "list");
+      expect(r.code, first).toBe(1);
+      expect(r.err, first).toContain(usage);
+    }
+    // A file or folder named .md is a board file only if it is a tracker's index note.
+    expect((await s().raw(s().note("BL-1"), "list")).err).toContain("no tracker index note");
+    fs.mkdirSync(join(s().dir, "Folder.md"));
+    expect((await s().raw(join(s().dir, "Folder.md"), "list")).err).toContain("is not a file; a tracker's index note is expected");
+    fs.writeFileSync(join(s().dir, "Plain.md"), "A note.\n");
+    expect((await s().raw(join(s().dir, "Plain.md"), "list")).err).toContain(`${join(s().dir, "Plain.md")} is not a tracker index note`);
+    expect((await s().raw(join(s().dir, "Nope.md"), "list")).err).toContain(`no tracker index note ${join(s().dir, "Nope.md")}`);
+  });
+
+  it("does not take options or the command before the board file", async () => {
+    for (const argv of [["--author", "me", s().index, "list"], ["--json", s().index, "list"], ["list", s().index]]) {
+      const r = await s().raw(...argv);
+      expect(r.code, argv.join(" ")).toBe(1);
+      expect(r.err, argv.join(" ")).toContain("no board file");
+    }
+    expect((await s().raw(s().index, "--author", "me", "list")).err).toContain("unknown command '--author'");
+  });
+
+  it("has no --tracker option", async () => {
+    const cases: [string[], string][] = [
+      [["--tracker", s().index, "list"], "no board file"],
+      [[s().index, "list", "--tracker", s().index], "Unknown option '--tracker'"],
+      [[s().index, "list", `--tracker=${s().index}`], "Unknown option '--tracker'"],
+    ];
+    for (const [argv, error] of cases) {
+      const r = await s().raw(...argv);
+      expect(r.code, argv.join(" ")).toBe(1);
+      expect(r.err, argv.join(" ")).toContain(error);
+    }
+    expect((await s().raw(s().index, "list", "--help")).out).not.toContain("--tracker");
+  });
+
+  it("prints a command's help with no board file, but still wants one for the command itself", async () => {
+    delete s().env["BILINEAR_TRACKER"];
+    for (const command of ["set", "init"]) {
+      const r = await s().raw(command, "--help");
+      expect(r.code, command).toBe(0);
+      expect(r.out, command).toContain(`bilinear <board.md> ${command}`);
+    }
+    for (const argv of [["set"], ["set", "BL-1", "status=done"], ["list", "--bogus"], ["Trackers/Bilinear", "list"]]) {
+      const r = await s().raw(...argv);
+      expect(r.code, argv.join(" ")).toBe(1);
+      expect(r.err, argv.join(" ")).toContain("no board file");
+    }
+  });
+
+  it("quotes a board path in an example command only when a shell would split or expand it", () => {
+    expect(shellWord("Trackers/My Board.md")).toBe('"Trackers/My Board.md"');
+    expect(shellWord('a"$b`c\\.md')).toBe('"a\\"\\$b\\`c\\.md"');
+    expect(shellWord("C:\\Notes\\Bilinear.md")).toBe("C:\\Notes\\Bilinear.md");
+    expect(shellWord("\\\\server\\My Notes\\Bilinear.md")).toBe('"\\\\server\\My Notes\\Bilinear.md"');
+    expect(shellWord("Trackers/Bilinear/Bilinear.md")).toBe("Trackers/Bilinear/Bilinear.md");
+    expect(instructions("My Trackers/Board.md", "skill")).toContain('`bilinear "My Trackers/Board.md" <command> ...`');
+    expect(instructions("Trackers/Board.md", "skill")).toContain("`bilinear Trackers/Board.md <command> ...`");
+  });
+
+  describe("BILINEAR_TRACKER", () => {
+    const other = () => join(s().dir, "Other.md");
+    beforeEach(async () => {
+      await s().ok("new", "One");
+      await s().ok(other(), "init", "--prefix", "OT");
+    });
+
+    it("names the board file when none is given first", async () => {
+      s().env["BILINEAR_TRACKER"] = s().index;
+      s().cwd = s().root;
+      expect(JSON.parse((await s().raw("list", "--json")).out)).toHaveLength(1);
+      expect((await s().raw("new", "Two")).out).toBe("BL-2\n");
+      expect((await s().raw("--author", "me", "list")).err).toContain("unknown command '--author'");
+    });
+
+    it("loses to the board file given first", async () => {
+      s().env["BILINEAR_TRACKER"] = s().index;
+      expect(await s().ok(other(), "new", "Two")).toBe("OT-1\n");
+      expect(await s().ids()).toEqual(["BL-1"]);
+      expect(await s().ids(other())).toEqual(["OT-1"]);
+    });
+
+    it("does not guess a tracker from the prefix of the issues named", async () => {
+      await s().ok(other(), "new", "Two");
+      s().env["BILINEAR_TRACKER"] = s().index;
+      expect((await s().raw("new", "Three", "--blocked-by", "OT-1")).out).toBe("BL-2\n");
+      const r = await s().raw("show", "OT-1");
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("OT-1: no such issue");
+      s().env["BILINEAR_TRACKER"] = other();
+      expect((await s().raw("show", "BL-1")).err).toContain("BL-1: no such issue");
+    });
+
+    it("must be the index note of a tracker, as a path ending in .md", async () => {
+      for (const value of [s().dir, s().vault, join("Trackers", "Bilinear"), join(s().dir, "Other")]) {
+        s().env["BILINEAR_TRACKER"] = value;
+        const r = await s().raw("list");
+        expect(r.code, value).toBe(1);
+        expect(r.err, value).toContain(`$BILINEAR_TRACKER (${value}) is not the path of a tracker's index note, which ends in .md`);
+      }
+      s().env["BILINEAR_TRACKER"] = join(s().dir, "Nope.md");
+      expect((await s().raw("list")).err).toContain(`no tracker index note $BILINEAR_TRACKER (${join(s().dir, "Nope.md")})`);
+      fs.writeFileSync(join(s().dir, "Plain.md"), "A note.\n");
+      s().env["BILINEAR_TRACKER"] = join(s().dir, "Plain.md");
+      expect((await s().raw("list")).err).toContain("is not a tracker index note");
+      s().env["BILINEAR_TRACKER"] = join(s().dir, "Nope");
+      expect((await s().raw("--version")).code).toBe(0);
+    });
+
+    it("creates the index note with init", async () => {
+      s().env["BILINEAR_TRACKER"] = join(s().vault, "New", "New.md");
+      expect((await s().raw("init", "--prefix", "NW")).out).toBe(`${join(s().vault, "New", "New.md")}\n`);
+      expect((await s().raw("new", "A")).out).toBe("NW-1\n");
+    });
   });
 
   it("knows the index note by its frontmatter, not its name", async () => {
     fs.renameSync(s().index, join(s().dir, "Board.md"));
-    expect(await s().ok("new", "One")).toBe("BL-1\n");
+    expect(await s().ok(join(s().dir, "Board.md"), "new", "One")).toBe("BL-1\n");
   });
 
   describe("in a folder of several", () => {
     const other = () => join(s().dir, "Other.md");
     beforeEach(async () => {
-      await s().ok("init", other(), "--prefix", "OT");
-      await s().ok("--tracker", s().index, "new", "One");
-      await s().ok("--tracker", other(), "new", "Two");
+      await s().ok(other(), "init", "--prefix", "OT");
+      await s().ok(s().index, "new", "One");
+      await s().ok(other(), "new", "Two");
     });
 
-    it("needs the tracker named when the command names no issue", async () => {
-      for (const argv of [["list"], ["new", "Three"], ["lint"], ["state"], ["label"], ["archive", "--closed"]]) {
-        const r = await s().run(...argv);
-        expect(r.code, argv.join(" ")).toBe(1);
-        expect(r.err, argv.join(" ")).toContain(`${s().dir} holds several trackers (Bilinear.md, Other.md); name one, as in --tracker ${s().index}`);
-      }
-      const named = await s().run("--tracker", join("..", "Bilinear"), "list");
-      expect(named.code).toBe(1);
-      expect(named.err).toContain(`--tracker ${join("..", "Bilinear", "Bilinear.md")}`);
-      expect(await s().ids("--tracker", other())).toEqual(["OT-1"]);
-      s().env["BILINEAR_TRACKER"] = s().index;
-      expect(await s().ids()).toEqual(["BL-1"]);
-    });
-
-    it("takes the tracker whose prefix the issue has", async () => {
-      s().cwd = join(s().dir, "issues");
-      await s().ok("set", "OT-1", "status=todo");
-      await s().ok("comment", "BL-1", "Seen.");
-      expect(JSON.parse(await s().ok("show", "OT-1", "--json")).status).toBe("todo");
-      expect(s().read(s().note("BL-1"))).toContain("rk: Seen.");
-      expect(await s().ok("--tracker", s().dir, "new", "Three", "--blocked-by", "OT-1")).toBe("OT-2\n");
-      expect(await s().ok("new", "Four", "--related-to", "[[BL-1]]")).toBe("BL-2\n");
-      expect(await s().ids("--blocked-by", "OT-1")).toEqual(["OT-2"]);
-      await s().ok("move", "OT-2", "--top");
-      await s().ok("move", "BL-2", "--before", "BL-1");
-      expect(await s().ok("archive", "OT-1", "OT-2")).toBe("OT-1\nOT-2\n");
-      expect(await s().ok("unarchive", "OT-2")).toBe("OT-2\n");
-      await s().ok("rm", "BL-2");
-      expect(await s().ids("--tracker", s().index, "--all")).toEqual(["BL-1"]);
-      expect(await s().ids("--tracker", other(), "--all")).toEqual(["OT-2", "OT-1"]);
-    });
-
-    it("does not guess from a prefix that is no tracker's, or from issues of two", async () => {
-      for (const argv of [["show", "XX-1"], ["show", "nonsense"], ["archive", "BL-1", "OT-1"]]) {
-        const r = await s().run(...argv);
-        expect(r.code, argv.join(" ")).toBe(1);
-        expect(r.err, argv.join(" ")).toContain("holds several trackers");
-      }
-      // The title of a new issue is not an issue named.
-      expect(await s().code("new", "OT-1")).toBe(1);
-      // A tracker that is named is the one, whatever the issue's prefix.
-      const r = await s().run("--tracker", s().index, "show", "OT-1");
-      expect(r.err).toContain("OT-1: no such issue");
-    });
-
-    it("names a tracker without the .md of its index note", async () => {
-      s().cwd = s().vault;
-      expect(await s().ids("--tracker", join("Trackers", "Bilinear", "Other"))).toEqual(["OT-1"]);
-      const r = await s().run("--tracker", join("Trackers", "Bilinear", "Nope"), "list");
+    it("works on the board file named, whatever prefix the issues have", async () => {
+      expect(await s().ok(s().index, "new", "Three", "--blocked-by", "OT-1")).toBe("BL-2\n");
+      expect(await s().ok("new", "Four", "--related-to", "[[OT-1]]")).toBe("BL-3\n");
+      const r = await s().run(s().index, "show", "OT-1");
       expect(r.code).toBe(1);
-      expect(r.err).toContain(`no tracker index note in ${join("Trackers", "Bilinear", "Nope")}`);
-      fs.writeFileSync(join(s().dir, "Plain.md"), "A note.\n");
-      const plain = await s().run("--tracker", join("Trackers", "Bilinear", "Plain"), "list");
-      expect(plain.err).toContain(`${join("Trackers", "Bilinear", "Plain")}.md is not a tracker index note`);
+      expect(r.err).toContain("OT-1: no such issue");
+      expect((await s().run("set", "OT-1", "status=todo")).err).toContain("OT-1: no such issue");
+      expect((await s().run(other(), "show", "BL-1")).err).toContain("BL-1: no such issue");
+      expect(await s().ok(other(), "new", "Five", "--blocked-by", "BL-1")).toBe("OT-2\n");
+      await s().ok("comment", "BL-1", "Seen.");
+      expect(s().read(s().note("BL-1"))).toContain("rk: Seen.");
+      await s().ok("move", "BL-3", "--before", "BL-1");
+      expect(await s().ok("archive", "BL-3")).toBe("BL-3\n");
+      expect(await s().ok("unarchive", "BL-3")).toBe("BL-3\n");
+      await s().ok("rm", "BL-3");
+      expect(await s().ids(s().index, "--all")).toEqual(["BL-1", "BL-2"]);
+      expect(await s().ids(other(), "--all")).toEqual(["OT-1", "OT-2"]);
+    });
+
+    describe("with issues linked across trackers", () => {
+      const bl = () => [s().index];
+      beforeEach(async () => {
+        // The other tracker closes only canceled issues: done ones are open there.
+        fs.writeFileSync(other(), fs.readFileSync(other(), "utf8").replace("closed-states: [done, canceled]", "closed-states: [canceled]"));
+      });
+
+      it("takes the ID of another tracker's issue when an issue is made or set", async () => {
+        expect(await s().ok(...bl(), "new", "Three", "--blocked-by", "OT-1")).toBe("BL-2\n");
+        await s().ok("set", "BL-1", "related-to+=OT-1");
+        expect(s().read(s().note("BL-2"))).toContain("[[OT-1]]");
+        expect(s().read(s().note("BL-1"))).toContain("[[OT-1]]");
+        for (const argv of [["new", "Four", "--blocked-by", "OT-99"], ["set", "BL-1", "blocked-by+=OT-99"], ["set", "BL-1", "related-to+=XX-1"]]) {
+          const r = await s().run(...bl(), ...argv);
+          expect(r.code, argv.join(" ")).toBe(1);
+        }
+        expect(await s().run(...bl(), "lint")).toMatchObject(CLEAN);
+      });
+
+      it("counts a blocker of another tracker open or closed by that tracker's states", async () => {
+        await s().ok(...bl(), "new", "Three", "--blocked-by", "OT-1");
+        expect(await s().ids(...bl(), "--blocked")).toEqual(["BL-2"]);
+        await s().ok(other(), "set", "OT-1", "status=done");
+        expect(await s().ids(...bl(), "--blocked")).toEqual(["BL-2"]);
+        await s().ok(other(), "set", "OT-1", "status=canceled");
+        expect(await s().ids(...bl(), "--blocked")).toEqual([]);
+        expect(await s().ok(...bl(), "list", "--blocked-by", "OT-1")).toContain("BL-2");
+      });
+
+      it("lists the issues blocked by or related to one of another tracker", async () => {
+        await s().ok(...bl(), "new", "Three", "--blocked-by", "OT-1");
+        await s().ok("set", "BL-1", "related-to+=OT-1");
+        expect(await s().ids(...bl(), "--blocked-by", "OT-1")).toEqual(["BL-2"]);
+        expect(await s().ids(...bl(), "--blocked-by", "[[OT-1]]")).toEqual(["BL-2"]);
+        expect(await s().ids(...bl(), "--related-to", "OT-1")).toEqual(["BL-1"]);
+        expect(await s().ids(...bl(), "--related-to", "OT-1", "--blocked-by", "OT-1")).toEqual([]);
+        // The other tracker's issues are not this one's to list.
+        expect(await s().ids(other(), "--blocked-by", "OT-1")).toEqual([]);
+        for (const flag of ["--blocked-by", "--related-to"]) {
+          const r = await s().run(...bl(), "list", flag, "OT-99");
+          expect(r.code, flag).toBe(1);
+          expect(r.err, flag).toContain("OT-99: no such issue");
+        }
+      });
+
+      it("shows the issues of another tracker among the links, with their status", async () => {
+        await s().ok(...bl(), "new", "Three", "--blocked-by", "OT-1");
+        await s().ok("set", "BL-1", "related-to+=OT-1");
+        await s().ok(other(), "set", "OT-1", "status=in-progress");
+        const text = await s().ok(...bl(), "show", "BL-2");
+        expect(text).toContain("progress:    0/1  (OT-1 in-progress)\n");
+        const related = await s().ok(...bl(), "show", "BL-1");
+        expect(related).toContain("related:     OT-1 in-progress\n");
+        const owner = await s().ok(other(), "show", "OT-1");
+        expect(owner).toContain("blocks:      BL-2 backlog\n");
+        expect(owner).toContain("related:     BL-1 backlog\n");
+        const j = JSON.parse(await s().ok(...bl(), "show", "BL-2", "--json"));
+        expect(j).toMatchObject({ "blocked-by": ["OT-1"], blocked: true, progress: { done: 0, total: 1, issues: ["OT-1"] } });
+        expect(JSON.parse(await s().ok(...bl(), "show", "BL-1", "--json"))).toMatchObject({ related: ["OT-1"], blocked: false });
+        expect(JSON.parse(await s().ok(other(), "show", "OT-1", "--json"))).toMatchObject({ blocks: ["BL-2"], related: ["BL-1"] });
+        // An issue of the other tracker is not one to show here.
+        expect((await s().run(...bl(), "show", "OT-1")).err).toContain("OT-1: no such issue");
+      });
     });
 
     it("lints each on its own, and locks them as one", async () => {
-      expect(await s().run("--tracker", s().index, "lint")).toMatchObject(CLEAN);
-      expect(await s().run("--tracker", other(), "lint")).toMatchObject(CLEAN);
+      expect(await s().run(s().index, "lint")).toMatchObject(CLEAN);
+      expect(await s().run(other(), "lint")).toMatchObject(CLEAN);
       fs.writeFileSync(s().lockFile, PLUGIN_LOCK);
       s().env["BILINEAR_LOCK_TIMEOUT"] = "0.05";
       const beat = setInterval(() => fs.utimesSync(s().lockFile, new Date(), new Date()), 10);
       try {
-        expect(await s().code("--tracker", other(), "new", "Held")).toBe(3);
+        expect(await s().code(other(), "new", "Held")).toBe(3);
       } finally {
         clearInterval(beat);
       }
@@ -427,7 +579,7 @@ describe("several processes at once", () => {
       const procs = 6;
       const per = 4;
       const env = { ...process.env, BILINEAR_LOCK_TIMEOUT: "60", BILINEAR_USER: "w", BILINEAR_TODAY: "2026-10-01" };
-      const cli = (...argv: string[]) => promisify(execFile)(process.execPath, [BIN, "--tracker", s().dir, ...argv], { env });
+      const cli = (...argv: string[]) => promisify(execFile)(process.execPath, [BIN, s().index, ...argv], { env });
       const failures: string[] = [];
       await Promise.all(
         Array.from({ length: procs }, async (_, n) => {
@@ -640,7 +792,7 @@ describe("for LLM agents", () => {
   const AGENTS = join(".agents", "skills", "bilinear", "SKILL.md");
   const home = () => join(s().root, "home");
   const proj = () => join(s().vault, "proj");
-  const setup = (...argv: string[]) => s().ok("--tracker", s().dir, "agent-setup", ...argv);
+  const setup = (...argv: string[]) => s().ok(s().index, "agent-setup", ...argv);
   const hasGit = spawnSync("git", ["--version"]).status === 0;
   beforeEach(() => {
     s().env["HOME"] = home();
@@ -655,6 +807,7 @@ describe("for LLM agents", () => {
   const repo = () => fs.mkdirSync(join(s().vault, ".git"));
   const block = (path: string, skill: string, triage = "") =>
     `<!-- bilinear:start -->\n${triage === "" ? "" : "<!-- bilinear:followups -->\n"}## Issue tracking\n\nWork on this project is tracked in a Bilinear issue tracker. ${isAbsolute(path) ? "Its path:" : "Its path, from the root of the repository:"}\n\n    ${path}\n\n` +
+    `Run the CLI with it first, as in \`bilinear ${shellWord(path)} <command> ...\`, or set\n\`BILINEAR_TRACKER\` to it once and leave it out.\n\n` +
     `Track every piece of work there, from before it starts until it is finished,\nas the \`bilinear\` skill says. The skill is in\n\`${skill}\`.\n${triage}<!-- bilinear:end -->\n`;
   const claudeBlock = (path = s().index) => block(path, ".claude/skills/bilinear/SKILL.md");
   const codexBlock = (path = s().index) => block(path, ".agents/skills/bilinear/SKILL.md");
@@ -671,8 +824,8 @@ describe("for LLM agents", () => {
     expect(s().read(skill)).toContain("name: bilinear");
     fs.writeFileSync(claude, "# Project\n");
     expect(await setup("proj", "--claude")).toBe(`unchanged ${skill}\nupdated ${claude}\n`);
-    expect(await s().code("--tracker", s().dir, "agent-setup")).toBe(1);
-    expect(await s().code("--tracker", s().dir, "agent-setup", "a", "b", "--claude")).toBe(1);
+    expect(await s().code(s().index, "agent-setup")).toBe(1);
+    expect(await s().code(s().index, "agent-setup", "a", "b", "--claude")).toBe(1);
   });
 
   it("sets a project up for Codex", async () => {
@@ -693,15 +846,15 @@ describe("for LLM agents", () => {
   });
 
   it("needs a harness for a project, and the project's folder rather than a folder of a harness", async () => {
-    const r = await s().run("--tracker", s().dir, "agent-setup", "proj");
+    const r = await s().run(s().index, "agent-setup", "proj");
     expect(r.code).toBe(1);
     expect(r.err).toContain("give --codex, --claude or both");
     for (const folder of [".claude", ".codex", ".agents"]) {
-      const bad = await s().run("--tracker", s().dir, "agent-setup", folder, "--claude");
+      const bad = await s().run(s().index, "agent-setup", folder, "--claude");
       expect(bad.code, folder).toBe(1);
       expect(bad.err, folder).toContain(`give the project's folder, not its ${folder}`);
     }
-    expect(await s().code("--tracker", s().dir, "agent-setup", join("proj", ".claude"), "--codex")).toBe(1);
+    expect(await s().code(s().index, "agent-setup", join("proj", ".claude"), "--codex")).toBe(1);
     expect(fs.existsSync(proj())).toBe(false);
     expect(fs.existsSync(join(s().vault, ".claude"))).toBe(false);
   });
@@ -735,12 +888,12 @@ describe("for LLM agents", () => {
     expect(await setup(join(s().root, "claude"))).toBe(`created ${join(s().root, "claude", "skills", "bilinear", "SKILL.md")}\ncreated ${join(s().root, "claude", "CLAUDE.md")}\n`);
     expect(s().read(join(s().root, "claude", "CLAUDE.md"))).toBe(block(s().index, join(s().root, "claude", "skills", "bilinear", "SKILL.md")));
     expect(await setup(join(s().root, "codex"))).toBe(`created ${join(home(), AGENTS)}\ncreated ${join(s().root, "codex", "AGENTS.md")}\n`);
-    expect(await s().code("--tracker", s().dir, "agent-setup", join(s().root, "codex"), "--claude")).toBe(1);
+    expect(await s().code(s().index, "agent-setup", join(s().root, "codex"), "--claude")).toBe(1);
   });
 
   it("refuses an option that does not belong to a folder of the home directory", async () => {
     for (const argv of [["~/.claude", "--codex"], ["~/.codex", "--claude"], ["~/.agents", "--claude"], ["~/.agents", "--followups"], ["~/.claude", "--codex", "--claude"]]) {
-      expect(await s().code("--tracker", s().dir, "agent-setup", ...argv), argv.join(" ")).toBe(1);
+      expect(await s().code(s().index, "agent-setup", ...argv), argv.join(" ")).toBe(1);
     }
     expect(fs.existsSync(home())).toBe(false);
   });
@@ -748,11 +901,14 @@ describe("for LLM agents", () => {
   it("sets up ~/.agents with the skill alone, and without a tracker", async () => {
     s().cwd = s().root;
     const skill = join(home(), AGENTS);
-    expect(await s().ok("agent-setup", "~/.agents")).toBe(`created ${skill}\n`);
-    expect(await s().ok("agent-setup", "~/.agents", "--codex", "--local")).toBe(`unchanged ${skill}\n`);
+    const bare = async (...argv: string[]) => (await s().raw("agent-setup", ...argv)).out;
+    expect(await bare("~/.agents")).toBe(`created ${skill}\n`);
+    expect(await bare("~/.agents", "--codex", "--local")).toBe(`unchanged ${skill}\n`);
     expect(fs.readdirSync(join(home(), ".agents"))).toEqual(["skills"]);
     for (const argv of [["~/.claude"], ["~/.codex"], ["proj", "--claude"], ["proj", "--codex"]]) {
-      expect(await s().code("agent-setup", ...argv), argv.join(" ")).toBe(1);
+      const r = await s().raw("agent-setup", ...argv);
+      expect(r.code, argv.join(" ")).toBe(1);
+      expect(r.err, argv.join(" ")).toContain("agent-setup needs a board file for this");
     }
     expect(fs.existsSync(join(home(), ".claude"))).toBe(false);
   });
@@ -837,7 +993,7 @@ describe("for LLM agents", () => {
     expect(text).toContain("Assign an issue for `triage` to the user (`--assignee <the user's name>`),");
     expect(text).toContain("write it so that the user can accept it\nwith as few edits as possible.");
 
-    await s().ok("--tracker", s().dir, "state", "inbox", "--triage");
+    await s().ok(s().index, "state", "inbox", "--triage");
     await setup(".", "--claude", "--followups");
     expect(s().read(claude)).toContain('(`new "Title" --status inbox`)');
     await setup("~/.codex", "--followups");
@@ -849,14 +1005,14 @@ describe("for LLM agents", () => {
 
     // Without a triage state it fails, and writes nothing.
     s().edit(s().index, "triage-state: inbox\n", "");
-    const r = await s().run("--tracker", s().dir, "agent-setup", "none", "--claude", "--followups");
+    const r = await s().run(s().index, "agent-setup", "none", "--claude", "--followups");
     expect(r.code).toBe(1);
-    expect(r.err).toContain("bilinear state triage --triage");
+    expect(r.err).toContain("state triage --triage");
     expect(fs.existsSync(join(s().vault, "none"))).toBe(false);
   });
 
   describe("with --update", () => {
-    const update = (...argv: string[]) => s().ok("--tracker", s().dir, "agent-setup", ...argv, "--update");
+    const update = (...argv: string[]) => s().ok(s().index, "agent-setup", ...argv, "--update");
     const stale = (path: string) => fs.writeFileSync(path, "an older version");
 
     it("refreshes what is there, and leaves a file that is the same as it was", async () => {
@@ -916,11 +1072,11 @@ describe("for LLM agents", () => {
     });
 
     it("reads the triage state from a tracker named by its absolute path", async () => {
-      await s().ok("--tracker", s().dir, "state", "triage", "--triage");
+      await s().ok(s().index, "state", "triage", "--triage");
       await setup("~/.codex", "--followups");
       const agents = join(home(), ".codex", "AGENTS.md");
       expect(s().read(agents)).toContain("--status triage");
-      await s().ok("--tracker", s().dir, "state", "inbox", "--triage");
+      await s().ok(s().index, "state", "inbox", "--triage");
       expect(await s().ok("agent-setup", "~/.codex", "--update")).toBe(`unchanged ${join(home(), AGENTS)}\nupdated ${agents}\n`);
       expect(s().read(agents)).toContain("--status inbox");
       expect(s().read(agents)).not.toContain("--status triage");
@@ -955,8 +1111,8 @@ describe("for LLM agents", () => {
       await setup(".", "--claude", "--followups");
       const before = s().read(claude);
       const other = join(s().vault, "Other");
-      await s().ok("init", join(other, "Other.md"), "--prefix", "OT");
-      expect(await s().ok("--tracker", other, "agent-setup", ".", "--update")).toContain(`unchanged ${claude}`);
+      await s().ok(join(other, "Other.md"), "init", "--prefix", "OT");
+      expect(await s().ok(join(other, "Other.md"), "agent-setup", ".", "--update")).toContain(`unchanged ${claude}`);
       expect(s().read(claude)).toBe(before);
       s().cwd = other;
       await s().ok("agent-setup", s().vault, "--update");
@@ -964,13 +1120,28 @@ describe("for LLM agents", () => {
       expect(before).toContain("\n    Trackers/Bilinear/Bilinear.md\n");
     });
 
-    it("keeps a section that names the tracker by its folder, as older versions wrote it", async () => {
+    it("does not read a section that names the tracker by its folder, as older versions wrote it", async () => {
       repo();
       const claude = join(s().vault, "CLAUDE.md");
       await setup(".", "--claude", "--followups");
       s().edit(claude, "    Trackers/Bilinear/Bilinear.md\n", "    Trackers/Bilinear\n");
       const before = s().read(claude);
-      expect(await update(".")).toContain(`unchanged ${claude}`);
+      const r = await s().run("agent-setup", ".", "--update");
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("names the tracker Trackers/Bilinear, which cannot be read");
+      expect(s().read(claude)).toBe(before);
+    });
+
+    it("does not read a section without the follow-ups rule that names the tracker by its folder either", async () => {
+      repo();
+      const claude = join(s().vault, "CLAUDE.md");
+      await setup(".", "--claude");
+      s().edit(claude, "    Trackers/Bilinear/Bilinear.md\n", "    Trackers/Bilinear\n");
+      const before = s().read(claude);
+      const r = await s().run("agent-setup", ".", "--update");
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("names the tracker Trackers/Bilinear, which cannot be read: it is not the path of a tracker's index note");
+      expect(r.err).toContain("run agent-setup without --update");
       expect(s().read(claude)).toBe(before);
     });
 
@@ -978,7 +1149,7 @@ describe("for LLM agents", () => {
       repo();
       const claude = join(s().vault, "CLAUDE.md");
       await setup(".", "--claude", "--followups");
-      await s().ok("--tracker", s().dir, "state", "inbox", "--triage");
+      await s().ok(s().index, "state", "inbox", "--triage");
       await update(".");
       expect(s().read(claude)).toContain('(`new "Title" --status inbox`)');
     });
@@ -989,7 +1160,7 @@ describe("for LLM agents", () => {
       await setup(".", "--claude", "--followups");
       stale(skill);
       s().edit(s().index, "triage-state: triage\n", "");
-      let r = await s().run("--tracker", s().dir, "agent-setup", ".", "--update");
+      let r = await s().run(s().index, "agent-setup", ".", "--update");
       expect(r.code).toBe(1);
       expect(r.err).toContain(`${claude} names the tracker Trackers/Bilinear/Bilinear.md, which has no triage state`);
       expect(r.err).toContain("run agent-setup without --update");
@@ -1011,16 +1182,16 @@ describe("for LLM agents", () => {
 
     it("fails where there is nothing to update, and with the options that say what to write", async () => {
       fs.writeFileSync(join(s().vault, "CLAUDE.md"), "# Rules\n");
-      const r = await s().run("--tracker", s().dir, "agent-setup", ".", "--update");
+      const r = await s().run(s().index, "agent-setup", ".", "--update");
       expect(r.code).toBe(1);
       expect(r.err).toContain("nothing to update in .: no bilinear skill or instructions section there");
       expect(fs.existsSync(join(s().vault, ".claude"))).toBe(false);
       for (const flag of ["--claude", "--codex", "--local", "--followups"]) {
-        const bad = await s().run("--tracker", s().dir, "agent-setup", ".", "--update", flag);
+        const bad = await s().run(s().index, "agent-setup", ".", "--update", flag);
         expect(bad.code, flag).toBe(1);
         expect(bad.err, flag).toContain(`${flag} does not go with --update: what is there decides`);
       }
-      expect(await s().code("--tracker", s().dir, "agent-setup", join(".claude"), "--update")).toBe(1);
+      expect(await s().code(s().index, "agent-setup", join(".claude"), "--update")).toBe(1);
     });
 
     it("keeps the text around the section", async () => {
@@ -1063,11 +1234,11 @@ describe("for LLM agents", () => {
 
     it("gives each project its own tracker of a folder, and one skill to all", async () => {
       const other = join(s().dir, "Other.md");
-      await s().ok("init", other, "--prefix", "OT");
+      await s().ok(other, "init", "--prefix", "OT");
       for (const [project, index] of [["one", s().index], ["two", other]]) {
         const dir = join(s().root, "code", project);
         fs.mkdirSync(join(dir, ".git"), { recursive: true });
-        await s().ok("--tracker", index, "agent-setup", dir, "--claude", "--global-skill");
+        await s().ok(index, "agent-setup", dir, "--claude", "--global-skill");
         expect(s().read(join(dir, "CLAUDE.md")), project).toBe(globalBlock(index, ".claude"));
         expect(fs.readdirSync(dir).sort(), project).toEqual([".git", "CLAUDE.md"]);
       }
@@ -1117,12 +1288,9 @@ describe("for LLM agents", () => {
   it("names the tracker of a folder of several by its index note", async () => {
     repo();
     const other = join(s().dir, "Other.md");
-    await s().ok("init", other, "--prefix", "OT");
-    await s().ok("--tracker", other, "agent-setup", ".", "--claude");
+    await s().ok(other, "init", "--prefix", "OT");
+    await s().ok(other, "agent-setup", ".", "--claude");
     expect(s().read(join(s().vault, "CLAUDE.md"))).toBe(claudeBlock("Trackers/Bilinear/Other.md"));
-    const r = await s().run("--tracker", s().dir, "agent-setup", ".", "--claude");
-    expect(r.code).toBe(1);
-    expect(r.err).toContain("holds several trackers");
     expect(await s().ok("agent-setup", ".", "--update")).toContain(`unchanged ${join(s().vault, "CLAUDE.md")}`);
   });
 
@@ -1130,46 +1298,46 @@ describe("for LLM agents", () => {
     const repo = join(s().vault, "code", "repo");
     fs.mkdirSync(join(repo, ".git"), { recursive: true });
     fs.mkdirSync(join(repo, "docs", "deep"), { recursive: true });
-    const written = async (cwd: string, tracker: string, dir = ".") => {
+    const written = async (cwd: string, board: string, dir = ".") => {
       s().cwd = cwd;
-      await s().ok("--tracker", tracker, "agent-setup", dir, "--codex");
+      await s().ok(board, "agent-setup", dir, "--codex");
       return s().read(join(cwd, dir, "AGENTS.md"));
     };
     const make = async (folder: string) => {
       s().cwd = s().root;
-      await s().ok("init", join(folder, "Tracker.md"), "--prefix", "IN");
+      await s().ok(join(folder, "Tracker.md"), "init", "--prefix", "IN");
       return folder;
     };
 
     // Inside the repository: from its root, wherever the command or the folder is.
     const inside = await make(join(repo, "docs", "Tracker"));
-    expect(await written(repo, inside)).toBe(codexBlock("docs/Tracker/Tracker.md"));
-    expect(await written(join(repo, "docs", "deep"), inside)).toBe(codexBlock("docs/Tracker/Tracker.md"));
-    expect(await written(repo, inside, "sub")).toBe(codexBlock("docs/Tracker/Tracker.md"));
-    expect(await written(repo, inside, join("docs", "deep"))).toBe(codexBlock("docs/Tracker/Tracker.md"));
-    expect(await written(inside, inside)).toBe(codexBlock("docs/Tracker/Tracker.md"));
+    expect(await written(repo, join(inside, "Tracker.md"))).toBe(codexBlock("docs/Tracker/Tracker.md"));
+    expect(await written(join(repo, "docs", "deep"), join(inside, "Tracker.md"))).toBe(codexBlock("docs/Tracker/Tracker.md"));
+    expect(await written(repo, join(inside, "Tracker.md"), "sub")).toBe(codexBlock("docs/Tracker/Tracker.md"));
+    expect(await written(repo, join(inside, "Tracker.md"), join("docs", "deep"))).toBe(codexBlock("docs/Tracker/Tracker.md"));
+    expect(await written(inside, join(inside, "Tracker.md"))).toBe(codexBlock("docs/Tracker/Tracker.md"));
 
     // One level above the repository: still relative.
     const beside = await make(join(s().vault, "code", "Notes", "Tracker"));
-    expect(await written(repo, beside)).toBe(codexBlock("../Notes/Tracker/Tracker.md"));
+    expect(await written(repo, join(beside, "Tracker.md"))).toBe(codexBlock("../Notes/Tracker/Tracker.md"));
 
     // Further away: the absolute path.
-    expect(await written(repo, s().dir)).toBe(codexBlock(s().index));
+    expect(await written(repo, s().index)).toBe(codexBlock(s().index));
 
     // The tracker folder is the repository.
     fs.mkdirSync(join(beside, ".git"));
-    expect(await written(beside, beside)).toBe(codexBlock("Tracker.md"));
+    expect(await written(beside, join(beside, "Tracker.md"))).toBe(codexBlock("Tracker.md"));
 
     // No repository: the absolute path.
-    expect(await written(s().vault, s().dir)).toBe(codexBlock(s().index));
+    expect(await written(s().vault, s().index)).toBe(codexBlock(s().index));
   });
 
   it("names the tracker in full in the home directory, even in a repository", async () => {
     fs.mkdirSync(join(home(), ".git"), { recursive: true });
     fs.mkdirSync(join(home(), "Notes", "Tracker"), { recursive: true });
-    await s().ok("init", join(home(), "Notes", "Tracker", "Tracker.md"), "--prefix", "HM");
+    await s().ok(join(home(), "Notes", "Tracker", "Tracker.md"), "init", "--prefix", "HM");
     for (const [folder, file] of [[".claude", "CLAUDE.md"], [".codex", "AGENTS.md"]]) {
-      await s().ok("--tracker", join(home(), "Notes", "Tracker"), "agent-setup", `~/${folder}`);
+      await s().ok(join(home(), "Notes", "Tracker", "Tracker.md"), "agent-setup", `~/${folder}`);
       expect(s().read(join(home(), folder, file)), folder).toContain(`Its path:\n\n    ${join(home(), "Notes", "Tracker", "Tracker.md")}\n`);
     }
   });
@@ -1236,7 +1404,7 @@ describe("for LLM agents", () => {
       fs.writeFileSync(join(s().vault, "AGENTS.md"), "# Rules\n");
       fs.writeFileSync(join(s().vault, "CLAUDE.local.md"), "# Mine\n");
       execFileSync("git", ["add", "AGENTS.md"], { cwd: s().vault });
-      const r = await s().run("--tracker", s().dir, "agent-setup", ".", "--claude", "--codex", "--local");
+      const r = await s().run(s().index, "agent-setup", ".", "--claude", "--codex", "--local");
       expect(r.code).toBe(1);
       expect(r.err).toContain(`${join(s().vault, "AGENTS.md")} is committed to git, so it cannot be kept local`);
       expect(r.err).toContain("Codex has no local instructions file");
@@ -1247,11 +1415,11 @@ describe("for LLM agents", () => {
       expect(s().read(join(s().vault, "AGENTS.md"))).toBe("# Rules\n");
 
       // A file that is there but not committed is fine; so is the same file without --local.
-      expect(await s().code("--tracker", s().dir, "agent-setup", ".", "--claude", "--local")).toBe(0);
-      expect(await s().code("--tracker", s().dir, "agent-setup", ".", "--codex")).toBe(0);
+      expect(await s().code(s().index, "agent-setup", ".", "--claude", "--local")).toBe(0);
+      expect(await s().code(s().index, "agent-setup", ".", "--codex")).toBe(0);
 
       execFileSync("git", ["add", "-f", "CLAUDE.local.md"], { cwd: s().vault });
-      const claude = await s().run("--tracker", s().dir, "agent-setup", ".", "--claude", "--local");
+      const claude = await s().run(s().index, "agent-setup", ".", "--claude", "--local");
       expect(claude.code).toBe(1);
       expect(claude.err).toContain(`${join(s().vault, "CLAUDE.local.md")} is committed to git, so it cannot be kept local`);
     });
@@ -1518,7 +1686,7 @@ describe("commands", () => {
     await s().ok("comment", "BL-1", "from user");
     s().env["BILINEAR_USER"] = "env";
     await s().ok("comment", "BL-1", "from env");
-    await s().ok("--author", "flag", "comment", "BL-1", "from flag");
+    await s().ok("comment", "BL-1", "from flag", "--author", "flag");
     await s().ok("comment", "BL-1", "from flag after", "--author", "late");
     expect(s().read(s().note("BL-1")).endsWith("\n## Comments\n- 2026-10-01 rk: from user\n- 2026-10-01 env: from env\n- 2026-10-01 flag: from flag\n- 2026-10-01 late: from flag after\n")).toBe(true);
     expect(await s().code("comment", "BL-1", " ")).toBe(1);
@@ -1629,10 +1797,10 @@ describe("commands", () => {
 
   it("a second index note with the same prefix is reported", async () => {
     fs.writeFileSync(join(s().dir, "Other.md"), "---\nbilinear: tracker\nprefix: BL\nnext: 1\nstates: [todo]\n---\n");
-    const r = await s().run("--tracker", s().index, "lint");
+    const r = await s().run(s().index, "lint");
     expect(r.code).toBe(2);
     expect(r.out).toContain("error: Bilinear.md: Other, in the same folder, has the prefix BL too [prefix-shared]");
-    expect(await s().ids("--tracker", s().index)).toEqual(["BL-1", "BL-2", "BL-3"]);
+    expect(await s().ids()).toEqual(["BL-1", "BL-2", "BL-3"]);
   });
 
   it("usage errors exit with 1", async () => {
@@ -1645,8 +1813,8 @@ describe("commands", () => {
   });
 
   it("help and version", async () => {
-    expect(await s().ok("--version")).toMatch(/^bilinear \d+\.\d+\.\d+\n$/);
-    expect(await s().ok("--help")).toContain("commands:\n  init ");
-    expect(await s().ok("set", "--help")).toContain("usage: bilinear [--tracker PATH] [--author NAME] set <id> <key=value>...");
+    expect(await s().raw("--version").then((r) => r.out)).toMatch(/^bilinear \d+\.\d+\.\d+\n$/);
+    expect((await s().raw("--help")).out).toContain("commands:\n  init ");
+    expect(await s().ok("set", "--help")).toContain("usage: bilinear <board.md> set <id> <key=value>...");
   });
 });

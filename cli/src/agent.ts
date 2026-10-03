@@ -30,6 +30,12 @@ A folder may hold several trackers, each with a prefix of its own, whose
 notes lie together in \`issues/\` and \`archive/\`. The tracker of a project is
 the one its instructions name, by the path of its index note: work in that
 one only, and leave the issues of the others alone unless you are asked.
+The exception: an issue may be blocked by or related to an issue of another
+tracker in the folder, by its ID, and you may set such a link. Relating,
+unrelating and deleting may edit the relation lists in the other tracker's
+note as a side effect. Beyond that, do not change the other tracker's
+issues: to edit, comment on or move one, run the CLI with that tracker's
+board file.
 
 ## Tracking work
 
@@ -146,6 +152,13 @@ a property is meant for it, is lost to whoever reads the tracker next.
   either ends it. Say in a comment what the relation is. A duplicate is
   then closed in the state that means canceled, and what it knew is carried
   over to the issue that stays.
+- **Another tracker's issue**: \`blocked-by\` and \`related-to\` also take the
+  ID of an issue of another tracker in the same folder, such as
+  \`set BL-3 blocked-by+=OT-7\`. Such a blocker is done when it is in a closed
+  state of its own tracker. An ID that no tracker in the folder lists is
+  refused. \`show\` prints the linked issue with its status, but \`show <ID>\`
+  and \`list\` cover only the tracker you ran them with: to read the other
+  issue itself, run the CLI with that tracker's board file.
 
 Before creating an issue, look through the open ones (\`list\`) for the ones
 it has to wait for and the ones that have to wait for it, and set these when
@@ -153,23 +166,26 @@ you create it. Before choosing what to work on, read the relations of the
 issue: \`show <ID>\` lists the issues it is blocked by, the ones it blocks
 and the ones it is related to, with their states, and \`list --blocked\`
 lists the issues that still wait for another. The CLI refuses a
-\`blocked-by\` that would make issues wait for each other in a circle. When
+\`blocked-by\` that would make issues wait for each other in a circle, also
+through the other trackers of the folder. When
 a relation changes, because work is split or no longer needed, change it in
 the tracker at once.
 
 ## Running the CLI
 
 \`\`\`sh
-npx --yes obsidian-bilinear <command>     # nothing to install; needs Node 20+
-bilinear <command>                        # if installed with npm install -g obsidian-bilinear
+npx --yes obsidian-bilinear <board file> <command>   # nothing to install; needs Node 20+
+bilinear <board file> <command>                      # if installed with npm install -g obsidian-bilinear
 \`\`\`
 
-The tracker is taken from \`--tracker PATH\` (its index note, or a folder with
-one tracker), then \`$BILINEAR_TRACKER\`, then a search upward from the working
-directory. Pass \`--tracker\` with the path the project's instructions give,
-with every command, or set \`BILINEAR_TRACKER\` to it; a relative path there
-is from the root of the repository. Run \`<command> --help\` for a command's
-exact arguments.
+The first argument is the board file: the tracker's index note, which ends in
+\`.md\`. Pass the path the project's instructions give, first, with every
+command; a relative path there is from the root of the repository. Or set
+\`BILINEAR_TRACKER\` to that path once, and leave the board file out:
+\`bilinear <command> ...\`; one given first wins. Nothing else picks the
+tracker: not the working directory, and not the prefix of the issues named.
+Options such as \`--author\` come after the command. Run
+\`<board file> <command> --help\` for a command's exact arguments.
 
 ## Commands
 
@@ -190,12 +206,12 @@ Properties: \`title\`, \`status\` (one of the tracker's states), \`priority\`
 custom property.
 
 \`\`\`sh
-bilinear list --status todo,in-progress --json
-bilinear new "Fix flaky cache test" --priority high --label bug
-bilinear set BL-12 assignee=claude status=todo
-bilinear set BL-12 status=in-progress
-bilinear --author claude comment BL-12 "Reproduced: the cache key ignores the locale."
-bilinear set BL-12 status=done
+bilinear <board file> list --status todo,in-progress --json
+bilinear <board file> new "Fix flaky cache test" --priority high --label bug
+bilinear <board file> set BL-12 assignee=claude status=todo
+bilinear <board file> set BL-12 status=in-progress
+bilinear <board file> comment BL-12 "Reproduced: the cache key ignores the locale." --author claude
+bilinear <board file> set BL-12 status=done
 \`\`\`
 
 ## Working with it
@@ -302,6 +318,14 @@ and moves the issue to the backlog.
 `;
 }
 
+/**
+ * `word` as one shell word: as is if plain, else in double quotes. A backslash is left as it is, being the separator
+ * of a Windows path, which no shell there takes for an escape.
+ */
+export function shellWord(word: string): string {
+  return /^[A-Za-z0-9_@%+=:,./\\~-]+$/.test(word) ? word : `"${word.replace(/["$`]/g, "\\$&")}"`;
+}
+
 /** The instructions for CLAUDE.md or AGENTS.md: which tracker the project's work is tracked in, and where the skill is. */
 export function instructions(path: string, skill: string, triage?: string): string {
   const where = nodePath.isAbsolute(path) ? "Its path:" : "Its path, from the root of the repository:";
@@ -311,6 +335,9 @@ export function instructions(path: string, skill: string, triage?: string): stri
 Work on this project is tracked in a Bilinear issue tracker. ${where}
 
     ${path}
+
+Run the CLI with it first, as in \`bilinear ${shellWord(path)} <command> ...\`, or set
+\`BILINEAR_TRACKER\` to it once and leave it out.
 
 Track every piece of work there, from before it starts until it is finished,
 as the \`bilinear\` skill says. The skill is in
