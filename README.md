@@ -90,6 +90,10 @@ bilinear list --status todo,in-progress
 | `show <ID>` | Print properties and body |
 | `set <ID> key=value ...` | Change properties, including `title`. `key=` removes a key; `labels+=x` and `labels-=x` edit lists |
 | `comment <ID> "text"` | Append a comment |
+| `context record <ID\|PREFIX> (--type T --subject TEXT [..] \| --file <path\|->)` | Record a context entry, or a batch from JSON, in an issue or in the tracker |
+| `context list <ID\|PREFIX> [--type T] [--status S] [--all]` | List the entries of an issue or of the tracker |
+| `context get <FULLID>...` | Print whole entries, such as `BL-9/D3`, with their evidence |
+| `context checkpoint <ID>` | Print what to record in an issue now; writes nothing |
 | `move <ID> --before <ID> \| --after <ID> \| --top \| --bottom` | Reorder |
 | `archive <ID>... \| --closed` | Archive named issues or all closed ones |
 | `unarchive <ID>...` | Restore |
@@ -113,7 +117,7 @@ bilinear list --status todo,in-progress
 - A folder may hold several trackers; each is named by its own index note:
   `bilinear Trackers/Website.md set WEB-2 status=done`.
 - The comment author is `--author`, then `BILINEAR_USER`, then `$USER`.
-- `--json` on `list`, `show`, `new`, `label`, `state` and `lint`.
+- `--json` on `list`, `show`, `new`, `label`, `state`, `lint`, `context record`, `context list` and `context get`.
 - `list` shows progress as `[1/2]` and `show` names the blockers and their
   states; in JSON it is `progress: {done, total, issues}`.
 - `blocked-by` and `related-to` take issue IDs, for `new` and for `set`
@@ -262,6 +266,77 @@ the command says that nothing was excluded.
 The CLI moves notes with a plain file move. Bare `[[BL-4]]` links survive;
 path-style links in other notes are only rewritten when the plugin does the
 move.
+
+### Persistent context
+
+An issue holds the context of the work. An agent session is a temporary worker
+on it: what one session learns must reach the next one through the issue.
+
+- **The working state.** When the issue or the tracker has entries,
+  `show <ID>` prints a block of at most 8000
+  characters: the goal, the latest state, the rejected approaches and why they
+  failed, the constraints, the decisions, the open questions, the constraints
+  of the tracker, and an index of the other entries. It is computed at each
+  call and is not stored. `show <ID> --json` has it as `context`.
+- **The entries.** They are under `## Context log` in the issue note, and in
+  the index note for the whole tracker. The types are decision `D`,
+  constraint `C`, finding `F`, rejected `R`, question `Q`, state `S` and
+  artifact `A`. The statuses are `active`, `superseded` and `resolved`. The
+  full ID is `BL-9/D3` for an issue and `BL/D1` for the tracker.
+
+  ```md
+  ### D3: Use one cache directory per test
+  - status: active
+  - author: claude
+  - created: 2026-10-01
+  - updated: 2026-10-01
+  - evidence:
+    - comment:2026-10-01#2
+
+  Each test gets a temp directory. Tests no longer share state.
+
+  Rationale: Shared state caused the flaky failures.
+  ```
+- **The evidence.** An entry points to its sources: `comment:<date>#<n>`,
+  `entry:<id>`, `file:<path>`. Any other `kind:value` item, such as
+  `commit:abc`, is kept and not checked. No command deletes an entry or
+  changes its text.
+
+```sh
+bilinear Trackers/Bilinear.md context record BL-12 --type rejected --subject "Key the cache by URL" \
+  --attempted "Used the URL as the key" --failed "Two locales share a URL" --applies "While the URL has no locale"
+bilinear Trackers/Bilinear.md context list BL-12 --type R     # the rejected approaches
+bilinear Trackers/Bilinear.md context get BL-12/D3 BL/D1      # whole entries, also superseded ones
+bilinear Trackers/Bilinear.md context checkpoint BL-12        # then: context record BL-12 --file -
+```
+
+`record` takes one entry from flags, or a batch with `--file <path|->` (all or
+nothing). `--supersedes ID` ends an older entry; a question becomes `resolved`.
+A new state supersedes the active states. An exact repeat is skipped. An entry
+with an equal subject and other content is refused unless `--supersedes` or
+`--new` is given. `checkpoint` prints the extraction question, the current
+index and the shape of the batch; the agent answers with one `record` call.
+When `set` changes the status of an issue that has a comment or an entry, it
+prints a reminder on stderr to run `context checkpoint`.
+
+Limits:
+
+- The tracker does not build the prompt of the agent. It cannot stop an agent
+  that repeats a rejected approach: the working state and the skill only put
+  the rejected approaches in front of it.
+- The tracker cannot force a checkpoint. The skill, the reminder from `set`
+  and a hint in the working state are the triggers.
+- `comment:<date>#<n>` is positional. If a comment is deleted by hand, the
+  later references of that date point at the wrong comment.
+- `lint` exits 2 on each unfixed warning, and the three context warnings
+  (`context-entry-invalid`, `context-duplicate-id`, `context-link-unknown`)
+  count.
+- There are two scopes only: the tracker and the issue. An issue does not
+  inherit from another issue.
+- Duplicate detection is exact (an equal subject after normalization). Similar
+  entries only get a warning.
+
+The format is in `spec/FORMAT.md`, sections 1.7 and 2.
 
 ## Plugin
 
@@ -431,7 +506,8 @@ Manual checklist, in `test-vault/`:
 ## Out of scope for v1
 
 Cycles, estimates, multi-tracker roll-ups, notifications, and sync with Linear
-or any other external service.
+or any other external service. For the context entries: `context search`,
+automatic merge of entries, and inheritance between issues.
 
 ## License
 

@@ -937,6 +937,8 @@ describe("for LLM agents", () => {
     expect(text).toContain("`--author <your name> comment <ID> \"text\"`");
     expect(text).toContain("is the name of the agent you are");
     expect(text).toContain("An issue that needs the user to act is assigned to the user");
+    expect(text).toContain("`context checkpoint <ID>`");
+    expect(text).toContain("`context record <ID> --file -`");
     expect(text).toContain("## Relations between issues");
     expect(text).toContain("## Writing issues");
     expect(text).toContain("- Prefer checklists to prose");

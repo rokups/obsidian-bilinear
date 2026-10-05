@@ -51,7 +51,9 @@ after you finish. This is required, and it does not wait to be asked for.
    what was asked, the constraints, how to tell that it is done. Do not start work
    that has no issue. One issue is one piece of work that can be finished on
    its own; larger work is split into issues of their own, which the issue
-   for the whole is blocked by (\`--blocked-by <ID>\`).
+   for the whole is blocked by (\`--blocked-by <ID>\`). When you start or
+   resume an issue, read the working state that \`show <ID>\` prints, if
+   there is one: it is what earlier sessions left, so do not derive it again.
 2. **On choosing what to work on**, take the issue and move it out of the
    backlog, before anything is started. As soon as you intend to work on
    an issue, set it to the state for work that is up next, and assign it
@@ -77,8 +79,18 @@ after you finish. This is required, and it does not wait to be asked for.
    once they have answered. Work that turns up along the way and is not
    part of this issue gets an issue of its own, related to this one
    (\`new "Title" --related-to <ID>\`), which the comment names as \`[[ID]]\`.
+   Before you try a new approach, run \`context list <ID> --type R\`, and do
+   not repeat an approach whose \`Applies:\` condition still holds; read
+   that condition with \`context get <FULLID>\`. Record
+   what a later session needs with \`context record\`: a decision with its
+   rationale, a constraint, a finding, an approach that failed (what was
+   attempted, why it failed, when that applies), an open question, the
+   current state. A comment is for the user and the history; a context entry
+   is for the next session. Do not copy one into the other.
 5. **When the work waits for review**, move the issue to the tracker's review
-   state if it has one.
+   state if it has one. At each status change, and before you stop work, run
+   \`context checkpoint <ID>\` and, if there is something new, answer it
+   with one \`context record <ID> --file -\` call.
 6. **On finishing**, comment what was done and how it was checked, then set
    the issue to the closed state that means done. Work that is given up is
    closed too: comment why, and set the closed state that means canceled.
@@ -192,10 +204,14 @@ Options such as \`--author\` come after the command. Run
 ## Commands
 
 - \`list [--status S] [--label L] [--assignee A] [--priority P] [--blocked] [--blocked-by ID] [--related-to ID] [--archived | --all] [--json]\`: issues in the tracker's order. Filters take comma-separated values
-- \`show <ID> [--json]\`: one issue: properties, the issues it is blocked by, blocks and is related to, body and comments
+- \`show <ID> [--json]\`: one issue: properties, the issues it is blocked by, blocks and is related to, body and comments, and its working state (the context that earlier sessions recorded)
 - \`new "Title" [--description TEXT] [--status S] [--priority P] [--label L] [--assignee A] [--due YYYY-MM-DD] [--blocked-by ID] [--related-to ID] [--top]\`: create an issue; prints its ID. The description is Markdown and may have several lines
 - \`set <ID> key=value ...\`: change properties. \`key=\` removes one; \`labels+=x\`, \`labels-=x\` edit a list
 - \`comment <ID> "text" [--author NAME]\`: append a dated comment, signed with NAME
+- \`context record <ID|PREFIX> --type T --subject TEXT [--content TEXT] [--rationale TEXT] [--alternatives TEXT] [--evidence kind:value] [--supersedes ID] [--new] | --file <path|->\`: add a context entry to an issue, or to the tracker with its prefix; \`--file\` takes a batch of entries as JSON, all or nothing. T is \`decision\`, \`constraint\`, \`finding\`, \`rejected\`, \`question\`, \`state\` or \`artifact\`; \`rejected\` also needs \`--attempted\`, \`--failed\` and \`--applies\`, and takes \`--promising\` and \`--happened\`
+- \`context list <ID|PREFIX> [--type T] [--status S] [--all] [--json]\`: one line for each active entry; \`--type R\` gives the rejected approaches
+- \`context get <FULLID>... [--json]\`: whole entries, such as \`BL-12/D3\` or \`BL/D1\`, with their evidence; also the superseded ones
+- \`context checkpoint <ID>\`: writes nothing; prints what to record now, for you to answer with one \`context record <ID> --file -\` call
 - \`move <ID> --top | --bottom | --before <ID> | --after <ID>\`: reorder; the order is the priority order the user sees
 - \`archive <ID>... | --closed\`, \`unarchive <ID>...\`: move issues out of and back into the open list
 - \`rm <ID>\`: delete an issue; its note goes to the vault's trash (outside a vault it needs \`--force\`)
@@ -213,13 +229,19 @@ bilinear <board file> new "Fix flaky cache test" --priority high --label bug
 bilinear <board file> set BL-12 assignee=claude status=todo
 bilinear <board file> set BL-12 status=in-progress
 bilinear <board file> comment BL-12 "Reproduced: the cache key ignores the locale." --author claude
+bilinear <board file> context record BL-12 --type rejected --subject "Key the cache by URL" --attempted "Used the URL as the key" --failed "Two locales share a URL" --applies "While the URL has no locale"
+bilinear <board file> context list BL-12 --type R
+bilinear <board file> context checkpoint BL-12
 bilinear <board file> set BL-12 status=done
 \`\`\`
 
 ## Working with it
 
-- Read with \`--json\` (\`list\`, \`show\`, \`state\`, \`label\`, \`lint\`) when you need
-  to act on the result.
+- Read with \`--json\` (\`list\`, \`show\`, \`context list\`, \`context get\`, \`state\`,
+  \`label\`, \`lint\`) when you need to act on the result.
+- Never edit or delete a context entry by hand. A decision that changes is a
+  new entry with \`--supersedes\`. A constraint for the whole tracker goes to
+  the tracker scope: \`context record <PREFIX> --type constraint ...\`.
 - Run \`state\` before setting a status: trackers define their own states, and an
   unknown one is refused. A label the tracker does not list is accepted with a
   warning; add it with \`label <name>\` if it is meant to stay.
