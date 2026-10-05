@@ -81,6 +81,7 @@ describe("fixtures through the CLI", () => {
         env: { BILINEAR_TODAY: c.op.today ?? "2026-01-01" },
         cwd: root,
         stdout: (s) => (out += s),
+        stdin: async () => "",
         stderr: (s) => (err += s),
       });
       expect(snapshot(tracker)).toEqual(snapshot(join(c.dir, "after")));

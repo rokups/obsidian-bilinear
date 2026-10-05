@@ -308,6 +308,12 @@ describe("the subject of an entry", () => {
     expect(r).toMatchObject({ id: "BL-1/D1", action: "skipped" });
   });
 
+  it("keeps two subjects of marks only apart", async () => {
+    const r = await rec("BL-1", dec("?"), dec("!"));
+    expect(r.map((x) => x.action)).toEqual(["created", "created"]);
+    expect((await rec("BL-1", dec("?")))[0]).toMatchObject({ id: "BL-1/D1", action: "skipped" });
+  });
+
   it("throws on a skip with supersedes, and the note stays", async () => {
     await rec("BL-1", dec("Use X", "Same."), dec("Other plan", "o"));
     const before = note();
@@ -402,6 +408,13 @@ describe("odd text", () => {
     expect(note()).toBe(before);
   });
 
+  it("converts the error of insertEntry for a note with a fence that is not closed, and the note stays", async () => {
+    await createIssue(t, { title: "Fenced", description: "Text\n```js\ncode" }, TODAY);
+    const before = note("BL-3");
+    await expect(rec("BL-3", dec("Use X", "Fine."))).rejects.toThrow(/input 1 \(Use X\).*code fence in the note is not closed/);
+    expect(note("BL-3")).toBe(before);
+  });
+
   it("keeps a status line in the content as content", async () => {
     await rec("BL-1", dec("Use X", "- status: superseded\nrest of it"));
     const e = entry(note(), "D1");
@@ -418,6 +431,14 @@ describe("odd text", () => {
     await rec("BL-1", dec("Use X", "One."));
     io.files.set("T/Bilinear/issues/BL-1.md", note() + "\n### D1: Again\n- status: active\n");
     await expect(rec("BL-1", dec("Pick beta", "Two."))).rejects.toThrow(/more than one entry with the ID D1; a person must correct the note first/);
+  });
+
+  it("trims white space and a line break around a supersedes item", async () => {
+    await rec("BL-1", dec("Use X", "One."));
+    const [r] = await rec("BL-1", dec("Pick beta", "Two.", { supersedes: [" D1\n"] }));
+    expect(r.superseded).toEqual(["BL-1/D1"]);
+    expect(entry(note(), "D1").status).toBe("superseded");
+    await expect(rec("BL-1", dec("Pick gamma", "Three.", { supersedes: [" BL-1/D2\n"] }))).resolves.toHaveLength(1);
   });
 
   it("keeps CRLF in a note, when it records and supersedes", async () => {

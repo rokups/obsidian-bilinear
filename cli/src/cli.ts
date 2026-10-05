@@ -9,11 +9,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
-import { COLOR_NAMES, LINK_LIST_KEYS, LIST_KEYS, STATE_SHAPES, linkId, makeLink, todayIso } from "../../plugin/src/format/ids";
+import { COLOR_NAMES, LINK_LIST_KEYS, LIST_KEYS, STATE_SHAPES, TYPE_LETTERS, linkId, makeLink, todayIso, ID_RE, PREFIX_RE, cleanTitle, type EntryType } from "../../plugin/src/format/ids";
 import type { IssueRecord } from "../../plugin/src/format/record";
 import { Doc, type Value } from "../../plugin/src/format/yaml";
 import { OpError, type Tracker } from "../../plugin/src/ops/io";
 import { adoptIssue, archiveClosed, archiveIssues, commentIssue, createIssue, createTracker, deleteIssue, moveIssue, setLabel, setProps, setStateStyle, setTriageState, unarchiveIssues, unrelate, type PropEdits } from "../../plugin/src/ops/issues";
+import { getContext, recordContext, type RecordInput } from "../../plugin/src/ops/context";
 import { lint } from "../../plugin/src/ops/lint";
 import { LOCK_TIMES, LockTimeout } from "../../plugin/src/ops/lock-file";
 import { allRecords, linkTargets, locked, notePath, readIndex, requireItem, resolveNote } from "../../plugin/src/ops/tracker";
@@ -33,6 +34,8 @@ export interface Context {
   cwd: string;
   stdout(text: string): void;
   stderr(text: string): void;
+  /** All of the standard input, as text. */
+  stdin(): Promise<string>;
 }
 
 /** Bad arguments. Exit code 1, with the usage line. */
@@ -116,6 +119,110 @@ function styleValue(given: string | undefined): string | null | undefined {
 }
 
 const ASSIGN_RE = /^([^=+\-\s][^=\s]*?)(\+=|-=|=)([\s\S]*)$/;
+
+const ENTRY_TYPES = Object.values(TYPE_LETTERS) as EntryType[];
+const REJECTED_KEYS = ["attempted", "promising", "happened", "failed", "applies"] as const;
+const TEXT_KEYS = ["content", "rationale", "alternatives"] as const;
+/** The flags of `context record` that describe one entry. */
+const ENTRY_FLAGS = ["type", "subject", "content", "rationale", "alternatives", "evidence", "supersedes", "new", ...REJECTED_KEYS] as const;
+
+/** A type given as its name or its letter, in any letter case; null if it is neither. */
+function entryType(given: string): EntryType | null {
+  const g = given.trim().toLowerCase();
+  const byLetter = (TYPE_LETTERS as Record<string, EntryType>)[g.toUpperCase()];
+  if (g.length === 1) return byLetter ?? null;
+  return ENTRY_TYPES.find((t) => t === g) ?? null;
+}
+
+const typeList = (): string => Object.entries(TYPE_LETTERS).map(([letter, name]) => `${name} (${letter})`).join(", ");
+
+/** Check the JSON of `--file` and turn it into the entries to record. Each problem names the item (from 1) and the key. */
+function parseEntries(text: string, source: string): RecordInput[] {
+  if (!text.trim()) throw new OpError(`${source} is empty; give one JSON object or an array of objects`);
+  let data: unknown;
+  try {
+    data = JSON.parse(text.replace(/^\uFEFF/, ""));
+  } catch (e) {
+    throw new OpError(`${source} is not valid JSON (${e instanceof Error ? e.message : String(e)}); give one object or an array of objects`);
+  }
+  const items = Array.isArray(data) ? data : [data];
+  if (items.length === 0) throw new OpError(`${source} has no entries; give one object or an array of objects`);
+  const known = ["type", "subject", ...TEXT_KEYS, "evidence", "supersedes", "new", "rejected", ...REJECTED_KEYS];
+  const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+  return items.map((item, i): RecordInput => {
+    const at = `item ${i + 1}`;
+    if (!isObject(item)) throw new OpError(`${at}: must be an object with the keys ${known.join(", ")}`);
+    for (const key of Object.keys(item)) {
+      if (!known.includes(key)) throw new OpError(`${at}: unknown key '${key}'; the keys are ${known.join(", ")}`);
+    }
+    const string = (key: string, value: unknown, where = at): string => {
+      if (typeof value !== "string") throw new OpError(`${where}: '${key}' must be a string`);
+      return value;
+    };
+    if (item["type"] === undefined) throw new OpError(`${at}: 'type' is required; it is one of ${typeList()}`);
+    const type = entryType(string("type", item["type"]));
+    if (type === null) throw new OpError(`${at}: '${String(item["type"])}' is not a type in key 'type'; use one of ${typeList()}`);
+    if (item["subject"] === undefined) throw new OpError(`${at}: 'subject' is required`);
+    const input: RecordInput = { type, subject: string("subject", item["subject"]) };
+    for (const key of TEXT_KEYS) if (item[key] !== undefined) input[key] = string(key, item[key]);
+    if (item["evidence"] !== undefined) {
+      const v = item["evidence"];
+      if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) throw new OpError(`${at}: 'evidence' must be an array of strings of the form kind:value`);
+      input.evidence = v as string[];
+    }
+    if (item["supersedes"] !== undefined) {
+      const v = item["supersedes"];
+      if (typeof v === "string") input.supersedes = [v];
+      else if (Array.isArray(v) && v.every((x) => typeof x === "string")) input.supersedes = v as string[];
+      else throw new OpError(`${at}: 'supersedes' must be a string or an array of strings`);
+    }
+    if (item["new"] !== undefined) {
+      if (typeof item["new"] !== "boolean") throw new OpError(`${at}: 'new' must be true or false`);
+      input.isNew = item["new"];
+    }
+    const given = item["rejected"];
+    if (given !== undefined && !isObject(given)) throw new OpError(`${at}: 'rejected' must be an object with the keys ${REJECTED_KEYS.join(", ")}`);
+    const rejected: Record<string, string> = {};
+    for (const key of Object.keys(given ?? {})) {
+      if (!(REJECTED_KEYS as readonly string[]).includes(key)) throw new OpError(`${at}: unknown key '${key}' in 'rejected'; the keys are ${REJECTED_KEYS.join(", ")}`);
+      rejected[key] = string(key, (given as Record<string, unknown>)[key], `${at}: 'rejected'`);
+    }
+    for (const key of REJECTED_KEYS) {
+      if (item[key] === undefined) continue;
+      if (key in rejected) throw new OpError(`${at}: key '${key}' is given twice, at the top level and in 'rejected'`);
+      rejected[key] = string(key, item[key]);
+    }
+    if (Object.keys(rejected).length || given !== undefined) input.rejected = rejected;
+    return input;
+  });
+}
+
+/** The one entry that the flags of `context record` describe. */
+function flagEntry(values: Values): RecordInput {
+  const type = str(values["type"]);
+  const subject = str(values["subject"]);
+  if (type === undefined) throw new UsageError(`--type is required (one of ${typeList()}), or give --file`);
+  if (subject === undefined) throw new UsageError("--subject is required, or give --file");
+  const kind = entryType(type);
+  if (kind === null) throw new UsageError(`'${type}' is not a type; use one of ${typeList()}`);
+  const input: RecordInput = { type: kind, subject };
+  for (const key of TEXT_KEYS) if (str(values[key]) !== undefined) input[key] = str(values[key]);
+  if (values["evidence"] !== undefined) input.evidence = list(values["evidence"]);
+  if (values["supersedes"] !== undefined) input.supersedes = csv(list(values["supersedes"]));
+  if (values["new"]) input.isNew = true;
+  const given = REJECTED_KEYS.filter((k) => str(values[k]) !== undefined);
+  if (kind !== "rejected") {
+    if (given.length) throw new UsageError(`--${given[0]} is only for --type rejected`);
+  } else {
+    const missing = (["attempted", "failed", "applies"] as const).filter((k) => !str(values[k])?.trim());
+    if (missing.length) throw new UsageError(`--type rejected needs ${missing.map((k) => `--${k}`).join(", ")}`);
+    input.rejected = Object.fromEntries(given.map((k) => [k, str(values[k])]));
+  }
+  return input;
+}
+
+/** A labelled value of an entry, without the line break that puts it on the lines under its label. */
+const labelled = (v: string): string => v.replace(/^\n/, "");
 
 const COMMANDS: Record<string, Command> = {
   init: {
@@ -347,6 +454,108 @@ const COMMANDS: Record<string, Command> = {
       const author = str(values["author"]) || ctx.env["BILINEAR_USER"] || ctx.env["USER"] || ctx.env["USERNAME"] || "unknown";
       await commentIssue(await tracker(), positionals[0], positionals[1], author, ctx.env["BILINEAR_TODAY"] || todayIso());
       return EXIT_OK;
+    },
+  },
+
+  context: {
+    args: "record <ID|PREFIX> (--type T --subject TEXT [...] | --file <path|->) [--json] | get <FULLID>... [--json]",
+    help: "record context entries (decisions, findings, ...) in an issue or the tracker, or read them",
+    options: {
+      json: { type: "boolean" },
+      file: { type: "string" },
+      type: { type: "string" },
+      subject: { type: "string" },
+      content: { type: "string" },
+      rationale: { type: "string" },
+      alternatives: { type: "string" },
+      evidence: { type: "string", multiple: true },
+      supersedes: { type: "string", multiple: true },
+      new: { type: "boolean" },
+      attempted: { type: "string" },
+      promising: { type: "string" },
+      happened: { type: "string" },
+      failed: { type: "string" },
+      applies: { type: "string" },
+    },
+    takes: [0, Infinity],
+    reads: (_values, positionals) => positionals[0] === "get",
+    async run({ ctx, values, positionals, out, tracker }) {
+      const sub = positionals[0];
+      if (sub === "record") {
+        if (positionals.length !== 2) throw new UsageError("record needs one target: an issue ID such as BL-9, or the prefix of the tracker such as BL");
+        const target = cleanTitle(positionals[1]).toUpperCase();
+        if (!ID_RE.test(target) && !PREFIX_RE.test(target)) throw new UsageError(`'${positionals[1]}' is not an issue ID such as BL-9 or a tracker prefix such as BL`);
+        const file = str(values["file"]);
+        const flags = ENTRY_FLAGS.filter((k) => values[k] !== undefined);
+        if (file !== undefined && flags.length) throw new UsageError(`--file cannot go with --${flags[0]}; put the entry in the file, or drop --file`);
+        let inputs: RecordInput[];
+        if (file !== undefined) {
+          let text: string;
+          if (file === "-") text = await ctx.stdin();
+          else {
+            try {
+              text = fs.readFileSync(nodePath.resolve(ctx.cwd, file), "utf8");
+            } catch {
+              throw new OpError(`cannot read the file '${file}'; give the path of a JSON file, or - for the standard input`);
+            }
+          }
+          inputs = parseEntries(text, file === "-" ? "the standard input" : `the file '${file}'`);
+        } else {
+          inputs = [flagEntry(values)];
+        }
+        const author = str(values["author"]) || ctx.env["BILINEAR_USER"] || ctx.env["USER"] || ctx.env["USERNAME"] || "unknown";
+        const results = await recordContext(await tracker(), positionals[1], inputs, { author, today: ctx.env["BILINEAR_TODAY"] || todayIso() });
+        if (values["json"]) {
+          out(json(results));
+          return EXIT_OK;
+        }
+        for (const r of results) {
+          out(`${r.id} ${r.action === "created" ? "created" : "skipped (duplicate)"}`);
+          if (r.superseded.length) out(`  superseded: ${r.superseded.join(" ")}`);
+          for (const w of r.warnings) out(`  warning: ${w}`);
+        }
+        return EXIT_OK;
+      }
+      if (sub === "get") {
+        const ids = csv(positionals.slice(1));
+        if (!ids.length) throw new UsageError("get needs one or more full entry IDs, such as BL-9/D3 or BL/D1");
+        const t = await tracker();
+        const found = await locked(t, () => getContext(t, ids));
+        if (values["json"]) {
+          out(
+            json(
+              found.map(({ id, entry: e }) => {
+                const note = id.slice(0, id.indexOf("/"));
+                return {
+                  id,
+                  type: e.type,
+                  number: e.number,
+                  subject: e.subject,
+                  status: e.status,
+                  author: e.author,
+                  created: e.created,
+                  updated: e.updated,
+                  content: e.content,
+                  rationale: labelled(e.rationale),
+                  alternatives: labelled(e.alternatives),
+                  evidence: e.evidence,
+                  supersedes: e.supersedes.map((l) => `${note}/${l}`),
+                  supersededBy: e.supersededBy === null ? null : `${note}/${e.supersededBy}`,
+                  rejected: e.rejected ? Object.fromEntries(REJECTED_KEYS.map((k) => [k, labelled(e.rejected![k])])) : null,
+                };
+              }),
+            ),
+          );
+          return EXIT_OK;
+        }
+        found.forEach(({ id, text }, i) => {
+          if (i) out("");
+          out(`## ${id}`);
+          out(text.replace(/\n+$/, ""));
+        });
+        return EXIT_OK;
+      }
+      throw new UsageError(`${sub === undefined ? "missing subcommand" : `unknown subcommand '${sub}'`}; use one of: record, get`);
     },
   },
 
@@ -613,7 +822,7 @@ function help(name?: string): string {
     "the command line; one given there wins.\n" +
     "\n" +
     "options, after the command:\n" +
-    "  --author NAME   author for comments (default: $BILINEAR_USER, then $USER)\n";
+    "  --author NAME   author for comments and context entries (default: $BILINEAR_USER, then $USER)\n";
   if (name) {
     let text = `${usage(name)}\n${COMMANDS[name].help}\n\n${options}`;
     if (name === "label" || name === "state") {
@@ -624,6 +833,21 @@ function help(name?: string): string {
         `ICON is one of ${STATE_SHAPES.join(", ")}, or a Lucide icon name; 'none' clears it.\n` +
         "--triage makes the state the triage state, where new issues wait for the user to accept or\n" +
         "reject them; a state the tracker does not have yet is added in front of the others.\n";
+    }
+    if (name === "context") {
+      text +=
+        "\ncontext record writes one entry from flags, or a batch from JSON (--file, - is the standard input).\n" +
+        "The target is an issue ID (BL-9) or the tracker's prefix (BL). The batch is all or nothing.\n" +
+        `TYPE is one of ${typeList()}, or its letter.\n` +
+        "An entry with the same subject and content as an active one is skipped. The same subject with other\n" +
+        "content is refused: give --supersedes ID to replace the old entry, or --new to keep both.\n" +
+        "--evidence takes kind:value (commit:abc, comment:2026-10-01#1, entry:D2); repeat it. --supersedes\n" +
+        "takes IDs, repeated or comma separated. Type rejected needs --attempted, --failed and --applies,\n" +
+        "and takes --promising and --happened.\n" +
+        "The JSON has the keys type, subject, content, rationale, alternatives, evidence (array), supersedes,\n" +
+        "new (boolean) and rejected (object with the five keys of the flags, which may also stand at the top).\n" +
+        "A value that starts with '-' needs an equals sign: --content=\"- first item\", or use --file.\n" +
+        "context get prints the entries with the given full IDs (BL-9/D3, BL/D1); --json gives their fields.\n";
     }
     if (name === "agent-setup") {
       text +=
@@ -747,7 +971,13 @@ export async function main(argv: string[], ctx: Context): Promise<number> {
       }) as { values: Values; positionals: string[] };
     } catch (e) {
       if (boardMissing && !argv.includes("--help") && !argv.includes("-h")) return noBoard();
-      throw new UsageError(e instanceof Error ? e.message.split("\n")[0] : String(e));
+      const message = e instanceof Error ? e.message.split("\n")[0] : String(e);
+      const ambiguous = /^Option '(--[^']+)' argument is ambiguous/.exec(message);
+      if (!ambiguous) throw new UsageError(message);
+      const file = command.options && "file" in command.options ? ", or give the entry with --file" : "";
+      throw new UsageError(
+        `${message} A value that starts with '-' must stand in one argument with its option: write ${ambiguous[1]}=VALUE${file}`,
+      );
     }
     const { values, positionals } = parsed;
     if (values["help"]) {

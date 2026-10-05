@@ -20,6 +20,8 @@ export class Sandbox {
   index = join(this.dir, "Bilinear.md");
   env: Record<string, string | undefined> = { BILINEAR_TODAY: "2026-10-01", USER: "rk" };
   cwd = this.dir;
+  /** What the standard input holds for the next runs. */
+  stdin: string | Error = "";
 
   async init(): Promise<void> {
     fs.mkdirSync(join(this.vault, ".obsidian"), { recursive: true });
@@ -36,7 +38,11 @@ export class Sandbox {
   async raw(...argv: string[]): Promise<Ran> {
     let out = "";
     let err = "";
-    const code = await main(argv, { env: this.env, cwd: this.cwd, stdout: (s) => (out += s), stderr: (s) => (err += s) });
+    const stdin = async () => {
+      if (this.stdin instanceof Error) throw this.stdin;
+      return this.stdin;
+    };
+    const code = await main(argv, { env: this.env, cwd: this.cwd, stdout: (s) => (out += s), stderr: (s) => (err += s), stdin });
     return { code, out, err };
   }
 

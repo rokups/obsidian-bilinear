@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import { instructions, shellWord } from "../../cli/src/agent";
 import { NodeIO } from "../../cli/src/node-io";
+import { OpError } from "../src/ops/io";
 import { withFileLock } from "../src/ops/lock-file";
 import { sandbox } from "./cli";
 
@@ -483,7 +484,7 @@ describe("the lock", () => {
   it("makes writers wait, and give up with exit code 3", async () => {
     const before = s().read(s().index);
     await held(async () => {
-      for (const argv of [["new", "B"], ["set", "BL-1", "status=todo"], ["comment", "BL-1", "x"], ["move", "BL-1", "--top"], ["archive", "BL-1"], ["rm", "BL-1"], ["lint", "--fix"]]) {
+      for (const argv of [["new", "B"], ["set", "BL-1", "status=todo"], ["comment", "BL-1", "x"], ["move", "BL-1", "--top"], ["archive", "BL-1"], ["rm", "BL-1"], ["lint", "--fix"], ["context", "record", "BL-1", "--type", "decision", "--subject", "A"]]) {
         const r = await s().run(...argv);
         expect(r.code, argv.join(" ")).toBe(3);
         expect(r.err).toContain("locked by another bilinear process or by Obsidian; gave up after 0.2s");
@@ -496,7 +497,7 @@ describe("the lock", () => {
 
   it("makes readers wait too", async () => {
     await held(async () => {
-      for (const argv of [["list"], ["show", "BL-1"], ["lint"], ["label"], ["state"]]) {
+      for (const argv of [["list"], ["show", "BL-1"], ["lint"], ["label"], ["state"], ["context", "get", "BL-1/D1"]]) {
         expect(await s().run(...argv), argv.join(" ")).toMatchObject({ code: 3, out: "" });
       }
     });
@@ -1816,5 +1817,322 @@ describe("commands", () => {
     expect(await s().raw("--version").then((r) => r.out)).toMatch(/^bilinear \d+\.\d+\.\d+\n$/);
     expect((await s().raw("--help")).out).toContain("commands:\n  init ");
     expect(await s().ok("set", "--help")).toContain("usage: bilinear <board.md> set <id> <key=value>...");
+  });
+});
+
+describe("context", () => {
+  const s = sandbox();
+  beforeEach(async () => {
+    await s().ok("new", "One");
+    await s().ok("new", "Two");
+  });
+
+  it("record writes an entry from flags and prints one line", async () => {
+    const r = await s().run("context", "record", "BL-1", "--type", "decision", "--subject", "Use X", "--content", "Because.", "--rationale", "Fast", "--evidence", "commit:abc", "--evidence", "url:http://x");
+    expect(r).toEqual({ code: 0, out: "BL-1/D1 created\n", err: "" });
+    const text = s().read(s().note("BL-1"));
+    expect(text).toContain("### D1: Use X\n- status: active\n- author: rk\n- created: 2026-10-01\n- updated: 2026-10-01\n- evidence:\n  - commit:abc\n  - url:http://x\n");
+    expect(text).toContain("Because.");
+    expect(text).toContain("Rationale: Fast");
+    expect(await s().run("lint")).toMatchObject({ code: 0 });
+  });
+
+  it("record takes its author like comment", async () => {
+    await s().ok("context", "record", "BL-1", "--type", "finding", "--subject", "A");
+    s().env["BILINEAR_USER"] = "env";
+    await s().ok("context", "record", "BL-1", "--type", "finding", "--subject", "B");
+    await s().ok("context", "record", "BL-1", "--type", "finding", "--subject", "C", "--author", "flag");
+    const text = s().read(s().note("BL-1"));
+    expect([...text.matchAll(/- author: (\w+)/g)].map((m) => m[1])).toEqual(["rk", "env", "flag"]);
+  });
+
+  it("record takes the type as a name or a letter, in any case, and refuses an unknown one", async () => {
+    expect(await s().ok("context", "record", "BL-1", "--type", "D", "--subject", "A")).toBe("BL-1/D1 created\n");
+    expect(await s().ok("context", "record", "BL-1", "--type", "Finding", "--subject", "B")).toBe("BL-1/F1 created\n");
+    expect(await s().ok("context", "record", "BL-1", "--type", "c", "--subject", "C")).toBe("BL-1/C1 created\n");
+    const before = s().read(s().note("BL-1"));
+    for (const type of ["bogus", "x", "", "decisions"]) {
+      const r = await s().run("context", "record", "BL-1", "--type", type, "--subject", "Z");
+      expect(r.code, type).toBe(1);
+      expect(r.err).toContain("is not a type");
+    }
+    expect(await s().code("context", "record", "BL-1", "--subject", "Z")).toBe(1);
+    expect(await s().code("context", "record", "BL-1", "--type", "decision")).toBe(1);
+    expect(s().read(s().note("BL-1"))).toBe(before);
+  });
+
+  it("record writes a rejected entry from five flags, and refuses without --failed", async () => {
+    const flags = ["--type", "rejected", "--subject", "Polling", "--attempted", "Poll", "--promising", "Simple", "--happened", "Slow", "--applies", "Always"];
+    const before = s().read(s().note("BL-1"));
+    const bad = await s().run("context", "record", "BL-1", ...flags);
+    expect(bad.code).toBe(1);
+    expect(bad.err).toContain("--failed");
+    expect(s().read(s().note("BL-1"))).toBe(before);
+    expect(await s().ok("context", "record", "BL-1", ...flags, "--failed", "Too slow")).toBe("BL-1/R1 created\n");
+    const text = s().read(s().note("BL-1"));
+    for (const line of ["Attempted: Poll", "Promising: Simple", "Happened: Slow", "Failed: Too slow", "Applies: Always"]) expect(text).toContain(line);
+    expect(await s().code("context", "record", "BL-1", "--type", "decision", "--subject", "D", "--failed", "x")).toBe(1);
+  });
+
+  it("record prints superseded, skips a duplicate and asks for --supersedes or --new", async () => {
+    const rec = (...a: string[]) => s().run("context", "record", "BL-1", "--type", "decision", ...a);
+    expect((await rec("--subject", "Use X", "--content", "One.")).out).toBe("BL-1/D1 created\n");
+    const second = await rec("--subject", "Use Y", "--content", "Two.", "--supersedes", "D1");
+    expect(second).toMatchObject({ code: 0, out: "BL-1/D2 created\n  superseded: BL-1/D1\n" });
+    expect(s().read(s().note("BL-1"))).toContain("- superseded-by: D2");
+    const before = s().read(s().note("BL-1"));
+    expect(await rec("--subject", "Use Y", "--content", "Two.")).toMatchObject({ code: 0, out: "BL-1/D2 skipped (duplicate)\n" });
+    expect(s().read(s().note("BL-1"))).toBe(before);
+    const clash = await rec("--subject", "Use Y", "--content", "Other.");
+    expect(clash.code).toBe(1);
+    expect(clash.err).toContain("--supersedes");
+    expect(clash.err).toContain("--new");
+    expect(s().read(s().note("BL-1"))).toBe(before);
+    expect((await rec("--subject", "Use Y", "--content", "Other.", "--new")).out).toBe("BL-1/D3 created\n  warning: similar active decision entries: BL-1/D2 (Use Y)\n");
+  });
+
+  it("record takes --supersedes repeated or as a comma list, and prints warnings", async () => {
+    const rec = (...a: string[]) => s().ok("context", "record", "BL-1", "--type", "decision", ...a);
+    await rec("--subject", "Alpha one", "--content", "a");
+    await rec("--subject", "Beta two", "--content", "b");
+    await rec("--subject", "Gamma three", "--content", "c");
+    expect(await rec("--subject", "Delta four", "--supersedes", "D1,D2", "--supersedes", "BL-1/D3")).toBe("BL-1/D4 created\n  superseded: BL-1/D1 BL-1/D2 BL-1/D3\n");
+    await rec("--subject", "Epsilon five", "--content", "e");
+    const out = await rec("--subject", "Epsilon five today", "--content", "other");
+    expect(out).toMatch(/^BL-1\/D6 created\n {2}warning: similar active decision entries: BL-1\/D5 \(Epsilon five\)\n$/);
+  });
+
+  it("record --file - reads a JSON array from the standard input", async () => {
+    s().stdin = JSON.stringify([
+      { type: "decision", subject: "Use X", content: "Because.", evidence: ["commit:abc"] },
+      { type: "R", subject: "Polling", rejected: { attempted: "A", failed: "F" }, applies: "Never" },
+      { type: "finding", subject: "Found", supersedes: [], new: true },
+    ]);
+    const r = await s().run("context", "record", "BL-1", "--file", "-");
+    expect(r).toEqual({ code: 0, out: "BL-1/D1 created\nBL-1/R1 created\nBL-1/F1 created\n", err: "" });
+    const text = s().read(s().note("BL-1"));
+    expect(text).toContain("Applies: Never");
+    expect(text).toContain("Failed: F");
+  });
+
+  it("record --file reads a path and accepts one object", async () => {
+    const path = join(s().root, "entry.json");
+    const entry = { type: "constraint", subject: "Limit", content: "No more." };
+    fs.writeFileSync(path, JSON.stringify({ ...entry, supersedes: "D9" }));
+    const missing = await s().run("context", "record", "BL-1", "--file", path);
+    expect(missing.code).toBe(1);
+    expect(missing.err).toContain("input 1 (Limit)");
+    fs.writeFileSync(path, JSON.stringify(entry));
+    expect(await s().ok("context", "record", "BL-1", "--file", path)).toBe("BL-1/C1 created\n");
+    fs.writeFileSync(path, "\uFEFF" + JSON.stringify(entry));
+    expect(await s().ok("context", "record", "BL-1", "--file", path)).toBe("BL-1/C1 skipped (duplicate)\n");
+    const none = await s().run("context", "record", "BL-1", "--file", join(s().root, "none.json"));
+    expect(none.code).toBe(1);
+    expect(none.err).toContain("cannot read the file");
+  });
+
+  it("record --file names the item and the key of a bad input, and writes nothing", async () => {
+    const before = s().read(s().note("BL-1"));
+    const good = { type: "decision", subject: "Fine" };
+    const cases: Array<[string, RegExp]> = [
+      ["{not json", /not valid JSON/],
+      ["[]", /no entries/],
+      [JSON.stringify([good, { ...good, colour: "red" }]), /item 2: unknown key 'colour'/],
+      [JSON.stringify([good, { ...good, content: 5 }]), /item 2: 'content' must be a string/],
+      [JSON.stringify([{ ...good, evidence: "commit:a" }]), /item 1: 'evidence' must be an array of strings/],
+      [JSON.stringify([{ ...good, new: "yes" }]), /item 1: 'new' must be true or false/],
+      [JSON.stringify([good, { type: "bogus", subject: "S" }]), /item 2: 'bogus' is not a type in key 'type'/],
+      [JSON.stringify([{ subject: "S" }]), /item 1: 'type' is required/],
+      [JSON.stringify([good, 7]), /item 2: must be an object/],
+      [JSON.stringify([{ type: "rejected", subject: "S", rejected: { attempted: "a", nope: "x" } }]), /item 1: unknown key 'nope' in 'rejected'/],
+      [JSON.stringify([{ type: "rejected", subject: "S", failed: 1 }]), /item 1: 'failed' must be a string/],
+      // Valid in shape, refused by the op in the second item: the first is not written either.
+      [JSON.stringify([good, { type: "decision", subject: "Next", supersedes: ["D9"] }]), /input 2 \(Next\)/],
+    ];
+    for (const [text, expected] of cases) {
+      s().stdin = text;
+      const r = await s().run("context", "record", "BL-1", "--file", "-");
+      expect(r.code, text).toBe(1);
+      expect(r.err, text).toMatch(expected);
+      expect(s().read(s().note("BL-1")), text).toBe(before);
+    }
+  });
+
+  it("record refuses --file with an entry flag, a bad target and a missing note, each with a reason", async () => {
+    s().stdin = JSON.stringify({ type: "decision", subject: "A" });
+    const cases: Array<[string[], RegExp]> = [
+      [["BL-1", "--file", "-", "--type", "decision"], /--file cannot go with --type/],
+      [["BL-1", "--file", "-", "--new"], /--file cannot go with --new/],
+      [["--file", "-"], /record needs one target/],
+      [["BL-1", "BL-2", "--file", "-"], /record needs one target/],
+      [["bogus!", "--file", "-"], /'bogus!' is not an issue ID/],
+      [["BL-9", "--file", "-"], /BL-9/],
+      [["XX", "--file", "-"], /XX/],
+    ];
+    for (const [argv, expected] of cases) {
+      const r = await s().run("context", "record", ...argv);
+      expect(r.code, argv.join(" ")).toBe(1);
+      expect(r.err, argv.join(" ")).toMatch(expected);
+    }
+    expect(s().read(s().note("BL-1"))).not.toContain("###");
+    expect(s().read(s().note("BL-2"))).not.toContain("###");
+  });
+
+  it("record checks the target before it reads the standard input", async () => {
+    s().stdin = new OpError("the standard input is a terminal");
+    const bad = await s().run("context", "record", "bogus!", "--file", "-");
+    expect(bad.err).toContain("is not an issue ID");
+    const tty = await s().run("context", "record", "BL-1", "--file", "-");
+    expect(tty.code).toBe(1);
+    expect(tty.err).toContain("the standard input is a terminal");
+    s().stdin = "  \n";
+    const empty = await s().run("context", "record", "BL-1", "--file", "-");
+    expect(empty.code).toBe(1);
+    expect(empty.err).toContain("the standard input is empty");
+    expect(empty.err).not.toContain("not valid JSON");
+  });
+
+  it("record names the item and the key for each shape error", async () => {
+    const cases: Array<[unknown, RegExp]> = [
+      [[{ type: "rejected", subject: "S", failed: "x", rejected: { failed: "y" } }], /item 1: key 'failed' is given twice/],
+      [[{ type: "decision", subject: "S" }, { type: "decision", subject: "T", supersedes: 5 }], /item 2: 'supersedes' must be a string or an array of strings/],
+      [[{ type: "decision", subject: "S", supersedes: ["D1", 2] }], /item 1: 'supersedes' must be/],
+      [[{ type: "rejected", subject: "S", rejected: "no" }], /item 1: 'rejected' must be an object/],
+      [[{ type: "rejected", subject: "S", rejected: ["a"] }], /item 1: 'rejected' must be an object/],
+      [[{ type: "decision", content: "x" }], /item 1: 'subject' is required/],
+      [[{ type: "decision", subject: 3 }], /item 1: 'subject' must be a string/],
+      [[{ type: 4, subject: "S" }], /item 1: 'type' must be a string/],
+      [[{ type: "rejected", subject: "S", rejected: { attempted: 1 } }], /item 1: 'rejected': 'attempted' must be a string/],
+    ];
+    const before = s().read(s().note("BL-1"));
+    for (const [data, expected] of cases) {
+      s().stdin = JSON.stringify(data);
+      const r = await s().run("context", "record", "BL-1", "--file", "-");
+      expect(r.code, s().stdin as string).toBe(1);
+      expect(r.err, s().stdin as string).toMatch(expected);
+    }
+    expect(s().read(s().note("BL-1"))).toBe(before);
+  });
+
+  it("record refuses a value that starts with a dash and names the fix, and takes the equals form", async () => {
+    const bad = await s().run("context", "record", "BL-1", "--type", "decision", "--subject", "A", "--content", "- first item");
+    expect(bad.code).toBe(1);
+    expect(bad.err).toContain("Option '--content' argument is ambiguous.");
+    expect(bad.err).toContain("--content=VALUE");
+    expect(bad.err).toContain("give the entry with --file");
+    expect(s().read(s().note("BL-1"))).not.toContain("###");
+    expect(await s().ok("context", "record", "BL-1", "--type", "decision", "--subject", "A", "--content=- first item")).toBe("BL-1/D1 created\n");
+    const [e] = JSON.parse((await s().run("context", "get", "BL-1/D1", "--json")).out);
+    expect(e.content).toBe("- first item");
+    expect((await s().run("context", "--help")).out).toContain("--content=");
+    const other = await s().run("new", "Title", "--description", "- step one");
+    expect(other.code).toBe(1);
+    expect(other.err).toContain("--description=VALUE");
+    expect(other.err).not.toContain("give the entry with --file");
+  });
+
+  it("record refuses a flag with no value, and takes the last of a repeated single-value flag", async () => {
+    const none = await s().run("context", "record", "BL-1", "--type", "decision", "--subject");
+    expect(none.code).toBe(1);
+    expect(none.err).toContain("argument missing");
+    expect(s().read(s().note("BL-1"))).not.toContain("###");
+    expect(await s().ok("context", "record", "BL-1", "--type", "decision", "--subject", "First", "--subject", "Last")).toBe("BL-1/D1 created\n");
+    expect(s().read(s().note("BL-1"))).toContain("### D1: Last");
+  });
+
+  it("record --json prints the results", async () => {
+    await s().ok("context", "record", "BL-1", "--type", "decision", "--subject", "Old", "--content", "o");
+    const r = await s().run("context", "record", "BL-1", "--type", "decision", "--subject", "New", "--content", "n", "--supersedes", "D1", "--json");
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out)).toEqual([{ id: "BL-1/D2", action: "created", superseded: ["BL-1/D1"], warnings: [] }]);
+    s().stdin = JSON.stringify([{ type: "decision", subject: "New", content: "n" }]);
+    expect(JSON.parse((await s().run("context", "record", "BL-1", "--file", "-", "--json")).out)).toEqual([{ id: "BL-1/D2", action: "skipped", superseded: [], warnings: [] }]);
+  });
+
+  it("record in the tracker scope writes to the index note", async () => {
+    expect(await s().ok("context", "record", "BL", "--type", "constraint", "--subject", "House rule", "--content", "Always.")).toBe("BL/C1 created\n");
+    const index = s().read(s().index);
+    expect(index).toContain("### C1: House rule");
+    expect(index).toContain("Always.");
+    expect(s().read(s().note("BL-1"))).not.toContain("###");
+    expect(await s().run("lint")).toMatchObject({ code: 0 });
+    expect(await s().code("context", "record", "XX", "--type", "decision", "--subject", "A")).toBe(1);
+  });
+
+  it("get prints entries of an issue and of the tracker, as text and as JSON", async () => {
+    await s().ok("context", "record", "BL-1", "--type", "decision", "--subject", "Use X", "--content", "Because.", "--rationale", "Fast", "--evidence", "commit:abc");
+    await s().ok("context", "record", "BL", "--type", "constraint", "--subject", "House rule", "--content", "Always.");
+    const r = await s().run("context", "get", "BL-1/D1", "BL/C1");
+    expect(r.code).toBe(0);
+    const lines = r.out.split("\n");
+    expect(lines[0]).toBe("## BL-1/D1");
+    expect(lines[1]).toBe("### D1: Use X");
+    expect(r.out).toContain("\n\n## BL/C1\n### C1: House rule\n");
+    expect(r.out.endsWith("Always.\n")).toBe(true);
+    expect(r.out).toContain("Rationale: Fast");
+    expect((await s().run("context", "get", "BL-1/D1,BL/C1")).out).toBe(r.out);
+    const j = JSON.parse((await s().run("context", "get", "BL-1/D1", "BL/C1", "--json")).out);
+    expect(j).toHaveLength(2);
+    expect(j[0]).toEqual({
+      id: "BL-1/D1",
+      type: "decision",
+      number: 1,
+      subject: "Use X",
+      status: "active",
+      author: "rk",
+      created: "2026-10-01",
+      updated: "2026-10-01",
+      content: "Because.",
+      rationale: "Fast",
+      alternatives: "",
+      evidence: ["commit:abc"],
+      supersedes: [],
+      supersededBy: null,
+      rejected: null,
+    });
+    expect(j[1]).toMatchObject({ id: "BL/C1", type: "constraint", content: "Always." });
+  });
+
+  it("get returns a superseded entry with its evidence, and a rejected entry with its fields", async () => {
+    await s().ok("context", "record", "BL-1", "--type", "decision", "--subject", "Old", "--content", "o", "--evidence", "commit:abc");
+    await s().ok("context", "record", "BL-1", "--type", "decision", "--subject", "New", "--content", "n", "--supersedes", "D1");
+    await s().ok("context", "record", "BL-1", "--type", "rejected", "--subject", "Polling", "--attempted", "Poll", "--failed", "Slow", "--applies", "Always");
+    const [old, fresh, rej] = JSON.parse((await s().run("context", "get", "BL-1/D1", "BL-1/D2", "BL-1/R1", "--json")).out);
+    expect(old).toMatchObject({ status: "superseded", evidence: ["commit:abc"], supersededBy: "BL-1/D2" });
+    expect(fresh).toMatchObject({ status: "active", supersedes: ["BL-1/D1"] });
+    expect(rej.rejected).toEqual({ attempted: "Poll", promising: "", happened: "", failed: "Slow", applies: "Always" });
+    const text = (await s().run("context", "get", "BL-1/D1")).out;
+    expect(text).toContain("- status: superseded");
+    expect(text).toContain("  - commit:abc");
+  });
+
+  it("get trims the leading line break of a labelled value in JSON", async () => {
+    await s().ok("context", "record", "BL-1", "--type", "decision", "--subject", "Fenced", "--rationale", "```\ncode\n```");
+    const [e] = JSON.parse((await s().run("context", "get", "BL-1/D1", "--json")).out);
+    expect(e.rationale).toBe("```\ncode\n```");
+  });
+
+  it("get refuses an unknown ID and no ID", async () => {
+    await s().ok("context", "record", "BL-1", "--type", "decision", "--subject", "A");
+    for (const id of ["BL-1/D9", "BL-9/D1", "XX/D1", "BL-1", "nonsense"]) {
+      const r = await s().run("context", "get", id);
+      expect(r.code, id).toBe(1);
+      expect(r.out).toBe("");
+      expect(r.err).toContain(id);
+    }
+    expect((await s().run("context", "get", "BL-1/D1", "BL-1/D9")).out).toBe("");
+    const none = await s().run("context", "get");
+    expect(none.code).toBe(1);
+    expect(none.err).toContain("usage: bilinear <board.md> context");
+  });
+
+  it("an unknown or missing subcommand is a usage error that lists the subcommands", async () => {
+    for (const argv of [["context"], ["context", "bogus"], ["context", "list", "BL-1"]]) {
+      const r = await s().run(...argv);
+      expect(r.code, argv.join(" ")).toBe(1);
+      expect(r.err).toContain("record, get");
+    }
+    expect((await s().run("context", "--help")).out).toContain("context record");
+    expect((await s().raw("--help")).out).toMatch(/\n {2}context +record context entries/);
   });
 });

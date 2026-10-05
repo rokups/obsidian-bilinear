@@ -109,7 +109,9 @@ const EDGE_RE = /^[.,;:!?'"`()[\]{}<>]+|[.,;:!?'"`()[\]{}<>]+$/g;
 /** Two subjects with the same key are the same subject: NFKC, lower case, white space collapsed, marks cut at the ends of words. */
 function subjectKey(s: string): string {
   const words = cleanTitle(s).normalize("NFKC").toLowerCase().split(" ");
-  return words.map((w) => w.replace(EDGE_RE, "")).filter((w) => w !== "").join(" ");
+  const key = words.map((w) => w.replace(EDGE_RE, "")).filter((w) => w !== "").join(" ");
+  // A subject of marks only (`?`, `!`) has no key: its own text stands for it.
+  return key || cleanTitle(s).toLowerCase();
 }
 
 /** Check one evidence item and give the form to write. */
@@ -230,8 +232,9 @@ export function recordContext(t: Tracker, target: string, inputs: RecordInput[],
 
         // Rule 5: the entries that this one replaces.
         const explicit: string[] = [];
-        for (const s of input.supersedes ?? []) {
-          const full = s.includes("/") ? parseFullId(s.trim()) : null;
+        for (const raw of input.supersedes ?? []) {
+          const s = raw.trim();
+          const full = s.includes("/") ? parseFullId(s) : null;
           if (s.includes("/") && (!full || full.noteId !== noteId)) fail(`'${s}' is not an entry of ${noteId}`);
           const local = full ? full.local : normalizeLocal(s);
           if (!local) fail(`'${s}' is not an entry ID`);
