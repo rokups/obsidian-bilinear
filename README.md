@@ -400,7 +400,7 @@ Each case in `spec/fixtures/<case>/` is a `before/` tracker folder, an
 tests apply the operation twice, to the operations in memory and through the
 command line on disk, and compare byte for byte; they also check that parsing
 and re-serializing every fixture file is the identity. The fixtures cover each operation, every row of the consistency
-table, and the YAML variants Obsidian emits.
+table, the context entries, and the YAML variants Obsidian emits.
 
 `scripts/stress_obsidian.mjs` races the CLI against the plugin in a running
 Obsidian: the plugin writing while the CLI reads, the reverse, both writing,

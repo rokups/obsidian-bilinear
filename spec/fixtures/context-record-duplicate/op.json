@@ -1,0 +1,15 @@
+{
+  "op": "context-record",
+  "args": {
+    "target": "BL-9",
+    "entries": [
+      {
+        "type": "decision",
+        "subject": "Use SQLite for the cache",
+        "content": "Store entries in one SQLite file."
+      }
+    ]
+  },
+  "today": "2026-10-01",
+  "author": "claude"
+}

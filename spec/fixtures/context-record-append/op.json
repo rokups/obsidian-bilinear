@@ -1,0 +1,15 @@
+{
+  "op": "context-record",
+  "args": {
+    "target": "BL-9",
+    "entries": [
+      {
+        "type": "decision",
+        "subject": "Drop the in-memory layer",
+        "content": "The layer gave no gain."
+      }
+    ]
+  },
+  "today": "2026-10-01",
+  "author": "claude"
+}

@@ -1,0 +1,22 @@
+{
+  "op": "context-record",
+  "args": {
+    "target": "BL-9",
+    "entries": [
+      {
+        "type": "rejected",
+        "subject": "A global lock for the cache",
+        "content": "The lock was tried in the test setup.",
+        "rejected": {
+          "attempted": "A global lock around each cache write.",
+          "promising": "It looked simple.",
+          "happened": "The tests ran one at a time.",
+          "failed": "The run took four times as long.",
+          "applies": "Any shared cache with many writers."
+        }
+      }
+    ]
+  },
+  "today": "2026-10-01",
+  "author": "claude"
+}

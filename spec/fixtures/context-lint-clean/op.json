@@ -1,0 +1,11 @@
+{
+  "op": "lint",
+  "args": {
+    "fix": false
+  },
+  "expect": {
+    "problems": []
+  },
+  "today": "2026-10-01",
+  "author": "claude"
+}

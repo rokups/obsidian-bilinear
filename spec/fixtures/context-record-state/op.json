@@ -1,0 +1,15 @@
+{
+  "op": "context-record",
+  "args": {
+    "target": "BL-9",
+    "entries": [
+      {
+        "type": "state",
+        "subject": "Writing the new loader",
+        "content": "The new loader reads the cache first."
+      }
+    ]
+  },
+  "today": "2026-10-01",
+  "author": "claude"
+}

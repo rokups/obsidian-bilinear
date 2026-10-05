@@ -1,0 +1,15 @@
+{
+  "op": "context-record",
+  "args": {
+    "target": "BL",
+    "entries": [
+      {
+        "type": "constraint",
+        "subject": "Support Node 20",
+        "content": "The CLI must run on Node 20."
+      }
+    ]
+  },
+  "today": "2026-10-01",
+  "author": "claude"
+}

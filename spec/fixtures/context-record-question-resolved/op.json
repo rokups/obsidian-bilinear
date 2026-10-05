@@ -1,0 +1,18 @@
+{
+  "op": "context-record",
+  "args": {
+    "target": "BL-9",
+    "entries": [
+      {
+        "type": "decision",
+        "subject": "Set the cache size to 64 MB",
+        "content": "64 MB is enough for the test data.",
+        "supersedes": [
+          "Q1"
+        ]
+      }
+    ]
+  },
+  "today": "2026-10-01",
+  "author": "claude"
+}

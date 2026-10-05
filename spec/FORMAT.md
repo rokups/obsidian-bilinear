@@ -400,6 +400,9 @@ Tools write the metadata in the order of the table, omit the optional keys
 and labels that have no value, and put a blank line before the content and
 before the labels.
 
+The rules for recording an entry (numbers, duplicates, supersession, evidence)
+are in section 2.
+
 Hand-edited entries are read as follows:
 
 - A `status` that is missing or not one of the three reads as `active`. A
@@ -441,12 +444,63 @@ operation leaves the index correct and at worst a stray note.
 | Unarchive | Move note to `issues/`; move line to the end of `## Issues` |
 | Delete | Trash the note, wherever it is; remove the links to it from `blocked-by` and `related-to` of the other notes, those of the other trackers in the folder included; remove the line |
 | Comment | Append under `## Comments` in the issue note |
+| Record context | Write the issue note only, or the index note for the tracker scope; one or more entries in one write, all or nothing |
 | Adopt | Move a note lying in the tracker folder to `issues/`; add a line for it; raise `next` if needed. A note with the prefix of another tracker in the folder is refused |
 | Label | Add the label to `labels` if absent; set or clear its `label-colors` entry |
 | State style | Set or clear a state's `state-icons` and `state-colors` entries |
 
 New issues are appended at the end of `## Issues` unless "top" is requested.
 An adopted note is listed in the section matching where the note is.
+
+**Recording context.** An entry is added to the `## Context log` of one note, as
+section 1.7 says. Each entry of a batch is checked on the note as the entries
+before it left it. If one entry is refused, the note stays as it was. A note in
+which a local ID occurs more than once refuses every record call.
+
+- The number of a new entry is one more than the highest number of an entry
+  with the same letter, of any status, or 1 if there is none.
+- The checks of the fields, the evidence and `supersedes` come first, and a
+  failed check refuses the entry. Then the skip rule applies, before the two
+  rules that follow. It compares the new entry with the active entries
+  of the same type, except those that it names in `supersedes`. The entry is
+  skipped, and nothing is written, when one of them has an equal subject and
+  equal text. If the entry names other entries in `supersedes`, it is refused
+  instead. Subjects are equal when their keys are equal. The key is made as
+  follows: collapse white space; apply NFKC; make lower case; cut from each
+  word the marks `` . , ; : ! ? ' " ` ( ) [ ] { } < > `` at its start and end;
+  drop the empty words. A subject with no word left is its own key. The text is
+  the content and the labelled values, with white space collapsed.
+- An active entry of the same type, not named in `supersedes`, with an equal
+  subject and different text refuses the new entry, unless the caller asks to
+  keep both. An active state that the new state supersedes by the state rule
+  does not count.
+- Each entry named in `supersedes` must exist in the note and be active, else
+  the new entry is refused; so is a full ID of another note. The new entry gets
+  `supersedes`; each named entry gets `superseded-by`, `status: superseded` (a
+  question gets `resolved`) and `updated`.
+- When a new entry of type `S` is created, it also supersedes each active entry
+  of that type that it does not name. This applies only after the skip rule,
+  so a state equal to the active state is skipped.
+- The new entry has `status: active`, and the author and the date of the call as
+  `author`, `created` and `updated`. An entry of type `R` needs a non-empty
+  `Attempted:`, `Failed:` and `Applies:`.
+- The content and each labelled value are written with no white space at their
+  ends. In the content, a heading of level 1 to 3 is
+  written at level 4. A line that starts with one of the labels of the entry's
+  type gets a backslash before it. Lines in a fenced code block do not change.
+  A labelled value loses its blank lines outside a fenced code block.
+- An `evidence` item has the form `kind:value`: the kind is lower case letters,
+  the value is not empty, and white space at the ends of the item and the value
+  is removed. An item with a line break, or another form, refuses the entry.
+  A `comment:` item must name a comment of the note (`comment:<date>#<n>`). An
+  `entry:` item must name an entry of the note; it is written as the full ID, so
+  `entry:F1` in `BL-9` is written `entry:BL-9/F1`. For a full ID of another note
+  only the form is checked, and the ID is written in upper case. Other kinds,
+  `file:` included, are kept with no check.
+- A warning does not change what is written. Among others, there is one for an
+  active entry of the same type with a similar subject, one for a decision near
+  an active entry of type `R`, and one for a skipped entry whose evidence items
+  are not in the entry it equals ("the evidence was not added").
 
 **Every index write** also corrects the title copy of each line whose note has
 a different, non-empty `title` property.
@@ -668,6 +722,7 @@ identity.
 | `unarchive` | `ids` | |
 | `delete` | `id` | |
 | `comment` | `id`, `text` | |
+| `context-record` | `target`: an issue ID or the tracker prefix; `entries`: a list of objects with `type` (a name such as `decision`), `subject`, and optional `content`, `rationale`, `alternatives` (strings), `evidence`, `supersedes` (lists of strings), `rejected` (an object with `attempted`, `promising`, `happened`, `failed`, `applies`) and `new` (`true`) | |
 | `adopt` | `id` | |
 | `label` | `name`, optional `color`: a colour sets it, `null` clears it, absent leaves it | |
 | `labels` | | `labels`: the known labels in order, each `{name, color}` with `null` for no colour |
@@ -676,8 +731,8 @@ identity.
 | `lint` | `fix` | `problems`: sorted list of `<code>:<id>`, with `-` for the index |
 | `list` | | `issues`: every issue, open and archived, in index order; each entry lists the fields to compare |
 
-`today` is the date used for `created` and for comments; `author` is the
-comment author. In `list` results `blocked-by` is a list of IDs, an absent
+`today` is the date used for `created`, for comments and for the recorded
+entries; `author` is the comment author and the author of the recorded entries. In `list` results `blocked-by` is a list of IDs, an absent
 text property is `null`, and each issue has `archived` and `missing` flags,
 `links` (the IDs its description links to, known or not) and `progress`:
 `{done, total, issues}` with the blockers counted, or `null`. `related` is

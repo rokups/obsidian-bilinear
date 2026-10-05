@@ -1,0 +1,16 @@
+{
+  "op": "context-record",
+  "args": {
+    "target": "BL-9",
+    "entries": [
+      {
+        "type": "decision",
+        "subject": "Use one cache directory per test",
+        "content": "Each test gets a temp directory.",
+        "rationale": "Shared state caused the flaky failures."
+      }
+    ]
+  },
+  "today": "2026-10-01",
+  "author": "claude"
+}

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { IssueRecord } from "../src/format/record";
 import type { Tracker } from "../src/ops/io";
 import { adoptIssue, archiveClosed, archiveIssues, commentIssue, createIssue, deleteIssue, moveIssue, setLabel, setProps, setStateStyle, unarchiveIssues } from "../src/ops/issues";
+import { recordContext, type RecordInput } from "../src/ops/context";
 import { lint } from "../src/ops/lint";
 import { listIssues, readIndex, trackersIn } from "../src/ops/tracker";
 import { issueRelations, linkedProgress, type Progress, type Relations } from "../src/store/query";
@@ -104,6 +105,12 @@ export async function apply(t: Tracker, op: Op): Promise<Result> {
     case "comment":
       await commentIssue(t, a.id, a.text, op.author ?? "rk", today);
       return {};
+    case "context-record": {
+      // The entries use the JSON names of `context record --file`; only `new` differs from RecordInput.
+      const inputs = (a.entries as Array<Record<string, unknown>>).map(({ new: isNew, ...rest }) => ({ ...rest, ...(isNew === undefined ? {} : { isNew }) }) as unknown as RecordInput);
+      await recordContext(t, a.target, inputs, { author: op.author ?? "rk", today });
+      return {};
+    }
     case "adopt":
       await adoptIssue(t, a.id);
       return {};

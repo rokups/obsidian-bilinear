@@ -8,6 +8,9 @@ import { describe, expect, it } from "vitest";
 import { main } from "../../cli/src/cli";
 import { cases, type Op } from "./fixtures";
 
+/** The tracker folder is root/vault/Tracker; the batch of a `context-record` case goes in root/entries.json, outside it. */
+const ENTRIES_FILE = "entries.json";
+
 function argvFor(op: Op): string[] {
   const a = op.args ?? {};
   const clear = (v: string | null) => v ?? "none";
@@ -32,6 +35,8 @@ function argvFor(op: Op): string[] {
       return ["rm", a.id];
     case "comment":
       return ["comment", a.id, a.text, "--author", op.author ?? "rk"];
+    case "context-record":
+      return ["context", "record", a.target, "--file", ENTRIES_FILE, "--author", op.author ?? "rk"];
     case "adopt":
       return ["adopt", a.id];
     case "label":
@@ -75,6 +80,7 @@ describe("fixtures through the CLI", () => {
       const tracker = join(root, "vault", "Tracker");
       fs.mkdirSync(join(root, "vault", ".obsidian"), { recursive: true });
       fs.cpSync(join(c.dir, "before"), tracker, { recursive: true });
+      if (c.op.op === "context-record") fs.writeFileSync(join(root, ENTRIES_FILE), JSON.stringify(c.op.args.entries));
       let out = "";
       let err = "";
       const code = await main([join(tracker, c.op.tracker ?? "Tracker.md"), ...argvFor(c.op)], {
@@ -93,6 +99,7 @@ describe("fixtures through the CLI", () => {
         const open = problems.map((p) => p.split(":")[0]).filter((code) => !(c.op.args.fix && FIXABLE.includes(code)));
         expect(code).toBe(open.length ? 2 : 0);
       }
+      if (c.op.op === "context-record") expect(code).toBe(0);
       if (expected.labels !== undefined) expect(JSON.parse(out)).toEqual(expected.labels);
       if (expected.states !== undefined) expect(JSON.parse(out)).toEqual(expected.states);
       if (expected.issues !== undefined) {

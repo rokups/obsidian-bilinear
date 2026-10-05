@@ -1,0 +1,20 @@
+{
+  "op": "lint",
+  "args": {
+    "fix": false
+  },
+  "expect": {
+    "problems": [
+      "context-duplicate-id:-",
+      "context-duplicate-id:BL-9",
+      "context-entry-invalid:-",
+      "context-entry-invalid:BL-9",
+      "context-link-unknown:-",
+      "context-link-unknown:-",
+      "context-link-unknown:BL-9",
+      "context-link-unknown:BL-9"
+    ]
+  },
+  "today": "2026-10-01",
+  "author": "claude"
+}

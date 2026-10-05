@@ -1,0 +1,16 @@
+{
+  "op": "context-record",
+  "args": {
+    "target": "BL-9",
+    "entries": [
+      {
+        "type": "decision",
+        "subject": "Write the cache notes",
+        "content": "# Top\nText.\n## Second\n### Third\n#### Fourth\nRationale: not a label here\nAlternatives: nor this\n```\n# in a fence\nRationale: kept\n```\nLast line.",
+        "rationale": "The label is kept."
+      }
+    ]
+  },
+  "today": "2026-10-01",
+  "author": "claude"
+}
