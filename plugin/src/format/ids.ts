@@ -8,6 +8,7 @@ export const DEFAULT_CLOSED = ["done", "canceled"];
 export const ISSUES = "Issues";
 export const ARCHIVE = "Archive";
 export const COMMENTS = "Comments";
+export const CONTEXT = "Context";
 export const ISSUES_DIR = "issues";
 export const ARCHIVE_DIR = "archive";
 
@@ -49,6 +50,20 @@ export function parsePair(entry: string, normalize: Normalize): [string, string]
   const value = normalize(entry.slice(at + 1));
   return name && value !== null ? [name, value] : null;
 }
+/** The type of a context entry, by the letter of its local ID (`D3` is a decision). */
+export const TYPE_LETTERS = {
+  D: "decision",
+  C: "constraint",
+  F: "finding",
+  R: "rejected",
+  Q: "question",
+  S: "state",
+  A: "artifact",
+} as const;
+export type EntryType = (typeof TYPE_LETTERS)[keyof typeof TYPE_LETTERS];
+export const ENTRY_STATUSES = ["active", "superseded", "resolved"] as const;
+export type EntryStatus = (typeof ENTRY_STATUSES)[number];
+
 export const LIST_KEYS = ["labels", "blocked-by", "related-to"];
 /** The list properties whose values are links to issues. */
 export const LINK_LIST_KEYS = ["blocked-by", "related-to"];

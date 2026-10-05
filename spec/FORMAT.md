@@ -71,7 +71,7 @@ list lines.
 - A heading is `#` to `######`, whitespace, then the name. Trailing `#`s and
   whitespace are not part of the name.
 - A *section* is a level-2 heading with an exact, case-sensitive name
-  (`Issues`, `Archive`, `Comments`). It runs to the next level-1 or level-2
+  (`Issues`, `Archive`, `Comments`, `Context`). It runs to the next level-1 or level-2
   heading, or to the end of the file. Deeper headings stay inside it. If a name
   appears on more than one level-2 heading only the first is the section.
 
@@ -270,7 +270,8 @@ naming itself, are ignored here and reported by `lint`. `blocked-by` must not
 lead back to the issue it starts from, also through the issues of the other
 trackers; `related-to` has no such rule.
 
-The description is the note body outside the `## Comments` section. A link in
+The description is the note body outside the `## Context` and `## Comments`
+sections. A link in
 it is a wikilink or an embed, `[[BL-3]]` or `![[BL-3]]`, reduced to an ID the
 same way as an index line link; links inside fenced code blocks and inline
 code do not count. They are listed as `links` and are informational.
@@ -326,6 +327,93 @@ with one of ``! & * - ? [ ] { } | > @ ` " ' # % , :``; contains `: ` or ` #`;
 ends with `:`; contains a control character; looks like a number; or is one of
 `true false null yes no on off y n ~` in any letter case. Inside an inline list
 it must also be quoted when it contains `,`, `[`, `]`, `{` or `}`.
+
+### 1.7 Context entries
+
+An issue note may hold structured knowledge about the work: decisions,
+constraints and the like. The entries are under a `## Context` section, which
+may come before or after `## Comments`. The usual order is frontmatter,
+description, `## Context`, `## Comments`. The index note may also have a
+`## Context` section, for entries of the whole tracker; it is best placed at
+the end of the note.
+
+```
+## Context
+
+### D3: Use one cache directory per test
+- status: active
+- author: claude
+- created: 2026-10-01
+- updated: 2026-10-02
+- supersedes: D1
+- evidence:
+  - comment:2026-10-01#2
+  - file:src/cache.ts
+
+Each test gets a temp directory. Tests no longer share state.
+
+Rationale: Shared state caused the flaky failures.
+Alternatives: A global lock. A fixture reset.
+```
+
+An entry starts at a level-3 heading `### <letter><n>: <subject>` and ends at
+the next heading of level 3 or less, or at the end of the section. The letter
+(upper case when written, any case when read) gives the type:
+
+| Letter | Type | Letter | Type |
+|---|---|---|---|
+| `D` | decision | `Q` | question |
+| `C` | constraint | `S` | state |
+| `F` | finding | `A` | artifact |
+| `R` | rejected | | |
+
+The *local ID* is the letter and the number, such as `D3`. The *full ID* is
+`<note ID>/<local ID>`: `BL-9/D3` for an entry of an issue note, and `BL/D1`
+for an entry of the index note, where the note ID is the tracker prefix.
+
+Directly after the heading comes a block of bullets with metadata:
+
+| Key | Notes |
+|---|---|
+| `status` | `active`, `superseded` or `resolved` |
+| `author` | Free text |
+| `created`, `updated` | Dates, `YYYY-MM-DD` |
+| `supersedes` | Optional; local IDs separated by commas, such as `D1, D2` |
+| `superseded-by` | Optional; one local ID |
+| `evidence` | Optional; one reference per line as a nested bullet list. An inline value with commas is also read |
+
+Next is free text, the *content*. After it come lines that start at column 0
+with a label, each optional: `Rationale:` and `Alternatives:`. An entry of
+type `R` also has `Attempted:`, `Promising:`, `Happened:`, `Failed:` and
+`Applies:`. A value goes on over the next lines until the next label or a
+blank line.
+
+Tools write the metadata in the order of the table, omit the optional keys
+and labels that have no value, and put a blank line before the content and
+before the labels.
+
+Hand-edited entries are read as follows:
+
+- A `status` that is missing or not one of the three reads as `active`. A
+  `status` bullet that does not parse is kept as it is, and tools then write no
+  `status` line of their own.
+- A bullet that is not in the table, has a value that does not parse, or has
+  indented lines under it (other than `evidence`) is kept as it is, with those
+  lines, and written back after the known bullets. A key counts as given only
+  when its value parses, so a later valid bullet of that key is used.
+- Blank lines directly after the heading are skipped. Every bullet that then
+  follows, up to the first line that is not a bullet or a line under one,
+  belongs to the metadata block, a list of the entry's own too. The content
+  starts at the first line after that block that is not blank.
+- Text after a label's value, after a blank line, joins the content. A label's
+  value goes on through the lines of a fenced code block, blank lines included,
+  and keeps its indentation.
+- A level-3 heading that is not in the form of an entry is not an entry. Its
+  lines are skipped, and so is any text between `## Context` and the first
+  entry.
+- A local ID that occurs more than once in a note is reported; the entries
+  are all kept.
+- Headings inside fenced code blocks are not headings (section 1.3).
 
 ## 2. Operations
 
