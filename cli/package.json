@@ -1,6 +1,6 @@
 {
   "name": "obsidian-bilinear",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Command-line client for Bilinear, the Markdown issue tracker for Obsidian",
   "type": "module",
   "bin": {
