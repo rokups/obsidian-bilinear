@@ -1,4 +1,4 @@
-import { COMMENTS, ID_RE, cleanTitle, linkTarget } from "./ids";
+import { COMMENTS, ID_RE, NON_DESCRIPTION_SECTIONS, cleanTitle, linkTarget } from "./ids";
 import { chomp, hasEol, isBlank, splitLines } from "./lines";
 import { findSections } from "./markdown";
 import { Doc, type Value } from "./yaml";
@@ -45,16 +45,16 @@ export function addComment(text: string, date: string, author: string, comment: 
 /**
  * IDs of the issues a note's body links to, in order, each once. Links and
  * embeds count wherever they are in the description; links in code and under
- * `## Comments` do not, so that mentioning an issue in a comment does not make
+ * `## Comments` or `## Context` do not, so that mentioning an issue in a comment does not make
  * it part of this one.
  */
 export function bodyLinks(body: string, selfId: string | null = null): string[] {
   const lines = splitLines(body);
-  const { sections, kinds } = findSections(lines, [COMMENTS]);
-  const comments = sections.get(COMMENTS) ?? [0, 0];
+  const { sections, kinds } = findSections(lines, NON_DESCRIPTION_SECTIONS);
+  const skipped = [...sections.values()];
   const out: string[] = [];
   lines.forEach((line, i) => {
-    if (kinds[i].kind === "code" || (i >= comments[0] && i < comments[1])) return;
+    if (kinds[i].kind === "code" || skipped.some(([a, b]) => i >= a && i < b)) return;
     for (const m of chomp(line).replace(/`[^`]*`/g, "").matchAll(/\[\[([^[\]]+)\]\]/g)) {
       const target = linkTarget(m[1]);
       if (ID_RE.test(target) && target !== selfId && !out.includes(target)) out.push(target);

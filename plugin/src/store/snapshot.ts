@@ -1,6 +1,6 @@
 // What a tracker view shows: the index list resolved against the notes.
 
-import { COMMENTS, ID_RE, LOCATIONS } from "../format/ids";
+import { ID_RE, LOCATIONS, NON_DESCRIPTION_SECTIONS } from "../format/ids";
 import { Index } from "../format/index-note";
 import { recordFromFrontmatter, type IssueRecord } from "../format/record";
 import { joinPath } from "../ops/io";
@@ -57,18 +57,24 @@ export interface LinkCache {
 
 /**
  * Link targets in a note's description, in document order: links and embeds
- * outside the `## Comments` section. (The cache already leaves out code and
+ * outside the `## Comments` and `## Context` sections. (The cache already leaves out code and
  * frontmatter.)
  */
 export function descriptionLinks(cache: LinkCache | null | undefined): string[] {
   if (!cache) return [];
   const headings = cache.headings ?? [];
-  const at = headings.findIndex((h) => h.level === 2 && h.heading.trim() === COMMENTS);
-  const from = at < 0 ? Infinity : headings[at].position.start.line;
-  const next = at < 0 ? undefined : headings.slice(at + 1).find((h) => h.level <= 2);
-  const to = next ? next.position.start.line : Infinity;
+  // The first level-2 heading of each section that is not description, up to the next heading of level 1 or 2.
+  const skipped: Array<[number, number]> = [];
+  const seen = new Set<string>();
+  headings.forEach((h, i) => {
+    const name = h.heading.trim();
+    if (h.level !== 2 || !NON_DESCRIPTION_SECTIONS.includes(name) || seen.has(name)) return;
+    seen.add(name);
+    const next = headings.slice(i + 1).find((x) => x.level <= 2);
+    skipped.push([h.position.start.line, next ? next.position.start.line : Infinity]);
+  });
   return [...(cache.links ?? []), ...(cache.embeds ?? [])]
-    .filter((l) => l.position.start.line < from || l.position.start.line >= to)
+    .filter((l) => !skipped.some(([a, b]) => l.position.start.line >= a && l.position.start.line < b))
     .sort((a, b) => a.position.start.offset - b.position.start.offset)
     .map((l) => l.link);
 }

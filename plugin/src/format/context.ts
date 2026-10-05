@@ -1,4 +1,5 @@
 import {
+  COMMENTS,
   ENTRY_STATUSES,
   ID_RE,
   PREFIX_RE,
@@ -8,8 +9,8 @@ import {
   type EntryStatus,
   type EntryType,
 } from "./ids";
-import { chomp, isBlank, splitLines, trimBlank } from "./lines";
-import { findSections, type LineKind } from "./markdown";
+import { chomp, detectEol, hasEol, isBlank, splitLines, trimBlank } from "./lines";
+import { classify, findSections, type LineKind } from "./markdown";
 import { Doc } from "./yaml";
 
 export interface RejectedFields {
@@ -70,6 +71,11 @@ const LETTERS = Object.fromEntries(Object.entries(TYPE_LETTERS).map(([letter, ty
   EntryType,
   string
 >;
+
+/** The labels an entry of a type can have. */
+function labelsOf(type: EntryType): string[] {
+  return type === "rejected" ? [...REJECTED_LABELS, "Rationale", "Alternatives"] : ["Rationale", "Alternatives"];
+}
 
 /** `d3` -> `D3`; null when it is not a local ID of a known type. */
 function normalizeLocal(s: string): string | null {
@@ -259,7 +265,7 @@ function parseEntry(
   }
 
   // The free text, then the labelled lines. Text after a label's value goes to the content.
-  const labels = type === "rejected" ? [...REJECTED_LABELS, "Rationale", "Alternatives"] : ["Rationale", "Alternatives"];
+  const labels = labelsOf(type);
   const content: string[] = [];
   const values = new Map<string, string[]>();
   let cur: string[] | null = null;
@@ -280,7 +286,10 @@ function parseEntry(
       if (seenLabel || content.length || !isBlank(s)) content.push(s);
     }
   }
-  e.content = content.join("\n").replace(/^\n+|\n+$/g, "");
+  // Lines of only spaces at either end of the content are blank lines too.
+  while (content.length && isBlank(content[0])) content.shift();
+  while (content.length && isBlank(content[content.length - 1])) content.pop();
+  e.content = content.join("\n");
   const value = (label: string) => (values.get(label) ?? []).join("\n");
   e.rationale = value("Rationale");
   e.alternatives = value("Alternatives");
@@ -305,7 +314,7 @@ export function formatEntry(e: ContextEntry, eol: string): string {
   const kept = bullets.find((m) => isValid(trimBlank(m[1]).toLowerCase())) ?? bullets[0];
   const v = kept ? trimBlank(kept[1]).toLowerCase() : null;
   const valid = v !== null && isValid(v);
-  const badStatus = e.statusInExtra === true && (v === e.status || (!valid && e.status === "active"));
+  const badStatus = kept !== undefined && e.statusInExtra === true && (v === e.status || (!valid && e.status === "active"));
   if (!badStatus) out.push(`- status: ${e.status}`);
   if (e.author) out.push(`- author: ${e.author}`);
   if (e.created) out.push(`- created: ${e.created}`);
@@ -332,4 +341,194 @@ export function formatEntry(e: ContextEntry, eol: string): string {
   if (e.content) out.push("", ...e.content.split("\n"));
   if (labelled.length) out.push("", ...labelled.flatMap((l) => l.split("\n")));
   return out.map((l) => l + eol).join("");
+}
+
+/** One more than the highest number of an entry with this letter (any case); 1 when there is none. Duplicates count. */
+export function nextNumber(text: string, letter: string): number {
+  const l = letter.toUpperCase();
+  let max = 0;
+  for (const e of parseContext(text).entries) if (e.local[0] === l && e.number > max) max = e.number;
+  return max + 1;
+}
+
+const BAD_BREAK_RE = /[\r\n]/;
+
+/** Problems of one free text field, `content` or a labelled value. See `checkEntry`. */
+function checkField(name: string, value: string, labels: string[], labelled: boolean, out: string[]): void {
+  if (value === "") return;
+  if (value.includes("\r")) out.push(`${name} has a carriage return`);
+  const all = value.split("\n");
+  // The first line of a value that does not start with a line break stands on the label line, not at column 0.
+  const own = labelled && !value.startsWith("\n");
+  if (own) {
+    if (all[0] !== trimBlank(all[0])) out.push(`${name} starts or ends with a space or tab`);
+  } else if (!labelled && (isBlank(all[0]) || isBlank(all[all.length - 1]))) {
+    out.push(`${name} starts or ends with a blank line`);
+  }
+  const rest = labelled ? all.slice(1) : all;
+  const text = rest.map((l) => l + "\n");
+  const kinds = classify(text);
+  if (classify([...text, "x\n"])[text.length].kind === "code") out.push(`${name} has a code fence that is not closed`);
+  rest.forEach((line, i) => {
+    const k = kinds[i];
+    if (k.kind === "heading" && k.level <= 3) out.push(`${name} has a heading of level ${k.level}: ${line}`);
+    if (k.kind === "text") {
+      const lm = LABEL_RE.exec(line);
+      if (lm && labels.includes(lm[1])) out.push(`${name} has a line that starts with a label: ${line}`);
+    }
+    if (labelled && k.kind !== "code" && isBlank(line)) out.push(`${name} has a blank line`);
+  });
+}
+
+/**
+ * Problems that make an entry unsafe to write, as texts; empty when it is safe. An entry that passes is read back
+ * as the same entry by `parseContext`.
+ */
+export function checkEntry(e: ContextEntry): string[] {
+  const out: string[] = [];
+  const letter = (Object.keys(TYPE_LETTERS) as string[]).find((l) => TYPE_LETTERS[l as keyof typeof TYPE_LETTERS] === e.type);
+  if (!letter) out.push(`unknown type: ${String(e.type)}`);
+  else if (!Number.isInteger(e.number) || e.number < 0) out.push(`number is not a whole number: ${e.number}`);
+  else if (e.local !== `${letter}${e.number}`) out.push(`local ID ${e.local} does not match the type and number`);
+  if (BAD_BREAK_RE.test(e.subject) || trimBlank(e.subject) === "") out.push("subject is empty or has a line break");
+  else if (e.subject !== trimBlank(e.subject)) out.push("subject starts or ends with a space or tab");
+  else if (/(^|[ \t])#+$/.test(e.subject)) out.push("subject ends with a # that reads as a closing mark of the heading");
+  if (!(ENTRY_STATUSES as readonly string[]).includes(e.status)) out.push(`unknown status: ${String(e.status)}`);
+  if (e.author !== null && (BAD_BREAK_RE.test(e.author) || e.author === "" || e.author !== trimBlank(e.author))) {
+    out.push("author is empty, has a line break, or starts or ends with a space or tab");
+  }
+  for (const key of ["created", "updated"] as const) {
+    if (e[key] !== null && !validDate(e[key])) out.push(`${key} is not a date: ${String(e[key])}`);
+  }
+  for (const id of e.supersedes) if (normalizeLocal(id) !== id) out.push(`supersedes has a bad ID: ${id}`);
+  if (e.supersededBy !== null && normalizeLocal(e.supersededBy) !== e.supersededBy) {
+    out.push(`superseded-by is not an ID: ${e.supersededBy}`);
+  }
+  for (const item of e.evidence) {
+    if (BAD_BREAK_RE.test(item) || trimBlank(item) === "") out.push("an evidence item is empty or has a line break");
+    else if (item !== trimBlank(item) || /^[-*+][ \t]/.test(item)) out.push(`evidence item is not safe to write: ${item}`);
+  }
+  if (e.extra.some((l) => BAD_BREAK_RE.test(l))) out.push("an extra line has a line break");
+  const labels = labelsOf(e.type);
+  checkField("content", e.content, labels, false, out);
+  checkField("rationale", e.rationale, labels, true, out);
+  checkField("alternatives", e.alternatives, labels, true, out);
+  if (e.type === "rejected" && e.rejected) {
+    for (const key of ["attempted", "promising", "happened", "failed", "applies"] as const) {
+      checkField(key, e.rejected[key], labels, true, out);
+    }
+  }
+  // The safety net: what is written must read back as the same entry, and as one entry only.
+  if (out.length === 0) {
+    const back = parseContext(`## ${CONTEXT}\n\n${formatEntry(e, "\n")}`).entries;
+    if (back.length !== 1) out.push(`it is written as ${back.length} entries, not one`);
+    else if (!sameEntry(back[0], e)) out.push("it does not read back as the same entry when it is written");
+  }
+  return out;
+}
+
+/** The entry as a value to compare: no range, and no `statusInExtra`, which only steers how the entry is written. */
+function canonical(e: ContextEntry): string {
+  const { range, statusInExtra, ...rest } = e;
+  const sort = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(sort)
+      : v && typeof v === "object"
+        ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, x]) => [k, sort(x)]))
+        : v;
+  return JSON.stringify(sort(rest));
+}
+
+function sameEntry(a: ContextEntry, b: ContextEntry): boolean {
+  return canonical(a) === canonical(b);
+}
+
+function assertEntry(e: ContextEntry): void {
+  const problems = checkEntry(e);
+  if (problems.length) throw new Error(`Context entry ${e.local} is not safe to write: ${problems.join("; ")}`);
+}
+
+/**
+ * Add an entry at the end of the `## Context` section of a note (frontmatter allowed). Without the section, it is
+ * created before `## Comments`, or at the end of the note when there is no such section. The tracker index note
+ * has no `## Comments`, so there the section goes at the end.
+ */
+export function insertEntry(text: string, e: ContextEntry): string {
+  assertEntry(e);
+  const doc = new Doc(text);
+  const eol = doc.eol;
+  const lines = splitLines(doc.body);
+  const block = formatEntry(e, eol);
+  const { sections } = findSections(lines, [CONTEXT, COMMENTS]);
+  const context = sections.get(CONTEXT);
+  const comments = sections.get(COMMENTS);
+  if (context) {
+    const [start, end] = context;
+    let pos = start + 1;
+    for (let i = start + 1; i < end; i++) {
+      if (!isBlank(lines[i])) pos = i + 1;
+    }
+    if (!hasEol(lines[pos - 1])) lines[pos - 1] += eol;
+    // A heading directly after the section gets its blank line.
+    const after = pos < lines.length && !isBlank(lines[pos]) ? eol : "";
+    lines.splice(pos, 0, eol, block + after);
+  } else if (comments) {
+    const at = comments[0];
+    const before = at > 0 && !isBlank(lines[at - 1]) ? [eol] : [];
+    lines.splice(at, 0, ...before, `## ${CONTEXT}${eol}`, eol, block, eol);
+  } else {
+    const n = lines.length;
+    if (n && !hasEol(lines[n - 1])) lines[n - 1] += eol;
+    if ((n && !isBlank(lines[n - 1])) || (!n && doc.hasFm)) lines.push(eol);
+    lines.push(`## ${CONTEXT}${eol}`, eol, block);
+  }
+  doc.body = lines.join("");
+  const out = doc.text();
+  const back = parseContext(out).entries.filter((x) => x.local === e.local);
+  if (back.length === 0 || !sameEntry(back[back.length - 1], e)) {
+    throw new Error(`Context entry ${e.local} is not found after it is written: a code fence in the note is not closed`);
+  }
+  return out;
+}
+
+/**
+ * Change the first entry with a local ID. Only the lines of that entry are replaced; the blank lines after it, the
+ * other lines and a missing final line break stay as they are. Throws when there is no such entry or when the
+ * changed entry is not safe to write.
+ */
+export function patchEntry(text: string, local: string, patch: (e: ContextEntry) => ContextEntry): string {
+  const want = normalizeLocal(local) ?? local;
+  const found = parseContext(text).entries.find((x) => x.local === want);
+  if (!found) throw new Error(`There is no context entry ${local}`);
+  const [from, to] = found.range;
+  const changed = patch(found);
+  assertEntry(changed);
+  const eol = detectEol(text);
+  const lines = splitLines(text);
+  const old = lines.slice(from, to);
+  let keep = old.length;
+  while (keep > 0 && isBlank(old[keep - 1])) keep--;
+  const tail = old.slice(keep);
+  let block = formatEntry(changed, eol);
+  // The last line of the note had no terminator, and it still has none.
+  if (tail.length === 0 && old.length > 0 && !hasEol(old[old.length - 1])) block = block.slice(0, -eol.length);
+  lines.splice(from, to - from, block, ...tail);
+  return lines.join("");
+}
+
+/**
+ * The note without its `## Context` section, heading and content. It takes the whole note, as `parseContext` does,
+ * so the section is found with the frontmatter in the way of nothing. When the section was the last of the note,
+ * the blank lines before it go too.
+ */
+export function stripContext(text: string): string {
+  const doc = new Doc(text);
+  const lines = splitLines(doc.body);
+  const found = findSections(lines, [CONTEXT]).sections.get(CONTEXT);
+  if (!found) return text;
+  let [start, end] = found;
+  if (end >= lines.length) while (start > 0 && isBlank(lines[start - 1])) start--;
+  lines.splice(start, end - start);
+  doc.body = lines.join("");
+  return doc.text();
 }

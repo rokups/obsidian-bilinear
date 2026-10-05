@@ -9,6 +9,8 @@ export const ISSUES = "Issues";
 export const ARCHIVE = "Archive";
 export const COMMENTS = "Comments";
 export const CONTEXT = "Context";
+/** Sections of an issue note whose links are not those of the description. */
+export const NON_DESCRIPTION_SECTIONS = [COMMENTS, CONTEXT];
 export const ISSUES_DIR = "issues";
 export const ARCHIVE_DIR = "archive";
 

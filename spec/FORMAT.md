@@ -386,7 +386,13 @@ Next is free text, the *content*. After it come lines that start at column 0
 with a label, each optional: `Rationale:` and `Alternatives:`. An entry of
 type `R` also has `Attempted:`, `Promising:`, `Happened:`, `Failed:` and
 `Applies:`. A value goes on over the next lines until the next label or a
-blank line.
+blank line. A value under an empty label line keeps its position: the line
+break after the label stays part of the value.
+
+When a tool creates `## Context` in an issue note, it puts the section directly
+before `## Comments`, or at the end of the note if there is no `## Comments`.
+In the index note it goes at the end. A new entry goes at the end of the
+section, after a blank line.
 
 Tools write the metadata in the order of the table, omit the optional keys
 and labels that have no value, and put a blank line before the content and
