@@ -9,19 +9,20 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
-import { COLOR_NAMES, LINK_LIST_KEYS, LIST_KEYS, STATE_SHAPES, TYPE_LETTERS, linkId, makeLink, todayIso, ID_RE, PREFIX_RE, cleanTitle, type EntryType } from "../../plugin/src/format/ids";
+import { COLOR_NAMES, ENTRY_STATUSES, LINK_LIST_KEYS, LIST_KEYS, STATE_SHAPES, TYPE_LETTERS, linkId, makeLink, todayIso, ID_RE, PREFIX_RE, cleanTitle, type EntryType } from "../../plugin/src/format/ids";
 import type { IssueRecord } from "../../plugin/src/format/record";
 import { Doc, type Value } from "../../plugin/src/format/yaml";
 import { OpError, type Tracker } from "../../plugin/src/ops/io";
 import { adoptIssue, archiveClosed, archiveIssues, commentIssue, createIssue, createTracker, deleteIssue, moveIssue, setLabel, setProps, setStateStyle, setTriageState, unarchiveIssues, unrelate, type PropEdits } from "../../plugin/src/ops/issues";
-import { buildContextView, getContext, recordContext, type RecordInput } from "../../plugin/src/ops/context";
-import { stripEntries } from "../../plugin/src/format/context";
+import { buildContextView, getContext, listContext, recordContext, type RecordInput } from "../../plugin/src/ops/context";
+import { parseContext, stripEntries, type ContextEntry } from "../../plugin/src/format/context";
+import { parseComments } from "../../plugin/src/format/issue-note";
 import { lint } from "../../plugin/src/ops/lint";
 import { LOCK_TIMES, LockTimeout } from "../../plugin/src/ops/lock-file";
 import { allRecords, linkTargets, locked, notePath, readIndex, requireItem, resolveNote } from "../../plugin/src/ops/tracker";
 import type { Progress, Relations } from "../../plugin/src/store/query";
 import { version } from "../package.json";
-import { SKILL, SetupError, blockSkill, blockTracker, exclude, excludePatterns, hasFollowups, instructions, instructionsBlock, isTracked, plan, realPath, repositoryRoot, shellWord, trackerPath, withInstructions, writeFile } from "./agent";
+import { SKILL, SetupError, blockSkill, blockTracker, checkpointText, exclude, excludePatterns, hasFollowups, instructions, instructionsBlock, isTracked, plan, realPath, repositoryRoot, shellWord, trackerPath, withInstructions, writeFile } from "./agent";
 import { ConflictError, NodeIO, slashed } from "./node-io";
 
 export const EXIT_OK = 0;
@@ -225,6 +226,53 @@ function flagEntry(values: Values): RecordInput {
 /** A labelled value of an entry, without the line break that puts it on the lines under its label. */
 const labelled = (v: string): string => v.replace(/^\n/, "");
 
+/** An entry with the key names and order of the CLI's JSON; `id` is its full ID. */
+function entryJson(id: string, e: ContextEntry): Record<string, unknown> {
+  const note = id.slice(0, id.indexOf("/"));
+  return {
+    id,
+    type: e.type,
+    number: e.number,
+    subject: e.subject,
+    status: e.status,
+    author: e.author,
+    created: e.created,
+    updated: e.updated,
+    content: e.content,
+    rationale: labelled(e.rationale),
+    alternatives: labelled(e.alternatives),
+    evidence: e.evidence,
+    supersedes: e.supersedes.map((l) => `${note}/${l}`),
+    supersededBy: e.supersededBy === null ? null : `${note}/${e.supersededBy}`,
+    rejected: e.rejected ? Object.fromEntries(REJECTED_KEYS.map((k) => [k, labelled(e.rejected![k])])) : null,
+  };
+}
+
+/** The flags that each subcommand of `context` uses, besides --author; every other flag of `context` is refused. */
+const CONTEXT_FLAGS: Record<string, readonly string[]> = {
+  record: [...ENTRY_FLAGS, "file", "json"],
+  get: ["json"],
+  list: ["type", "status", "all", "json"],
+  checkpoint: [],
+};
+
+/** The target of a context command: an issue ID (BL-9) or the prefix of the tracker (BL), in upper case. */
+function contextTarget(given: string): string {
+  const target = cleanTitle(given).toUpperCase();
+  if (!ID_RE.test(target) && !PREFIX_RE.test(target)) throw new UsageError(`'${given}' is not an issue ID such as BL-9 or a tracker prefix such as BL`);
+  return target;
+}
+
+const LIST_LINE_MAX = 220;
+
+/** The line of `context list` for an entry: full ID, status, date, subject, and for a rejected entry why it failed. */
+function listLine(id: string, e: ContextEntry): string {
+  const failed = e.rejected ? labelled(e.rejected.failed).split("\n")[0].trim() : "";
+  const line = `${id}  ${e.status}  ${e.updated ?? e.created ?? "-"}  ${e.subject}${failed ? ` - failed: ${failed}` : ""}`;
+  const chars = [...line];
+  return chars.length > LIST_LINE_MAX ? `${chars.slice(0, LIST_LINE_MAX - 1).join("")}…` : line;
+}
+
 const COMMANDS: Record<string, Command> = {
   init: {
     args: "--prefix PREFIX",
@@ -417,6 +465,8 @@ const COMMANDS: Record<string, Command> = {
         return { key: m[1], op: m[2], raw: m[3].trim() };
       });
       const t = await tracker();
+      // The callback can run more than once, so each run sets the flag again.
+      let remind = false;
       await setProps(t, id, (doc) => {
         const props: PropEdits = {};
         const current = (key: string): Value => (key in props ? props[key] : doc.get(key));
@@ -441,6 +491,8 @@ const COMMANDS: Record<string, Command> = {
           if (op === "-=") value = value.filter((v) => !given.some((g) => same(v, g)));
           props[key] = value;
         }
+        const text = doc.text();
+        remind = typeof props["status"] === "string" && props["status"] !== doc.get("status") && (parseComments(text).length > 0 || parseContext(text).entries.length > 0);
         return props;
       });
       // The relation may be in the other issue's note only: end it there too.
@@ -448,6 +500,8 @@ const COMMANDS: Record<string, Command> = {
         if (key !== "related-to" || op !== "-=") continue;
         for (const other of csv([raw])) await unrelate(t, id, linkId(other)!);
       }
+      // On stderr, with the other warnings, so that a script that reads stdout sees no change.
+      if (remind) t.warn?.(`${id}: status changed; record what the next session needs: context checkpoint ${id}`);
       return EXIT_OK;
     },
   },
@@ -464,10 +518,12 @@ const COMMANDS: Record<string, Command> = {
   },
 
   context: {
-    args: "record <ID|PREFIX> (--type T --subject TEXT [...] | --file <path|->) [--json] | get <FULLID>... [--json]",
-    help: "record context entries (decisions, findings, ...) in an issue or the tracker, or read them",
+    args: "record <ID|PREFIX> (--type T --subject TEXT [...] | --file <path|->) [--json] | get <FULLID>... [--json] | list <ID|PREFIX> [--type T] [--status S] [--all] [--json] | checkpoint <ID>",
+    help: "record context entries (decisions, findings, ...) in an issue or the tracker, read them, or list them",
     options: {
       json: { type: "boolean" },
+      all: { type: "boolean" },
+      status: { type: "string" },
       file: { type: "string" },
       type: { type: "string" },
       subject: { type: "string" },
@@ -484,13 +540,22 @@ const COMMANDS: Record<string, Command> = {
       applies: { type: "string" },
     },
     takes: [0, Infinity],
-    reads: (_values, positionals) => positionals[0] === "get",
+    reads: (_values, positionals) => ["get", "list", "checkpoint"].includes(positionals[0]),
     async run({ ctx, values, positionals, out, tracker }) {
       const sub = positionals[0];
+      const used = sub !== undefined && Object.hasOwn(CONTEXT_FLAGS, sub) ? CONTEXT_FLAGS[sub] : undefined;
+      if (used) {
+        for (const flag of Object.keys(values)) {
+          if (flag === "author" || flag === "help" || used.includes(flag)) continue;
+          if (sub === "record" && (flag === "status" || flag === "all")) {
+            throw new UsageError(`--${flag} belongs to context list; a new entry is always active, so use --supersedes ID to end an entry`);
+          }
+          throw new UsageError(`--${flag} is not a flag of context ${sub}${used.length ? `; it takes ${used.map((f) => `--${f}`).join(", ")}` : "; it takes no flag"}`);
+        }
+      }
       if (sub === "record") {
         if (positionals.length !== 2) throw new UsageError("record needs one target: an issue ID such as BL-9, or the prefix of the tracker such as BL");
-        const target = cleanTitle(positionals[1]).toUpperCase();
-        if (!ID_RE.test(target) && !PREFIX_RE.test(target)) throw new UsageError(`'${positionals[1]}' is not an issue ID such as BL-9 or a tracker prefix such as BL`);
+        contextTarget(positionals[1]);
         const file = str(values["file"]);
         const flags = ENTRY_FLAGS.filter((k) => values[k] !== undefined);
         if (file !== undefined && flags.length) throw new UsageError(`--file cannot go with --${flags[0]}; put the entry in the file, or drop --file`);
@@ -528,30 +593,7 @@ const COMMANDS: Record<string, Command> = {
         const t = await tracker();
         const found = await locked(t, () => getContext(t, ids));
         if (values["json"]) {
-          out(
-            json(
-              found.map(({ id, entry: e }) => {
-                const note = id.slice(0, id.indexOf("/"));
-                return {
-                  id,
-                  type: e.type,
-                  number: e.number,
-                  subject: e.subject,
-                  status: e.status,
-                  author: e.author,
-                  created: e.created,
-                  updated: e.updated,
-                  content: e.content,
-                  rationale: labelled(e.rationale),
-                  alternatives: labelled(e.alternatives),
-                  evidence: e.evidence,
-                  supersedes: e.supersedes.map((l) => `${note}/${l}`),
-                  supersededBy: e.supersededBy === null ? null : `${note}/${e.supersededBy}`,
-                  rejected: e.rejected ? Object.fromEntries(REJECTED_KEYS.map((k) => [k, labelled(e.rejected![k])])) : null,
-                };
-              }),
-            ),
-          );
+          out(json(found.map(({ id, entry }) => entryJson(id, entry))));
           return EXIT_OK;
         }
         found.forEach(({ id, text }, i) => {
@@ -561,7 +603,36 @@ const COMMANDS: Record<string, Command> = {
         });
         return EXIT_OK;
       }
-      throw new UsageError(`${sub === undefined ? "missing subcommand" : `unknown subcommand '${sub}'`}; use one of: record, get`);
+      if (sub === "list") {
+        if (positionals.length !== 2) throw new UsageError("list needs one target: an issue ID such as BL-9, or the prefix of the tracker such as BL");
+        const target = contextTarget(positionals[1]);
+        const given = str(values["type"]);
+        const type = given === undefined ? null : entryType(given);
+        if (given !== undefined && type === null) throw new UsageError(`'${given}' is not a type; use one of ${typeList()}`);
+        const status = str(values["status"])?.trim().toLowerCase();
+        if (status !== undefined && values["all"]) throw new UsageError("--status cannot go with --all; give one of them");
+        if (status !== undefined && !(ENTRY_STATUSES as readonly string[]).includes(status)) {
+          throw new UsageError(`'${str(values["status"])}' is not a status; use one of ${ENTRY_STATUSES.join(", ")}`);
+        }
+        const t = await tracker();
+        const found = (await locked(t, () => listContext(t, target))).filter(
+          ({ entry: e }) => (type === null || e.type === type) && (values["all"] === true || e.status === (status ?? "active")),
+        );
+        if (values["json"]) out(json(found.map(({ id, entry }) => entryJson(id, entry))));
+        else if (!found.length) out("no context entries");
+        else for (const { id, entry } of found) out(listLine(id, entry));
+        return EXIT_OK;
+      }
+      if (sub === "checkpoint") {
+        if (positionals.length !== 2) throw new UsageError("checkpoint needs one issue ID, such as BL-9");
+        const target = cleanTitle(positionals[1]).toUpperCase();
+        if (!ID_RE.test(target)) throw new UsageError(`'${positionals[1]}' is not an issue ID such as BL-9; checkpoint takes one issue, not a tracker prefix`);
+        const t = await tracker();
+        const found = await locked(t, () => listContext(t, target));
+        out(checkpointText(target, found.map(({ entry }) => entry)));
+        return EXIT_OK;
+      }
+      throw new UsageError(`${sub === undefined ? "missing subcommand" : `unknown subcommand '${sub}'`}; use one of: record, get, list, checkpoint`);
     },
   },
 
@@ -853,7 +924,11 @@ function help(name?: string): string {
         "The JSON has the keys type, subject, content, rationale, alternatives, evidence (array), supersedes,\n" +
         "new (boolean) and rejected (object with the five keys of the flags, which may also stand at the top).\n" +
         "A value that starts with '-' needs an equals sign: --content=\"- first item\", or use --file.\n" +
-        "context get prints the entries with the given full IDs (BL-9/D3, BL/D1); --json gives their fields.\n";
+        "context get prints the entries with the given full IDs (BL-9/D3, BL/D1); --json gives their fields.\n" +
+        "context list prints one line for each entry of an issue or of the tracker, in the order of the types and\n" +
+        "then by number: ID, status, date, subject. It shows the active entries; --all shows each status, and\n" +
+        "--status S (active, superseded, resolved) one status. --type T shows one type; --json gives the fields.\n" +
+        "context checkpoint prints, for an agent, what to record in an issue now. It writes nothing.\n";
     }
     if (name === "agent-setup") {
       text +=

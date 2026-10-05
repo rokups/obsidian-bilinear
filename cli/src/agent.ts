@@ -9,6 +9,8 @@
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
+import type { ContextEntry } from "../../plugin/src/format/context";
+import { TYPE_LETTERS } from "../../plugin/src/format/ids";
 
 export const SKILL_NAME = "bilinear";
 
@@ -324,6 +326,73 @@ and moves the issue to the backlog.
  */
 export function shellWord(word: string): string {
   return /^[A-Za-z0-9_@%+=:,./\\~-]+$/.test(word) ? word : `"${word.replace(/["$`]/g, "\\$&")}"`;
+}
+
+/** The batch that `context record --file -` takes, as the checkpoint shows it. It is valid for an issue with no entries. */
+const CHECKPOINT_EXAMPLE = [
+  {
+    type: "decision",
+    subject: "Use a queue for the writes",
+    content: "All writes go through one queue.",
+    rationale: "Two writers can overwrite each other.",
+  },
+  {
+    type: "rejected",
+    subject: "Lock the file for each write",
+    rejected: {
+      attempted: "A lock on the file for each write.",
+      failed: "The lock made the editor wait.",
+      applies: "Any code that runs in the editor.",
+    },
+  },
+  {
+    type: "state",
+    subject: "Queue works, tests are next",
+    content: "The queue is done. Next: write the tests for a full queue.",
+  },
+];
+
+/**
+ * The text of `context checkpoint`, for an agent: what to record in the note of an issue, what to leave out, the
+ * active entries of the issue now, the shape of a batch and the command that records it. A pure function.
+ */
+export function checkpointText(id: string, entries: Array<Pick<ContextEntry, "local" | "type" | "subject" | "status">>): string {
+  const active = entries.filter((e) => e.status === "active");
+  const groups = Object.values(TYPE_LETTERS).flatMap((type) => {
+    const found = active.filter((e) => e.type === type);
+    return found.length ? [`${type}:`, ...found.map((e) => `  ${e.local} ${e.subject}`)] : [];
+  });
+  const count = (status: string) => entries.filter((e) => e.status === status).length;
+  return [
+    `CHECKPOINT ${id}`,
+    "",
+    "What must the next session know that the note does not hold yet? Record only these:",
+    "- decisions, with the rationale",
+    "- constraints",
+    "- findings",
+    "- rejected approaches: what you attempted, why it failed, where it applies",
+    "- open questions",
+    "- the current state: what is done and what is next",
+    "- artifacts",
+    "",
+    "Do not record:",
+    "- a narrative of the session",
+    "- what the code or the commits already say",
+    "- what an active entry already holds",
+    "- a guess as a finding",
+    'To change an entry, supersede it with "supersedes": ["D3"]. Do not write a second entry.',
+    "",
+    `The active entries of ${id} now:`,
+    ...(active.length ? groups : [entries.length ? "(no active entries)" : "(no entries yet)"]),
+    `superseded: ${count("superseded")}, resolved: ${count("resolved")}`,
+    "",
+    "The batch is a JSON array. For example:",
+    JSON.stringify(CHECKPOINT_EXAMPLE, null, 2),
+    "",
+    "Record the batch with this command. Send the JSON on the standard input:",
+    `context record ${id} --file -`,
+    'If there is nothing new, "nothing new" is a valid result. Then no command is necessary.',
+  ].join("\n");
 }
 
 /** The instructions for CLAUDE.md or AGENTS.md: which tracker the project's work is tracked in, and where the skill is. */

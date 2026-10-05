@@ -347,6 +347,22 @@ export async function getContext(t: Tracker, ids: string[]): Promise<Array<{ id:
   return out;
 }
 
+/**
+ * Every entry of the note of an issue (`BL-9`) or of the index note (`BL`), each with its full ID, in the order of
+ * the types (decision first) and then by number. Lock-free: the caller takes the lock when it needs one.
+ */
+export async function listContext(t: Tracker, target: string): Promise<Array<{ id: string; entry: ContextEntry }>> {
+  const noteId = cleanTitle(target).toUpperCase();
+  const idx = await readIndex(t);
+  const path = await notePathOf(t, idx, noteId);
+  const text = await t.io.read(path);
+  if (text === null) throw new OpError(`${noteId}: note missing`);
+  const order: string[] = Object.keys(LETTERS);
+  return parseContext(text)
+    .entries.map((entry) => ({ id: fullId(noteId, entry.local), entry }))
+    .sort((a, b) => order.indexOf(a.entry.type) - order.indexOf(b.entry.type) || a.entry.number - b.entry.number);
+}
+
 /** The body of a note without its `## Context log` and `## Comments` sections; the other text is whole. */
 export function descriptionOf(noteText: string): string {
   const lines = splitLines(new Doc(noteText).body);

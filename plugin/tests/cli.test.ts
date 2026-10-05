@@ -2127,11 +2127,44 @@ describe("context", () => {
     expect(none.err).toContain("usage: bilinear <board.md> context");
   });
 
+  it("record refuses --status and --all, which belong to list", async () => {
+    const before = s().read(s().note("BL-1"));
+    for (const flag of [["--status", "resolved"], ["--all"]]) {
+      const r = await s().run("context", "record", "BL-1", "--type", "question", "--subject", "Who owns it?", ...flag);
+      expect(r.code, flag[0]).toBe(1);
+      expect(r.out).toBe("");
+      expect(r.err).toContain(`${flag[0]} belongs to context list`);
+      expect(r.err).toContain("--supersedes");
+    }
+    expect(s().read(s().note("BL-1"))).toBe(before);
+  });
+
+  it("get, list and checkpoint refuse the flags that they do not use", async () => {
+    await s().ok("context", "record", "BL-1", "--type", "decision", "--subject", "A");
+    const bad: Array<[string[], string]> = [
+      [["get", "BL-1/D1", "--status", "active"], "--status is not a flag of context get"],
+      [["get", "BL-1/D1", "--all"], "--all is not a flag of context get"],
+      [["get", "BL-1/D1", "--type", "decision"], "--type is not a flag of context get"],
+      [["get", "BL-1/D1", "--file", "x.json"], "--file is not a flag of context get"],
+      [["list", "BL-1", "--subject", "A"], "--subject is not a flag of context list"],
+      [["list", "BL-1", "--file", "x.json"], "--file is not a flag of context list"],
+      [["checkpoint", "BL-1", "--json"], "--json is not a flag of context checkpoint"],
+      [["checkpoint", "BL-1", "--type", "decision"], "--type is not a flag of context checkpoint"],
+      [["checkpoint", "BL-1", "--all"], "--all is not a flag of context checkpoint"],
+    ];
+    for (const [argv, message] of bad) {
+      const r = await s().run("context", ...argv);
+      expect(r.code, argv.join(" ")).toBe(1);
+      expect(r.out).toBe("");
+      expect(r.err).toContain(message);
+    }
+  });
+
   it("an unknown or missing subcommand is a usage error that lists the subcommands", async () => {
-    for (const argv of [["context"], ["context", "bogus"], ["context", "list", "BL-1"]]) {
+    for (const argv of [["context"], ["context", "bogus"], ["context", "lst", "BL-1"]]) {
       const r = await s().run(...argv);
       expect(r.code, argv.join(" ")).toBe(1);
-      expect(r.err).toContain("record, get");
+      expect(r.err).toContain("record, get, list, checkpoint");
     }
     expect((await s().run("context", "--help")).out).toContain("context record");
     expect((await s().raw("--help")).out).toMatch(/\n {2}context +record context entries/);
@@ -2160,7 +2193,7 @@ describe("show with context", () => {
     expect(j.context).toEqual({ l0: "", chars: 0, cap: 8000, counts: { active: 0, superseded: 0, resolved: 0, tracker: 0 }, shown: [], omitted: [] });
   });
 
-  it("an empty Context section and a missing note change nothing", async () => {
+  it("an empty Context log section and a missing note change nothing", async () => {
     s().edit(s().note("BL-1"), "## Comments", "## Context log\n\n## Comments");
     const text = await s().ok("show", "BL-1");
     expect(text).toContain("## Context log\n");
@@ -2171,7 +2204,7 @@ describe("show with context", () => {
     expect((await showJson("BL-2")).context.l0).toBe("");
   });
 
-  it("puts the L0 text after the properties and before the description, in place of the Context section", async () => {
+  it("puts the L0 text after the properties and before the description, in place of the Context log section", async () => {
     await record(...rejected);
     await record(...decision());
     await record(...state);
@@ -2187,7 +2220,7 @@ describe("show with context", () => {
     expect(text.indexOf("CONTEXT BL-1")).toBeLessThan(text.indexOf("Intro text.\n\n###"));
   });
 
-  it("keeps the whole description, with its own headings, before the Context section", async () => {
+  it("keeps the whole description, with its own headings, before the Context log section", async () => {
     await record(...decision());
     const text = await s().ok("show", "BL-1");
     expect(text).toContain("\n\nIntro text.\n\n### Sub\n\nMore.\n\n## Comments\n");
@@ -2301,7 +2334,7 @@ describe("show with context", () => {
     expect(text).not.toContain("Hint:");
   });
 
-  it("keeps hand-written text of the Context section: (A) no entry, active tracker entry", async () => {
+  it("keeps hand-written text of the Context log section: (A) no entry, active tracker entry", async () => {
     await record("BL", "--type", "constraint", "--subject", "No net", "--content", "Offline.");
     s().edit(s().note("BL-1"), "## Comments", "## Context log\n\nMy notes.\n\n## Comments");
     const text = await s().ok("show", "BL-1");
@@ -2309,7 +2342,7 @@ describe("show with context", () => {
     expect(text).toContain("## Context log\n\nMy notes.\n");
   });
 
-  it("keeps hand-written text of the Context section: (B) an entry, prose and a Notes block", async () => {
+  it("keeps hand-written text of the Context log section: (B) an entry, prose and a Notes block", async () => {
     await record(...decision());
     s().edit(s().note("BL-1"), "## Context log\n\n", "## Context log\n\nMy prose.\n\n");
     s().edit(s().note("BL-1"), "## Comments", "### Notes\n\nMy notes.\n\n## Comments");
@@ -2330,5 +2363,268 @@ describe("show with context", () => {
     const view = await contextView(t, "BL-1");
     expect(view.text).toMatch(L0_HEADER);
     expect((await showJson()).context.l0).toBe(view.text);
+  });
+});
+
+describe("context list", () => {
+  const s = sandbox();
+  const rec = (target: string, ...a: string[]) => s().ok("context", "record", target, ...a);
+  beforeEach(async () => {
+    await s().ok("new", "One");
+    await s().ok("new", "Two");
+  });
+
+  /** Entries in an order that is not the order of the list: R, F, then D1 that D2 supersedes, then Q. */
+  async function fill(): Promise<void> {
+    await rec("BL-1", "--type", "rejected", "--subject", "Polling", "--attempted", "Poll", "--failed", "Too slow\nand then more", "--applies", "Always");
+    await rec("BL-1", "--type", "finding", "--subject", "The API is slow");
+    await rec("BL-1", "--type", "decision", "--subject", "Use X", "--content", "x");
+    await rec("BL-1", "--type", "decision", "--subject", "Use Y", "--content", "y", "--supersedes", "D1");
+    await rec("BL-1", "--type", "question", "--subject", "Who owns it?");
+    await rec("BL", "--type", "constraint", "--subject", "No network");
+  }
+
+  it("shows the active entries by default, in the order of the types and then by number", async () => {
+    await fill();
+    await rec("BL-1", "--type", "decision", "--subject", "Use Z", "--content", "z");
+    const r = await s().run("context", "list", "BL-1");
+    expect(r).toEqual({
+      code: 0,
+      out: [
+        "BL-1/D2  active  2026-10-01  Use Y",
+        "BL-1/D3  active  2026-10-01  Use Z",
+        "BL-1/F1  active  2026-10-01  The API is slow",
+        "BL-1/R1  active  2026-10-01  Polling - failed: Too slow",
+        "BL-1/Q1  active  2026-10-01  Who owns it?",
+        "",
+      ].join("\n"),
+      err: "",
+    });
+  });
+
+  it("--all shows each status, --status one status", async () => {
+    await fill();
+    const all = (await s().ok("context", "list", "BL-1", "--all")).trim().split("\n");
+    expect(all.map((l) => l.split("  ")[0])).toEqual(["BL-1/D1", "BL-1/D2", "BL-1/F1", "BL-1/R1", "BL-1/Q1"]);
+    expect(all[0]).toBe("BL-1/D1  superseded  2026-10-01  Use X");
+    expect(await s().ok("context", "list", "BL-1", "--status", "superseded")).toBe("BL-1/D1  superseded  2026-10-01  Use X\n");
+    expect(await s().ok("context", "list", "BL-1", "--status", "RESOLVED")).toBe("no context entries\n");
+    await rec("BL-1", "--type", "state", "--subject", "S one");
+    await rec("BL-1", "--type", "question", "--subject", "Who is it?", "--supersedes", "Q1");
+    expect(await s().ok("context", "list", "BL-1", "--status", "resolved")).toBe("BL-1/Q1  resolved  2026-10-01  Who owns it?\n");
+  });
+
+  it("--type takes a name or a letter, also with --all", async () => {
+    await fill();
+    const want = "BL-1/R1  active  2026-10-01  Polling - failed: Too slow\n";
+    expect(await s().ok("context", "list", "BL-1", "--type", "R")).toBe(want);
+    expect(await s().ok("context", "list", "BL-1", "--type", "rejected")).toBe(want);
+    expect(await s().ok("context", "list", "BL-1", "--type", "Decision", "--all")).toBe("BL-1/D1  superseded  2026-10-01  Use X\nBL-1/D2  active  2026-10-01  Use Y\n");
+    expect(await s().ok("context", "list", "BL-1", "--type", "artifact")).toBe("no context entries\n");
+  });
+
+  it("lists the entries of the tracker by its prefix", async () => {
+    await fill();
+    expect(await s().ok("context", "list", "BL")).toBe("BL/C1  active  2026-10-01  No network\n");
+    expect(await s().ok("context", "list", "bl")).toBe("BL/C1  active  2026-10-01  No network\n");
+  });
+
+  it("prints the date of the last update, and cuts a long line with an ellipsis", async () => {
+    await rec("BL-1", "--type", "rejected", "--subject", "Long", "--attempted", "A", "--failed", "x".repeat(400), "--applies", "B");
+    s().env["BILINEAR_TODAY"] = "2026-10-05";
+    await rec("BL-1", "--type", "decision", "--subject", "Old", "--content", "a");
+    s().env["BILINEAR_TODAY"] = "2026-10-09";
+    await rec("BL-1", "--type", "decision", "--subject", "New", "--content", "b", "--supersedes", "D1");
+    const lines = (await s().ok("context", "list", "BL-1", "--all")).trimEnd().split("\n");
+    expect(lines[0]).toBe("BL-1/D1  superseded  2026-10-09  Old");
+    expect(lines[1]).toBe("BL-1/D2  active  2026-10-09  New");
+    expect(lines[2]).toMatch(/^BL-1\/R1 {2}active {2}2026-10-01 {2}Long - failed: x+…$/);
+    expect([...lines[2]]).toHaveLength(220);
+  });
+
+  it("cuts a long line at 220 code points, not inside an emoji", async () => {
+    // The cut falls inside the emoji when the line is cut in UTF-16 units.
+    const subject = "x".repeat(151) + "😀".repeat(100);
+    await rec("BL-1", "--type", "finding", "--subject", subject);
+    const line = (await s().ok("context", "list", "BL-1")).trimEnd();
+    expect([...line].length).toBe(220);
+    expect(line.endsWith("…")).toBe(true);
+    expect(line).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/);
+  });
+
+  it("checks the shape of the target like record, and works for an archived issue", async () => {
+    const r = await s().run("context", "list", "nonsense!");
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("'nonsense!' is not an issue ID such as BL-9 or a tracker prefix such as BL");
+    await rec("BL-2", "--type", "finding", "--subject", "Kept");
+    await s().ok("archive", "BL-2");
+    expect(await s().ok("context", "list", "BL-2")).toBe("BL-2/F1  active  2026-10-01  Kept\n");
+    expect(await s().ok("context", "checkpoint", "BL-2")).toContain("finding:\n  F1 Kept\n");
+  });
+
+  it("says that there is no entry", async () => {
+    expect(await s().run("context", "list", "BL-2")).toEqual({ code: 0, out: "no context entries\n", err: "" });
+    expect(await s().ok("context", "list", "BL")).toBe("no context entries\n");
+    expect(JSON.parse(await s().ok("context", "list", "BL-2", "--json"))).toEqual([]);
+  });
+
+  it("--json has the objects of get --json", async () => {
+    await fill();
+    const listed = JSON.parse(await s().ok("context", "list", "BL-1", "--all", "--json"));
+    expect(listed.map((e: { id: string }) => e.id)).toEqual(["BL-1/D1", "BL-1/D2", "BL-1/F1", "BL-1/R1", "BL-1/Q1"]);
+    const got = JSON.parse(await s().ok("context", "get", "BL-1/D1", "BL-1/D2", "BL-1/F1", "BL-1/R1", "BL-1/Q1", "--json"));
+    expect(listed).toEqual(got);
+    expect(listed[3].rejected.failed).toBe("Too slow\nand then more");
+  });
+
+  it("refuses wrong flags and an unknown target, and changes nothing", async () => {
+    await fill();
+    const before = s().read(s().note("BL-1"));
+    const bad: Array<[string[], string]> = [
+      [["BL-1", "--all", "--status", "active"], "--all"],
+      [["BL-1", "--status", "done"], "active, superseded, resolved"],
+      [["BL-1", "--type", "bogus"], "decision (D)"],
+      [["BL-1", "--type", ""], "is not a type"],
+      [[], "list needs one target"],
+      [["BL-1", "BL-2"], "list needs one target"],
+    ];
+    for (const [argv, message] of bad) {
+      const r = await s().run("context", "list", ...argv);
+      expect(r.code, argv.join(" ")).toBe(1);
+      expect(r.out).toBe("");
+      expect(r.err).toContain(message);
+    }
+    for (const target of ["BL-9", "XX", "nonsense"]) {
+      const r = await s().run("context", "list", target);
+      expect(r.code, target).toBe(1);
+      expect(r.err).toContain(target.toUpperCase());
+    }
+    expect(s().read(s().note("BL-1"))).toBe(before);
+  });
+});
+
+describe("context checkpoint", () => {
+  const s = sandbox();
+  beforeEach(async () => {
+    await s().ok("new", "One");
+    await s().ok("new", "Two");
+  });
+
+  it("prints the header, the questions, the rules, the index, the example and the command", async () => {
+    await s().ok("context", "record", "BL-1", "--type", "decision", "--subject", "Use X", "--content", "x");
+    await s().ok("context", "record", "BL-1", "--type", "decision", "--subject", "Use Y", "--content", "y", "--supersedes", "D1");
+    await s().ok("context", "record", "BL-1", "--type", "finding", "--subject", "It is slow");
+    await s().ok("context", "record", "BL", "--type", "constraint", "--subject", "Tracker rule");
+    const r = await s().run("context", "checkpoint", "bl-1");
+    expect(r.code).toBe(0);
+    expect(r.err).toBe("");
+    expect(r.out.startsWith("CHECKPOINT BL-1\n")).toBe(true);
+    for (const part of ["What must the next session know", "Do not record:", '"supersedes": ["D3"]', "decision:\n  D2 Use Y\nfinding:\n  F1 It is slow\n", "superseded: 1, resolved: 0", "context record BL-1 --file -", "nothing new"]) {
+      expect(r.out, part).toContain(part);
+    }
+    expect(r.out).not.toContain("Use X");
+    expect(r.out).not.toContain("Tracker rule");
+    expect(r.out.indexOf("Do not record")).toBeLessThan(r.out.indexOf("The active entries"));
+    expect(r.out.indexOf("The active entries")).toBeLessThan(r.out.indexOf("The batch is a JSON array"));
+  });
+
+  it("says that an issue has no entry, in fewer than 2500 characters", async () => {
+    const r = await s().run("context", "checkpoint", "BL-2");
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("(no entries yet)\nsuperseded: 0, resolved: 0\n");
+    expect(r.out.length).toBeLessThan(2500);
+  });
+
+  it("says that no entry is active when the entries are all resolved", async () => {
+    await s().ok("context", "record", "BL-1", "--type", "question", "--subject", "Who owns it?");
+    s().edit(s().note("BL-1"), "- status: active", "- status: resolved");
+    const text = await s().ok("context", "checkpoint", "BL-1");
+    expect(text).toContain("(no active entries)\nsuperseded: 0, resolved: 1\n");
+    expect(text).not.toContain("(no entries yet)");
+  });
+
+  it("writes nothing", async () => {
+    await s().ok("context", "record", "BL-1", "--type", "decision", "--subject", "Use X", "--content", "x");
+    const files = s().entries().map((f) => [f, s().read(join(s().dir, f))]);
+    await s().ok("context", "checkpoint", "BL-1");
+    await s().ok("context", "checkpoint", "BL-2");
+    expect(s().entries().map((f) => [f, s().read(join(s().dir, f))])).toEqual(files);
+  });
+
+  it("gives an example that context record takes, with three created lines", async () => {
+    const text = (await s().ok("context", "checkpoint", "BL-2"));
+    const json = text.slice(text.indexOf("[\n"), text.indexOf("\n]\n") + 2);
+    s().stdin = json;
+    expect(JSON.parse(json)).toHaveLength(3);
+    expect(await s().ok("context", "record", "BL-2", "--file", "-")).toBe("BL-2/D1 created\nBL-2/R1 created\nBL-2/S1 created\n");
+    expect(await s().run("lint")).toMatchObject({ code: 0 });
+  });
+
+  it("refuses a prefix, a missing ID, more than one ID and an unknown issue", async () => {
+    for (const argv of [["BL"], [], ["BL-1", "BL-2"], ["nonsense"]]) {
+      const r = await s().run("context", "checkpoint", ...argv);
+      expect(r.code, argv.join(" ")).toBe(1);
+      expect(r.out).toBe("");
+    }
+    expect((await s().run("context", "checkpoint", "BL")).err).toContain("not a tracker prefix");
+    const unknown = await s().run("context", "checkpoint", "BL-9");
+    expect(unknown).toMatchObject({ code: 1, out: "" });
+    expect(unknown.err).toContain("BL-9: no such issue");
+  });
+});
+
+describe("set reminder", () => {
+  const s = sandbox();
+  const REMIND = (id: string) => `bilinear: ${id}: status changed; record what the next session needs: context checkpoint ${id}\n`;
+  beforeEach(async () => {
+    await s().ok("new", "One");
+    await s().ok("new", "Two");
+    await s().ok("set", "BL-1", "status=todo");
+  });
+
+  it("is on stderr, once, when the status changes and the note has a comment", async () => {
+    await s().ok("comment", "BL-1", "Hello");
+    const r = await s().run("set", "BL-1", "status=done");
+    expect(r).toEqual({ code: 0, out: "", err: REMIND("BL-1") });
+  });
+
+  it("is given when the note has an entry and no comment", async () => {
+    await s().ok("context", "record", "BL-1", "--type", "finding", "--subject", "F");
+    expect((await s().run("set", "BL-1", "status=done", "priority=high")).err).toBe(REMIND("BL-1"));
+  });
+
+  it("is not given for an equal status", async () => {
+    await s().ok("comment", "BL-1", "Hello");
+    expect(await s().run("set", "BL-1", "status=todo")).toEqual({ code: 0, out: "", err: "" });
+  });
+
+  it("is not given for a note with no comment and no entry", async () => {
+    expect(await s().run("set", "BL-1", "status=done")).toEqual({ code: 0, out: "", err: "" });
+  });
+
+  it("is not given when the status is not an edit, or when the edit fails", async () => {
+    await s().ok("comment", "BL-1", "Hello");
+    await s().ok("context", "record", "BL-1", "--type", "finding", "--subject", "F");
+    expect(await s().run("set", "BL-1", "priority=high")).toEqual({ code: 0, out: "", err: "" });
+    const bad = await s().run("set", "BL-1", "status=nonsense");
+    expect(bad.code).toBe(1);
+    expect(bad.err).not.toContain("context checkpoint");
+  });
+
+  it("is set again on each run of the callback: the last run decides", async () => {
+    await s().ok("comment", "BL-1", "Hello");
+    const run = NodeIO.prototype.process;
+    // The first run sees the note with its comment; the run that writes sees it without.
+    const spy = vi.spyOn(NodeIO.prototype, "process").mockImplementation(function (this: NodeIO, path: string, fn: (text: string) => string) {
+      return run.call(this, path, (text) => {
+        fn(text);
+        return fn(text.replace(/\n## Comments[\s\S]*$/, "\n"));
+      });
+    });
+    try {
+      expect(await s().run("set", "BL-1", "status=done")).toEqual({ code: 0, out: "", err: "" });
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
