@@ -386,7 +386,8 @@ Directly after the heading comes a block of bullets with metadata:
 Next is free text, the *content*. After it come lines that start at column 0
 with a label, each optional: `Rationale:` and `Alternatives:`. An entry of
 type `R` also has `Attempted:`, `Promising:`, `Happened:`, `Failed:` and
-`Applies:`. A value goes on over the next lines until the next label or a
+`Applies:`; of these, `Attempted:`, `Failed:` and `Applies:` are required, and
+`lint` reports an entry that lacks one. A value goes on over the next lines until the next label or a
 blank line. A value under an empty label line keeps its position: the line
 break after the label stays part of the value.
 
@@ -418,8 +419,9 @@ Hand-edited entries are read as follows:
 - A level-3 heading that is not in the form of an entry is not an entry. Its
   lines are skipped, and so is any text between `## Context log` and the first
   entry.
-- A local ID that occurs more than once in a note is reported; the entries
-  are all kept.
+- A local ID that occurs more than once in a note is reported by `lint`; the
+  entries are all kept. `lint` also reports entries that do not parse and links
+  that name no entry (section 3.1). It never changes an entry, also with `--fix`.
 - Headings inside fenced code blocks are not headings (section 1.3).
 
 ## 2. Operations
@@ -517,6 +519,9 @@ of the two, then the tracker folder itself.
 | `blocked-by-invalid`, `related-to-invalid` | error | | Not a link to an issue, or a link to itself |
 | `blocked-by-unknown`, `related-to-unknown` | error | | Linked issue has no line in the index of this tracker or of another tracker in the same folder |
 | `blocked-by-cycle` | error | | Following `blocked-by` from the issue leads back to it, also through the other trackers of the same folder; reported for each issue of this tracker on the cycle |
+| `context-entry-invalid` | warning | | A context entry that does not parse (for example an unknown `status`), an entry of type `R` that lacks a value for one of `Attempted:`, `Failed:` and `Applies:`, which are required, an entry with `status: superseded` and no `superseded-by`, or one with `superseded-by` and `status: active`; checked in each listed note, archived ones too, and in the index note |
+| `context-duplicate-id` | warning | | More than one entry in a note has the same local ID |
+| `context-link-unknown` | warning | | `supersedes` or `superseded-by` names no entry of the note; `entry:` evidence names no entry (a local ID of the note, or a full ID of an issue or the tracker scope of this tracker; full IDs of another tracker are not checked); `comment:<date>#<n>` evidence names a comment that the note does not have, or is not in that form (the index note has no comments). Other evidence is not checked |
 
 One problem is reported per occurrence. A problem's subject is an issue ID, or
 the index note.

@@ -6,6 +6,7 @@ import { parseComments } from "../src/format/issue-note";
 import { buildContextView, contextView, getContext, recordContext, type RecordInput } from "../src/ops/context";
 import type { Tracker } from "../src/ops/io";
 import { archiveIssues, commentIssue, createIssue, createTracker } from "../src/ops/issues";
+import { lint } from "../src/ops/lint";
 import { listIssues } from "../src/ops/tracker";
 import { MemoryIO } from "./memory-io";
 
@@ -517,5 +518,174 @@ describe("contextView", () => {
     const w = await contextView(t, "BL-1");
     expect(w.text).toContain("Tracker constraints:");
     expect(w.text).not.toContain("Hint:");
+  });
+});
+
+describe("lint of context entries", () => {
+  const codes = async () => (await lint(t, false)).map((p) => `${p.severity}:${p.code}:${p.id ?? "-"}`);
+  const messages = async () => (await lint(t, false)).map((p) => p.message);
+  const log = (...entries: string[]) => `\n## Context log\n\n${entries.join("\n")}\n`;
+  const put = (id: string, ...entries: string[]) => io.files.set(`T/Bilinear/issues/${id}.md`, note(id) + log(...entries));
+  const putIndex = (...entries: string[]) => io.files.set("T/Bilinear/Bilinear.md", index() + log(...entries));
+  const ok = (local: string, extra = "") => `### ${local}: Subject ${local}\n- status: active\n${extra}\nText.\n`;
+
+  it("finds no problem in notes that context record wrote", async () => {
+    await commentIssue(t, "BL-1", "first", "bob", TODAY);
+    await rec("BL", { type: "constraint", subject: "No network", content: "Offline." });
+    await rec("BL-2", dec("Use Y", "Because."));
+    await rec(
+      "BL-1",
+      dec("Use X", "One.", { evidence: ["comment:2026-10-05#1", "entry:BL/C1", "entry:BL-2/D1", "file:src/a.ts"] }),
+      { type: "rejected", subject: "Try Z", rejected: { attempted: "Z", failed: "It broke.", applies: "Here." }, evidence: ["entry:D1"] },
+      { type: "state", subject: "Halfway", content: "Half done." },
+      dec("Use X better", "Two.", { supersedes: ["D1"], evidence: ["entry:BL-1/R1"] }),
+      { type: "question", subject: "Which cache?", content: "Unknown." },
+      dec("One cache", "Answer.", { supersedes: ["Q1"], evidence: ["comment:2026-10-05#1", "entry:BL-2/D1"] }),
+    );
+    await rec("BL", dec("Tracker rule", "Rule.", { evidence: ["entry:BL/C1", "entry:BL-1/D2"] }), { type: "question", subject: "Ask?", content: "?" });
+    await rec("BL", dec("Tracker answer", "Yes.", { supersedes: ["Q1"] }));
+    expect(entry(note(), "Q1").status).toBe("resolved");
+    expect(await lint(t, false)).toEqual([]);
+  });
+
+  it("gives no problem for no section and for a hand-written Context section", async () => {
+    io.files.set("T/Bilinear/issues/BL-1.md", note("BL-1") + "\n## Context\n\n### D1: Bad\n- status: weird\n- evidence:\n  - entry:D9\n");
+    expect(await lint(t, false)).toEqual([]);
+  });
+
+  it("reports an entry that does not parse, with the full ID", async () => {
+    put("BL-1", "### D1: A\n- status: weird\n\nText.\n");
+    expect(await lint(t, false)).toEqual([
+      { severity: "warning", code: "context-entry-invalid", id: "BL-1", message: "entry BL-1/D1: unknown status: weird", fixable: false, fixed: false },
+    ]);
+  });
+
+  it("reports an entry of the index note with a null ID and the tracker prefix", async () => {
+    putIndex("### D1: A\n- status: weird\n\nText.\n");
+    expect(await lint(t, false)).toEqual([
+      { severity: "warning", code: "context-entry-invalid", id: null, message: "entry BL/D1: unknown status: weird", fixable: false, fixed: false },
+    ]);
+  });
+
+  it("reports a rejected entry without a value for Attempted:, Failed: or Applies:, once, naming the labels", async () => {
+    const full = "### R3: X\n- status: active\n\nAttempted: A.\nFailed: B.\nApplies: C.\n";
+    put("BL-1", "### R1: Z\n- status: active\n\nPromising: It looked good.\nHappened: It broke.\n", "### R2: Y\n- status: active\n\nApplies: Always.\n", full, "### R4: W\n- status: active\n\nAttempted: A.\nApplies: C.\n");
+    const msg = (m: string) => ({ severity: "warning", code: "context-entry-invalid", id: "BL-1", message: m, fixable: false, fixed: false });
+    expect(await lint(t, false)).toEqual([
+      msg("entry BL-1/R1: a rejected entry needs a value for Attempted:, Failed: and Applies:"),
+      msg("entry BL-1/R2: a rejected entry needs a value for Attempted: and Failed:"),
+      msg("entry BL-1/R4: a rejected entry needs a value for Failed:"),
+    ]);
+  });
+
+  it("does not repeat a status or superseded-by that did not parse as a second problem", async () => {
+    put("BL-1", "### D1: A\n- status: superceded\n- superseded-by: D2\n\nText.\n", ok("D2"), "### D3: B\n- status: superseded\n- superseded-by: nope\n\nText.\n");
+    expect(await messages()).toEqual(["entry BL-1/D1: unknown status: superceded", "entry BL-1/D3: superseded-by is not an ID: nope"]);
+  });
+
+  it("does not check full IDs when the index has no valid prefix", async () => {
+    io.files.set("T/Bilinear/Bilinear.md", index().replace(/^prefix: BL\n/m, ""));
+    put("BL-1", ok("D1", "- evidence:\n  - entry:XX-1/D1\n  - entry:BL-1/D5\n  - entry:D1\n"));
+    const found = await lint(t, false);
+    expect(found.filter((p) => p.code === "context-link-unknown")).toEqual([]);
+  });
+
+  it("reads a full ID in lower case, and reports one of a listed issue whose note is missing", async () => {
+    put("BL-2", ok("D1"));
+    io.files.delete("T/Bilinear/issues/BL-1.md");
+    await createIssue(t, { title: "Third" }, TODAY);
+    put("BL-3", ok("D1", "- evidence:\n  - entry:bl-2/d1\n  - entry:BL-1/D1\n"));
+    const found = (await lint(t, false)).filter((p) => p.code.startsWith("context-"));
+    expect(found.map((p) => p.message)).toEqual(["entry BL-3/D1: evidence entry:BL-1/D1 is not an entry of BL-1"]);
+  });
+
+  it("reports status superseded without superseded-by, and superseded-by with status active", async () => {
+    put("BL-1", "### D1: A\n- status: superseded\n\nText.\n", "### D2: B\n- status: active\n- superseded-by: D3\n\nText.\n", ok("D3"));
+    expect(await messages()).toEqual([
+      "entry BL-1/D1: status is superseded but there is no superseded-by; name the entry that replaces it",
+      "entry BL-1/D2: superseded-by is D3 but status is active; status must be superseded or resolved",
+    ]);
+    expect(await codes()).toEqual(["warning:context-entry-invalid:BL-1", "warning:context-entry-invalid:BL-1"]);
+  });
+
+  it("reports an ID that more than one entry has", async () => {
+    put("BL-1", ok("D1"), ok("D1"), ok("D2"));
+    expect(await lint(t, false)).toEqual([
+      { severity: "warning", code: "context-duplicate-id", id: "BL-1", message: "more than one entry has the ID BL-1/D1; each entry needs its own ID", fixable: false, fixed: false },
+    ]);
+    putIndex(ok("C1"), ok("C1"));
+    expect((await lint(t, false)).filter((p) => p.id === null).map((p) => p.message)).toEqual(["more than one entry has the ID BL/C1; each entry needs its own ID"]);
+  });
+
+  it("reports supersedes and superseded-by that name no entry of the note", async () => {
+    put("BL-1", "### D1: A\n- status: superseded\n- superseded-by: D7\n- supersedes: D8, D2\n\nText.\n", ok("D2"));
+    expect(await lint(t, false)).toEqual([
+      { severity: "warning", code: "context-link-unknown", id: "BL-1", message: "entry BL-1/D1: supersedes D8 is not an entry of this note", fixable: false, fixed: false },
+      { severity: "warning", code: "context-link-unknown", id: "BL-1", message: "entry BL-1/D1: superseded-by D7 is not an entry of this note", fixable: false, fixed: false },
+    ]);
+  });
+
+  it("checks entry evidence: a local ID, and a full ID of an issue, of the tracker and of another tracker", async () => {
+    put("BL-2", ok("D1"));
+    putIndex(ok("C1"));
+    put(
+      "BL-1",
+      ok("D1"),
+      ok("D2", "- evidence:\n  - entry:D1\n  - entry:d9\n  - entry:BL-2/D1\n  - entry:BL-2/D2\n  - entry:BL-3/D1\n  - entry:BL/C1\n  - entry:BL/C2\n  - entry:XX-1/D1\n  - entry:XX/D1\n  - entry:nope\n"),
+    );
+    expect(await messages()).toEqual([
+      "entry BL-1/D2: evidence entry:d9 is not an entry of this note",
+      "entry BL-1/D2: evidence entry:nope is not an entry ID",
+      "entry BL-1/D2: evidence entry:BL-2/D2 is not an entry of BL-2",
+      "entry BL-1/D2: evidence entry:BL-3/D1 is not an entry of BL-3",
+      "entry BL-1/D2: evidence entry:BL/C2 is not an entry of BL",
+    ]);
+  });
+
+  it("checks entry evidence in the index note, and an entry of an archived issue", async () => {
+    await archiveIssues(t, ["BL-2"]);
+    io.files.set("T/Bilinear/archive/BL-2.md", io.files.get("T/Bilinear/archive/BL-2.md")! + log(ok("D1", "- evidence:\n  - entry:BL-1/D4\n  - entry:BL/C1\n")));
+    putIndex(ok("C1", "- evidence:\n  - entry:BL-2/D1\n  - entry:BL-2/D2\n  - entry:C5\n"));
+    expect(await lint(t, false)).toEqual([
+      { severity: "warning", code: "context-link-unknown", id: null, message: "entry BL/C1: evidence entry:C5 is not an entry of the index note", fixable: false, fixed: false },
+      { severity: "warning", code: "context-link-unknown", id: null, message: "entry BL/C1: evidence entry:BL-2/D2 is not an entry of BL-2", fixable: false, fixed: false },
+      { severity: "warning", code: "context-link-unknown", id: "BL-2", message: "entry BL-2/D1: evidence entry:BL-1/D4 is not an entry of BL-1", fixable: false, fixed: false },
+    ]);
+  });
+
+  it("checks comment evidence against the comments of the date, and in the index note", async () => {
+    await commentIssue(t, "BL-1", "one", "bob", "2026-10-01");
+    await commentIssue(t, "BL-1", "two", "bob", "2026-10-01");
+    put("BL-1", ok("D1", "- evidence:\n  - comment:2026-10-01#1\n  - comment:2026-10-01#2\n  - comment:2026-10-01#3\n  - comment:2026-10-02#1\n  - comment:2026-10-01\n  - comment:2026-10-01#0\n"));
+    putIndex(ok("C1", "- evidence:\n  - comment:2026-10-01#1\n"));
+    expect(await messages()).toEqual([
+      "entry BL/C1: evidence comment:2026-10-01#1 is not valid, because the index note has no comments",
+      "entry BL-1/D1: evidence comment:2026-10-01#3 is not a comment of this note; there are 2 comments of 2026-10-01",
+      "entry BL-1/D1: evidence comment:2026-10-02#1 is not a comment of this note; there are 0 comments of 2026-10-02",
+      "entry BL-1/D1: evidence comment:2026-10-01 is not in the form comment:<date>#<n>, with n from 1",
+      "entry BL-1/D1: evidence comment:2026-10-01#0 is not in the form comment:<date>#<n>, with n from 1",
+    ]);
+    expect((await lint(t, false)).every((p) => p.code === "context-link-unknown")).toBe(true);
+  });
+
+  it("trims the value of comment evidence and reads a date that is not real as a bad form", async () => {
+    await commentIssue(t, "BL-1", "one", "bob", "2026-10-01");
+    put("BL-1", ok("D1", "- evidence:\n  - comment: 2026-10-01#1\n  - comment:2026-13-45#1\n"));
+    expect(await messages()).toEqual(["entry BL-1/D1: evidence comment:2026-13-45#1 is not in the form comment:<date>#<n>, with n from 1"]);
+  });
+
+  it("does not check evidence of other kinds", async () => {
+    put("BL-1", ok("D1", "- evidence:\n  - file:src/none.ts\n  - commit:abc\n  - url:https://example.com\n"));
+    expect(await lint(t, false)).toEqual([]);
+  });
+
+  it("never changes a note, also with fix, and the problems stay not fixed", async () => {
+    put("BL-1", "### D1: A\n- status: superseded\n- supersedes: D9\n- evidence:\n  - entry:D8\n\nText.\n", ok("D1"));
+    putIndex("### C1: B\n- status: weird\n");
+    const before = [note("BL-1"), index()];
+    const found = await lint(t, true);
+    expect(found.map((p) => p.code).sort()).toEqual(["context-duplicate-id", "context-entry-invalid", "context-entry-invalid", "context-link-unknown", "context-link-unknown"]);
+    expect(found.every((p) => !p.fixable && !p.fixed)).toBe(true);
+    expect([note("BL-1"), index()]).toEqual(before);
   });
 });

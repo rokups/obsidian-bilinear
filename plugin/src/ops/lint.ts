@@ -1,7 +1,9 @@
 // Consistency checks of spec/FORMAT.md section 3.
 
+import { fullId, normalizeLocal, parseContext, parseFullId } from "../format/context";
 import { ARCHIVE, ISSUES, LINK_LIST_KEYS, LOCATIONS, PRIORITIES, cleanTitle, idNumber, linkId, validDate } from "../format/ids";
 import type { Index, Item } from "../format/index-note";
+import { parseComments } from "../format/issue-note";
 import { recordFromDoc, type IssueRecord } from "../format/record";
 import { Doc } from "../format/yaml";
 import { reaches } from "../store/query";
@@ -48,6 +50,79 @@ function checkNote(idx: Index, listed: (id: string) => boolean, id: string, doc:
   }
 }
 
+const COMMENT_REF_RE = /^([0-9]{4}-[0-9]{2}-[0-9]{2})#([0-9]+)$/;
+
+/**
+ * Check the context entries of a note: `id` is the issue ID, or null for the index note, whose entries have the
+ * tracker `prefix` in their full IDs. The local IDs of the note go into `notes` (note ID -> local IDs). A reference
+ * to the entry of another note cannot be checked before all notes are read, so its check goes into `later`.
+ */
+function checkContext(
+  text: string,
+  id: string | null,
+  prefix: string | null,
+  notes: Map<string, Set<string>>,
+  later: Array<() => void>,
+  add: Add,
+): void {
+  const parsed = parseContext(text);
+  if (parsed.section === null) return;
+  const noteId = id ?? prefix ?? "tracker";
+  const locals = new Set(parsed.entries.map((e) => e.local));
+  notes.set(noteId, locals);
+  const where = id === null ? "the index note" : "this note";
+  const comments = id === null ? [] : parseComments(text);
+
+  for (const p of parsed.problems) {
+    const at = p.indexOf(": ");
+    add("warning", "context-entry-invalid", id, `entry ${fullId(noteId, p.slice(0, at))}: ${p.slice(at + 2)}`);
+  }
+  for (const local of parsed.duplicates) {
+    add("warning", "context-duplicate-id", id, `more than one entry has the ID ${fullId(noteId, local)}; each entry needs its own ID`);
+  }
+  for (const e of parsed.entries) {
+    const entryId = fullId(noteId, e.local);
+    const invalid = (message: string) => add("warning", "context-entry-invalid", id, `entry ${entryId}: ${message}`);
+    const unknown = (message: string) => add("warning", "context-link-unknown", id, `entry ${entryId}: ${message}`);
+    if (e.type === "rejected") {
+      const absent = (["attempted", "failed", "applies"] as const)
+        .filter((k) => (e.rejected?.[k] ?? "").trim() === "")
+        .map((k) => `${k[0].toUpperCase()}${k.slice(1)}:`);
+      if (absent.length) invalid(`a rejected entry needs a value for ${absent.length > 1 ? `${absent.slice(0, -1).join(", ")} and ${absent[absent.length - 1]}` : absent[0]}`);
+    }
+    // A status or superseded-by that did not parse is reported already; the two checks would only repeat it.
+    const unread = parsed.problems.some((p) => p.startsWith(`${e.local}: `) && /^(unknown status|status |superseded-by )/.test(p.slice(e.local.length + 2)));
+    if (!unread && e.status === "superseded" && e.supersededBy === null) invalid("status is superseded but there is no superseded-by; name the entry that replaces it");
+    if (!unread && e.supersededBy !== null && e.status === "active") invalid(`superseded-by is ${e.supersededBy} but status is active; status must be superseded or resolved`);
+
+    for (const [key, value] of [...e.supersedes.map((v) => ["supersedes", v] as const), ...(e.supersededBy === null ? [] : [["superseded-by", e.supersededBy] as const])]) {
+      if (!locals.has(value)) unknown(`${key} ${value} is not an entry of ${where}`);
+    }
+    for (const item of e.evidence) {
+      if (item.startsWith("entry:")) {
+        const ref = item.slice("entry:".length).trim();
+        const local = normalizeLocal(ref);
+        const full = local === null ? parseFullId(ref) : null;
+        if (local !== null) {
+          if (!locals.has(local)) unknown(`evidence ${item} is not an entry of ${where}`);
+        } else if (full === null) {
+          unknown(`evidence ${item} is not an entry ID`);
+        } else if (prefix !== null && (full.noteId === prefix || idNumber(full.noteId, prefix) !== null)) {
+          // The entry may be in a note that is read later.
+          later.push(() => {
+            if (!notes.get(full.noteId)?.has(full.local)) unknown(`evidence ${item} is not an entry of ${full.noteId}`);
+          });
+        }
+      } else if (item.startsWith("comment:")) {
+        const m = COMMENT_REF_RE.exec(item.slice("comment:".length).trim());
+        if (id === null) unknown(`evidence ${item} is not valid, because the index note has no comments`);
+        else if (!m || !validDate(m[1]) || parseInt(m[2], 10) < 1) unknown(`evidence ${item} is not in the form comment:<date>#<n>, with n from 1`);
+        else if (comments.filter((c) => c.date === m[1]).length < parseInt(m[2], 10)) unknown(`evidence ${item} is not a comment of this note; there are ${comments.filter((c) => c.date === m[1]).length} comments of ${m[1]}`);
+      }
+    }
+  }
+}
+
 /** Check the tracker; with fix, repair what is safe. Never adds or removes issues. */
 export function lint(t: Tracker, fix: boolean): Promise<Problem[]> {
   return locked(t, async () => {
@@ -72,6 +147,9 @@ export function lint(t: Tracker, fix: boolean): Promise<Problem[]> {
 
     const listed = listedIn(idx, siblings);
     const prefix = idx.prefix;
+    const notes = new Map<string, Set<string>>();
+    const later: Array<() => void> = [];
+    checkContext(idx.text(), null, prefix, notes, later, add);
     const seen = new Map<string, Item>();
     const records: IssueRecord[] = [];
     const moves: Array<[string, boolean]> = [];
@@ -103,10 +181,13 @@ export function lint(t: Tracker, fix: boolean): Promise<Problem[]> {
       const path = (await resolveNote(t, it.id, it.archived))!;
       const doc = new Doc((await t.io.read(path)) ?? "");
       checkNote(idx, listed, it.id, doc, add);
+      checkContext(doc.text(), it.id, prefix, notes, later, add);
       records.push(recordFromDoc(it, doc, path));
       const title = cleanTitle(doc.getStr("title"));
       if (title && title !== it.title) add("warning", "title-mismatch", it.id, "index line title differs from the title property", true);
     }
+
+    for (const check of later) check();
 
     // A link to itself is `blocked-by-invalid` already, not a cycle as well. A cycle may pass through the other
     // trackers of the folder; only the issues of this one on it are reported, the others' own lint reports theirs.
