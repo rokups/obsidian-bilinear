@@ -67,7 +67,7 @@ const LABEL_RE = /^(Rationale|Alternatives|Attempted|Promising|Happened|Failed|A
 const KNOWN_KEYS = ["status", "author", "created", "updated", "supersedes", "superseded-by"];
 const STATUS_BULLET_RE = /^[-*+][ \t]+status[ \t]*:[ \t]*(.*)$/i;
 const REJECTED_LABELS = ["Attempted", "Promising", "Happened", "Failed", "Applies"];
-const LETTERS = Object.fromEntries(Object.entries(TYPE_LETTERS).map(([letter, type]) => [type, letter])) as Record<
+export const LETTERS = Object.fromEntries(Object.entries(TYPE_LETTERS).map(([letter, type]) => [type, letter])) as Record<
   EntryType,
   string
 >;
@@ -78,7 +78,7 @@ function labelsOf(type: EntryType): string[] {
 }
 
 /** `d3` -> `D3`; null when it is not a local ID of a known type. */
-function normalizeLocal(s: string): string | null {
+export function normalizeLocal(s: string): string | null {
   const m = LOCAL_RE.exec(trimBlank(s));
   if (!m || !(m[1].toUpperCase() in TYPE_LETTERS)) return null;
   return `${m[1].toUpperCase()}${parseInt(m[2], 10)}`;
