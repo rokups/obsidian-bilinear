@@ -14,7 +14,8 @@ import type { IssueRecord } from "../../plugin/src/format/record";
 import { Doc, type Value } from "../../plugin/src/format/yaml";
 import { OpError, type Tracker } from "../../plugin/src/ops/io";
 import { adoptIssue, archiveClosed, archiveIssues, commentIssue, createIssue, createTracker, deleteIssue, moveIssue, setLabel, setProps, setStateStyle, setTriageState, unarchiveIssues, unrelate, type PropEdits } from "../../plugin/src/ops/issues";
-import { getContext, recordContext, type RecordInput } from "../../plugin/src/ops/context";
+import { buildContextView, getContext, recordContext, type RecordInput } from "../../plugin/src/ops/context";
+import { stripEntries } from "../../plugin/src/format/context";
 import { lint } from "../../plugin/src/ops/lint";
 import { LOCK_TIMES, LockTimeout } from "../../plugin/src/ops/lock-file";
 import { allRecords, linkTargets, locked, notePath, readIndex, requireItem, resolveNote } from "../../plugin/src/ops/tracker";
@@ -357,21 +358,23 @@ const COMMANDS: Record<string, Command> = {
     async run({ values, positionals, out, tracker }) {
       const t = await tracker();
       const id = positionals[0];
-      const { records, foreign, progress, relations, doc, path } = await locked(t, async () => {
+      const { records, foreign, progress, relations, doc, path, text, idx } = await locked(t, async () => {
         const idx = await readIndex(t);
         const item = requireItem(idx, id);
         const path = await resolveNote(t, id, item.archived);
         const text = path === null ? null : await t.io.read(path);
-        return { ...(await allRecords(t, idx)), doc: text === null ? null : new Doc(text), path: text === null ? null : path };
+        return { ...(await allRecords(t, idx)), doc: text === null ? null : new Doc(text), path: text === null ? null : path, text, idx };
       });
       const rec = records.find((r) => r.id === id)!;
+      const view = buildContextView({ issueId: id, title: rec.title, noteText: text, indexText: idx.doc.text(), prefix: idx.prefix });
       const p = progress.get(id) ?? null;
       // A linked issue may belong to another tracker of the folder.
       const status = (other: string): string => records.find((r) => r.id === other)?.status ?? foreign.find((r) => r.id === other)?.status ?? "note missing";
       if (values["json"]) {
         const properties: Record<string, Value> = {};
         for (const key of doc?.keys() ?? []) properties[key] = doc!.get(key);
-        out(json({ ...toJson(rec, p, relations.get(id)), path: path === null ? null : native(path), properties, body: doc?.body ?? "" }));
+        const context = { l0: view.text, chars: view.chars, cap: view.cap, counts: view.counts, shown: view.shown, omitted: view.omitted };
+        out(json({ ...toJson(rec, p, relations.get(id)), path: path === null ? null : native(path), properties, body: doc?.body ?? "", context }));
         return EXIT_OK;
       }
       out(`${rec.id}  ${rec.title}`);
@@ -393,7 +396,10 @@ const COMMANDS: Record<string, Command> = {
       const rel = relations.get(id);
       if (rel?.blocks.length) out(`${pad("blocks:", 12)} ${states(rel.blocks)}`);
       if (rel?.related.length) out(`${pad("related:", 12)} ${states(rel.related)}`);
-      const body = doc.body.replace(/^[\r\n]+|[\r\n]+$/g, "");
+      // With entries, the L0 text takes the place of the `## Context` section and comes before the description.
+      const l0 = view.text !== "";
+      if (l0) out(`\n${view.text.replace(/\n+$/, "")}`);
+      const body = (l0 ? new Doc(stripEntries(text!)).body : doc.body).replace(/^[\r\n]+|[\r\n]+$/g, "");
       if (body) out(`\n${body}`);
       return EXIT_OK;
     },

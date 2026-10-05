@@ -532,3 +532,27 @@ export function stripContext(text: string): string {
   doc.body = lines.join("");
   return doc.text();
 }
+
+/**
+ * The note without the lines of its context entries. Text of the `## Context` section that is not an entry
+ * (prose, a `### Notes` block) stays. The heading goes only when the rest of the section is blank. A note
+ * without entries is returned as it is. Like `stripContext`, it takes the whole note.
+ */
+export function stripEntries(text: string): string {
+  const parsed = parseContext(text);
+  if (!parsed.section || parsed.entries.length === 0) return text;
+  const lines = splitLines(text);
+  const [from, to] = parsed.section;
+  let removed = 0;
+  for (const [a, b] of parsed.entries.map((e) => e.range).sort((x, y) => y[0] - x[0])) {
+    lines.splice(a, b - a);
+    removed += b - a;
+  }
+  const end = to - removed;
+  if (lines.slice(from + 1, end).every(isBlank)) {
+    let start = from;
+    if (end >= lines.length) while (start > 0 && isBlank(lines[start - 1])) start--;
+    lines.splice(start, end - start);
+  }
+  return lines.join("");
+}

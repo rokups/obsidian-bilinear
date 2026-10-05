@@ -1,7 +1,7 @@
 // The write side of context entries: numbers, insert, patch, strip and the checks before writing.
 
 import { describe, expect, it } from "vitest";
-import { checkEntry, formatEntry, insertEntry, nextNumber, parseContext, patchEntry, stripContext, type ContextEntry } from "../src/format/context";
+import { checkEntry, formatEntry, insertEntry, nextNumber, parseContext, patchEntry, stripContext, stripEntries, type ContextEntry } from "../src/format/context";
 import { TYPE_LETTERS } from "../src/format/ids";
 import { addComment, bodyLinks } from "../src/format/issue-note";
 import { Doc } from "../src/format/yaml";
@@ -452,5 +452,35 @@ describe("insertEntry and patchEntry in odd notes", () => {
     const out = insertEntry("## Context\n## Comments\n- c\n", NEW);
     expect(out).toBe(`## Context\n\n${NEW_TEXT}\n## Comments\n- c\n`);
     expect(found(out, "D4")).toEqual(bare(NEW));
+  });
+});
+
+describe("stripEntries", () => {
+  const E = "### D1: Entry\n- status: active\n\nContent.\n";
+  const F = "### F1: Other\n- status: active\n\nMore.\n";
+  it("removes a section of entries only, without a pile of blank lines", () => {
+    expect(stripEntries(`${FM}Text.\n\n## Context\n\n${E}\n${F}\n## Comments\n\n- c\n`)).toBe(`${FM}Text.\n\n## Comments\n\n- c\n`);
+  });
+  it("removes a section of entries at the end with the blank lines before it", () => {
+    expect(stripEntries(`${FM}Text.\n\n## Comments\n\n- c\n\n## Context\n\n${E}`)).toBe(`${FM}Text.\n\n## Comments\n\n- c\n`);
+  });
+  it("keeps the prose before the first entry under the heading", () => {
+    expect(stripEntries(`${FM}Text.\n\n## Context\n\nProse.\n\n${E}\n## Comments\n\n- c\n`)).toBe(`${FM}Text.\n\n## Context\n\nProse.\n\n## Comments\n\n- c\n`);
+  });
+  it("keeps a foreign block between entries", () => {
+    expect(stripEntries(`${FM}Text.\n\n## Context\n\n${E}\n### Notes\n\nMine.\n\n${F}\n## Comments\n`)).toBe(`${FM}Text.\n\n## Context\n\n### Notes\n\nMine.\n\n## Comments\n`);
+  });
+  it("keeps CRLF", () => {
+    expect(stripEntries(crlf(`${FM}Text.\n\n## Context\n\nProse.\n\n${E}\n## Comments\n`))).toBe(crlf(`${FM}Text.\n\n## Context\n\nProse.\n\n## Comments\n`));
+    expect(stripEntries(crlf(`${FM}Text.\n\n## Context\n\n${E}`))).toBe(crlf(`${FM}Text.\n`));
+  });
+  it("returns a note without a section or without entries as it is", () => {
+    for (const text of [`${FM}Text.\n`, `${FM}Text.\n\n## Context\n\nProse.\n\n## Comments\n`, `${FM}Text.\n\n## Context\n\n## Comments\n`]) {
+      expect(stripEntries(text)).toBe(text);
+    }
+  });
+  it("leaves no entry for parseContext", () => {
+    const out = stripEntries(`${FM}Text.\n\n## Context\n\nProse.\n\n${E}\n${F}\n## Comments\n`);
+    expect(parseContext(out).entries).toEqual([]);
   });
 });

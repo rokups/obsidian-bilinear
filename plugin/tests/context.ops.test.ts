@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { parseContext } from "../src/format/context";
 import { parseComments } from "../src/format/issue-note";
-import { getContext, recordContext, type RecordInput } from "../src/ops/context";
+import { buildContextView, contextView, getContext, recordContext, type RecordInput } from "../src/ops/context";
 import type { Tracker } from "../src/ops/io";
 import { archiveIssues, commentIssue, createIssue, createTracker } from "../src/ops/issues";
 import { listIssues } from "../src/ops/tracker";
@@ -463,5 +463,59 @@ describe("getContext reads", () => {
     };
     await getContext(t, ["BL-1/D1", "BL/C1", "BL-1/D2", "BL-1/D1"]);
     expect(reads.filter((p) => p.endsWith("BL-1.md"))).toHaveLength(1);
+  });
+});
+
+describe("contextView", () => {
+  it("is empty for an issue and a tracker without entries, even with a comment", async () => {
+    await commentIssue(t, "BL-1", "hello", "bob", TODAY);
+    const v = await contextView(t, "BL-1");
+    expect(v).toMatchObject({ text: "", chars: 0, cap: 8000, shown: [], omitted: [] });
+    expect(v.counts).toEqual({ active: 0, superseded: 0, resolved: 0, tracker: 0 });
+  });
+
+  it("builds the view from the entries of the issue and of the tracker, with the description whole", async () => {
+    await rec("BL-1", dec("Use X", "Because."));
+    await rec("BL", { type: "constraint", subject: "No net", content: "Offline." });
+    const v = await contextView(t, "BL-1");
+    expect(v.text).toContain("CONTEXT BL-1 (L0,");
+    expect(v.text).toContain("Goal: First\n  Text.\n");
+    expect(v.text).toContain("BL/C1 No net");
+    expect(v.shown).toEqual(["BL-1/D1", "BL/C1"]);
+    expect(v.counts).toEqual({ active: 1, superseded: 0, resolved: 0, tracker: 1 });
+    // The same text from a new Tracker over the same files.
+    const again: Tracker = { io, dir: "T/Bilinear", indexPath: "T/Bilinear/Bilinear.md" };
+    expect(await contextView(again, "BL-1")).toEqual(v);
+  });
+
+  it("takes a cap, reads an archived issue and refuses an unknown one", async () => {
+    await rec("BL-2", dec("Use X", "Because."));
+    await archiveIssues(t, ["BL-2"]);
+    const v = await contextView(t, "BL-2", { cap: 300 });
+    expect(v.cap).toBe(300);
+    expect(v.chars).toBeLessThanOrEqual(300);
+    expect(v.shown).toEqual(["BL-2/D1"]);
+    await expect(contextView(t, "BL-9")).rejects.toThrow(/BL-9/);
+  });
+
+  it("buildContextView needs no read, and uses the newest comment date for the hint", async () => {
+    await rec("BL-1", dec("Use X"));
+    await commentIssue(t, "BL-1", "later", "bob", "2026-10-09");
+    const v = buildContextView({ issueId: "BL-1", title: "First", noteText: note(), indexText: index(), prefix: "BL" });
+    expect(v.text).toContain("Hint:");
+    expect(v.text).toContain("context checkpoint BL-1");
+    expect(buildContextView({ issueId: "BL-1", title: "First", noteText: null, indexText: index(), prefix: null }).text).toBe("");
+  });
+
+  it("gives no view for a tracker with only superseded entries, and no hint for an issue without entries", async () => {
+    await rec("BL", { type: "constraint", subject: "No net", content: "Offline." });
+    const only = index().replace(/status: active/g, "status: superseded");
+    expect(only).not.toBe(index());
+    const v = buildContextView({ issueId: "BL-1", title: "First", noteText: note(), indexText: only, prefix: "BL" });
+    expect(v).toMatchObject({ text: "", shown: [], omitted: [] });
+    await commentIssue(t, "BL-1", "later", "bob", "2026-10-09");
+    const w = await contextView(t, "BL-1");
+    expect(w.text).toContain("Tracker constraints:");
+    expect(w.text).not.toContain("Hint:");
   });
 });

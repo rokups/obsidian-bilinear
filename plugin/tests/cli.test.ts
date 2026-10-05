@@ -8,10 +8,11 @@ import { Worker } from "node:worker_threads";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import { instructions, shellWord } from "../../cli/src/agent";
-import { NodeIO } from "../../cli/src/node-io";
+import { NodeIO, slashed } from "../../cli/src/node-io";
+import { contextView } from "../src/ops/context";
 import { OpError } from "../src/ops/io";
 import { withFileLock } from "../src/ops/lock-file";
-import { sandbox } from "./cli";
+import { Sandbox, sandbox } from "./cli";
 
 const CLEAN = { code: 0, out: "no problems found\n" };
 const PLUGIN_LOCK = '{"by": "plugin", "pid": 1, "token": "abc"}\n';
@@ -2134,5 +2135,200 @@ describe("context", () => {
     }
     expect((await s().run("context", "--help")).out).toContain("context record");
     expect((await s().raw("--help")).out).toMatch(/\n {2}context +record context entries/);
+  });
+});
+
+describe("show with context", () => {
+  const s = sandbox();
+  const L0_HEADER = /CONTEXT BL-1 \(L0, \d+ of 8000 chars; /;
+  const record = (...argv: string[]) => s().ok("context", "record", ...argv);
+  const rejected = ["BL-1", "--type", "rejected", "--subject", "Try A", "--attempted", "Used A", "--failed", "It broke", "--applies", "always"];
+  const decision = (subject = "Use X") => ["BL-1", "--type", "decision", "--subject", subject, "--content", "Because."];
+  const state = ["BL-1", "--type", "state", "--subject", "Doing it", "--content", "Half done."];
+  const showJson = async (id = "BL-1") => JSON.parse(await s().ok("show", id, "--json"));
+
+  beforeEach(async () => {
+    await s().ok("new", "One", "--description", "Intro text.\n\n### Sub\n\nMore.");
+    await s().ok("comment", "BL-1", "hello");
+  });
+
+  it("an issue without entries shows as before, with an empty context in json", async () => {
+    expect(await s().ok("show", "BL-1")).toBe(
+      "BL-1  One\nstatus:      backlog\npriority:    none\ncreated:     2026-10-01\n\nIntro text.\n\n### Sub\n\nMore.\n\n## Comments\n- 2026-10-01 rk: hello\n",
+    );
+    const j = await showJson();
+    expect(j.context).toEqual({ l0: "", chars: 0, cap: 8000, counts: { active: 0, superseded: 0, resolved: 0, tracker: 0 }, shown: [], omitted: [] });
+  });
+
+  it("an empty Context section and a missing note change nothing", async () => {
+    s().edit(s().note("BL-1"), "## Comments", "## Context\n\n## Comments");
+    const text = await s().ok("show", "BL-1");
+    expect(text).toContain("## Context\n");
+    expect(text).not.toContain("CONTEXT BL-1");
+    await s().ok("new", "Two");
+    fs.rmSync(s().note("BL-2"));
+    expect(await s().ok("show", "BL-2")).toBe("BL-2  Two\n(note missing)\n");
+    expect((await showJson("BL-2")).context.l0).toBe("");
+  });
+
+  it("puts the L0 text after the properties and before the description, in place of the Context section", async () => {
+    await record(...rejected);
+    await record(...decision());
+    await record(...state);
+    const text = await s().ok("show", "BL-1");
+    expect(text).toMatch(L0_HEADER);
+    expect(text).toContain("Rejected (do not retry):\n  R1 Try A - failed: It broke\n");
+    expect(text).toContain("Decisions:\n  D1 Use X - Because.\n");
+    expect(text).toContain("State: S1");
+    expect(text).not.toContain("- status: active");
+    expect(text).not.toContain("## Context");
+    expect(text).toContain("## Comments\n- 2026-10-01 rk: hello\n");
+    expect(text).toMatch(/created: {5}2026-10-01\n\nCONTEXT BL-1 [^]*\n\nIntro text\.\n\n### Sub\n\nMore\.\n\n## Comments\n/);
+    expect(text.indexOf("CONTEXT BL-1")).toBeLessThan(text.indexOf("Intro text.\n\n###"));
+  });
+
+  it("keeps the whole description, with its own headings, before the Context section", async () => {
+    await record(...decision());
+    const text = await s().ok("show", "BL-1");
+    expect(text).toContain("\n\nIntro text.\n\n### Sub\n\nMore.\n\n## Comments\n");
+  });
+
+  it("shows a tracker constraint, with its full ID, in an issue that has no entry of its own", async () => {
+    await record("BL", "--type", "constraint", "--subject", "No net", "--content", "Offline.");
+    const text = await s().ok("show", "BL-1");
+    expect(text).toMatch(L0_HEADER);
+    expect(text).toContain("Tracker constraints:\n  BL/C1 No net - Offline.\n");
+    expect(text).not.toContain("## Context");
+    expect((await showJson()).context.counts).toMatchObject({ active: 0, tracker: 1 });
+  });
+
+  it("gives the same L0 text to a new process as to the first one", async () => {
+    await record(...rejected);
+    await record(...decision());
+    await record("BL", "--type", "constraint", "--subject", "No net", "--content", "Offline.");
+    const first = await s().ok("show", "BL-1");
+    const l0 = (await showJson()).context.l0;
+    const again = new Sandbox();
+    try {
+      fs.cpSync(s().vault, again.vault, { recursive: true });
+      expect(await again.ok("show", "BL-1")).toBe(first);
+      expect((JSON.parse(await again.ok("show", "BL-1", "--json")) as { context: unknown }).context).toEqual((await showJson()).context);
+    } finally {
+      fs.rmSync(again.root, { recursive: true, force: true });
+    }
+    expect(first).toContain(l0.replace(/\n+$/, ""));
+  });
+
+  it("does not list a superseded decision and counts it in the index", async () => {
+    await record(...decision("Use X"));
+    await record(...decision("Use Y"), "--supersedes", "D1");
+    const text = await s().ok("show", "BL-1");
+    expect(text).toContain("  D2 Use Y - Because.");
+    expect(text).not.toContain("  D1 Use X");
+    const j = await showJson();
+    expect(j.context.counts).toMatchObject({ active: 1, superseded: 1 });
+    expect(j.context.shown).toEqual(["BL-1/D2"]);
+    expect(j.context.l0).toContain("superseded (1): D1");
+  });
+
+  it("adds a hint when a comment is newer than the last entry", async () => {
+    await record(...decision());
+    expect(await s().ok("show", "BL-1")).not.toContain("Hint:");
+    s().env.BILINEAR_TODAY = "2026-10-03";
+    await s().ok("comment", "BL-1", "later");
+    const text = await s().ok("show", "BL-1");
+    expect(text).toContain("Hint:");
+    expect(text).toContain("context checkpoint BL-1");
+  });
+
+  it("json has the context and keeps the raw body", async () => {
+    await record(...decision());
+    const j = await showJson();
+    expect(Object.keys(j.context).sort()).toEqual(["cap", "chars", "counts", "l0", "omitted", "shown"]);
+    expect(j.context.l0).toMatch(L0_HEADER);
+    expect(j.context.chars).toBe(j.context.l0.length);
+    expect(j.context.cap).toBe(8000);
+    expect(j.context.shown).toEqual(["BL-1/D1"]);
+    expect(j.body).toContain("## Context");
+    expect(j.body).toContain("- status: active");
+  });
+
+  it("shows the L0 text of an archived issue", async () => {
+    await record(...decision());
+    await s().ok("archive", "BL-1");
+    const text = await s().ok("show", "BL-1");
+    expect(text).toMatch(L0_HEADER);
+    expect(text).toContain("archived:    yes");
+    expect((await showJson()).context.shown).toEqual(["BL-1/D1"]);
+  });
+
+  it("keeps the L0 text within the cap for a note with 300 entries", async () => {
+    const entries = Array.from(
+      { length: 300 },
+      (_, i) => `### D${i + 1}: Decision number ${i + 1} about topic ${i * 7}\n- status: active\n- author: rk\n- created: 2026-10-01\n- updated: 2026-10-01\n\n${"Long content. ".repeat(20)}\n`,
+    );
+    s().edit(s().note("BL-1"), "## Comments", `## Context\n\n${entries.join("\n")}\n## Comments`);
+    const j = await showJson();
+    expect(j.context.chars).toBe(j.context.l0.length);
+    expect(j.context.chars).toBeLessThanOrEqual(8000);
+    expect(j.context.counts.active).toBe(300);
+    expect(j.context.shown.length + j.context.omitted.length).toBe(300);
+    expect((await s().ok("show", "BL-1")).length).toBeLessThan(20000);
+  });
+
+  it("shows an issue without entries byte for byte as before: hand-written Context, archived", async () => {
+    const plain = "BL-1  One\nstatus:      backlog\npriority:    none\ncreated:     2026-10-01\n\nIntro text.\n\n### Sub\n\nMore.\n\n";
+    s().edit(s().note("BL-1"), "## Comments", "## Context\n\n## Comments");
+    expect(await s().ok("show", "BL-1")).toBe(`${plain}## Context\n\n## Comments\n- 2026-10-01 rk: hello\n`);
+    s().edit(s().note("BL-1"), "## Context\n\n## Comments", "## Context\n\nMy notes.\n\n## Comments");
+    expect(await s().ok("show", "BL-1")).toBe(`${plain}## Context\n\nMy notes.\n\n## Comments\n- 2026-10-01 rk: hello\n`);
+    await s().ok("archive", "BL-1");
+    expect(await s().ok("show", "BL-1")).toBe(`${plain.replace("created:     2026-10-01\n", "created:     2026-10-01\narchived:    yes\n")}## Context\n\nMy notes.\n\n## Comments\n- 2026-10-01 rk: hello\n`);
+  });
+
+  it("does not turn the block on for a tracker with only superseded entries", async () => {
+    await record("BL", "--type", "constraint", "--subject", "No net", "--content", "Offline.");
+    s().edit(s().index, "status: active", "status: superseded");
+    const text = await s().ok("show", "BL-1");
+    expect(text).not.toContain("CONTEXT BL-1");
+    expect((await showJson()).context.l0).toBe("");
+  });
+
+  it("shows no hint for an issue that has a comment and no entry of its own", async () => {
+    await record("BL", "--type", "constraint", "--subject", "No net", "--content", "Offline.");
+    const text = await s().ok("show", "BL-1");
+    expect(text).toContain("Tracker constraints:");
+    expect(text).not.toContain("Hint:");
+  });
+
+  it("keeps hand-written text of the Context section: (A) no entry, active tracker entry", async () => {
+    await record("BL", "--type", "constraint", "--subject", "No net", "--content", "Offline.");
+    s().edit(s().note("BL-1"), "## Comments", "## Context\n\nMy notes.\n\n## Comments");
+    const text = await s().ok("show", "BL-1");
+    expect(text).toContain("Tracker constraints:\n  BL/C1 No net");
+    expect(text).toContain("## Context\n\nMy notes.\n");
+  });
+
+  it("keeps hand-written text of the Context section: (B) an entry, prose and a Notes block", async () => {
+    await record(...decision());
+    s().edit(s().note("BL-1"), "## Context\n\n", "## Context\n\nMy prose.\n\n");
+    s().edit(s().note("BL-1"), "## Comments", "### Notes\n\nMy notes.\n\n## Comments");
+    const text = await s().ok("show", "BL-1");
+    expect(text).toMatch(L0_HEADER);
+    expect(text).toContain("## Context\n\nMy prose.\n");
+    expect(text).toContain("### Notes\n\nMy notes.\n");
+    expect(text).not.toContain("### D1");
+    expect(text).not.toContain("- status: active");
+    expect(text).toContain("## Comments\n- 2026-10-01 rk: hello\n");
+  });
+
+  it("uses the same title rule as the op when the title line is missing", async () => {
+    await record(...decision());
+    const note = fs.readFileSync(s().note("BL-1"), "utf8").replace(/^title: .*\n/m, "");
+    fs.writeFileSync(s().note("BL-1"), note);
+    const t = { io: new NodeIO({ readOnly: true }), dir: slashed(s().dir), indexPath: slashed(s().index) };
+    const view = await contextView(t, "BL-1");
+    expect(view.text).toMatch(L0_HEADER);
+    expect((await showJson()).context.l0).toBe(view.text);
   });
 });

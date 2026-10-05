@@ -16,11 +16,12 @@ import {
   type ContextEntry,
   type RejectedFields,
 } from "../format/context";
-import { overlap } from "../format/context-view";
-import { ID_RE, PREFIX_RE, cleanTitle, todayIso, validDate, type EntryType } from "../format/ids";
+import { L0_CAP, buildL0, overlap, type L0View } from "../format/context-view";
+import { ID_RE, NON_DESCRIPTION_SECTIONS, PREFIX_RE, cleanTitle, todayIso, validDate, type EntryType } from "../format/ids";
 import { parseComments } from "../format/issue-note";
-import { isBlank } from "../format/lines";
-import { classify } from "../format/markdown";
+import { isBlank, splitLines } from "../format/lines";
+import { classify, findSections } from "../format/markdown";
+import { Doc } from "../format/yaml";
 import { OpError, type Tracker } from "./io";
 import { locked, readIndex, requireItem, resolveNote } from "./tracker";
 import type { Index } from "../format/index-note";
@@ -344,4 +345,65 @@ export async function getContext(t: Tracker, ids: string[]): Promise<Array<{ id:
     out.push({ id: fullId(parsed.noteId, entry.local), entry, text: formatEntry(entry, "\n") });
   }
   return out;
+}
+
+/** The body of a note without its `## Context` and `## Comments` sections; the other text is whole. */
+export function descriptionOf(noteText: string): string {
+  const lines = splitLines(new Doc(noteText).body);
+  const ranges = [...findSections(lines, NON_DESCRIPTION_SECTIONS).sections.values()];
+  const kept = lines.filter((_, i) => !ranges.some(([a, b]) => i >= a && i < b));
+  return kept.join("").replace(/^[\r\n]+|[\r\n]+$/g, "");
+}
+
+/**
+ * The L0 view of an issue from the text of its note and the text of the index note. A pure function: `show` uses
+ * it with the texts that it has read already. The view is on when the note has an entry of any status, or the
+ * tracker has an active entry. Otherwise the view is empty: `text` is "", the counts are zero and the lists are
+ * empty, also when there is a comment. The newest comment gives the staleness hint only for a note with entries.
+ * `noteText` null (the note is missing) gives the empty view; `contextView` throws "note missing" in that case.
+ */
+export function buildContextView(input: {
+  issueId: string;
+  title: string;
+  noteText: string | null;
+  indexText: string;
+  /** The prefix of the tracker; the prefix of `issueId` when the index has none. */
+  prefix: string | null;
+  cap?: number;
+}): L0View {
+  const entries = input.noteText === null ? [] : parseContext(input.noteText).entries;
+  const trackerEntries = input.noteText === null ? [] : parseContext(input.indexText).entries;
+  if (entries.length === 0 && !trackerEntries.some((e) => e.status === "active")) {
+    const counts = { active: 0, superseded: 0, resolved: 0, tracker: 0 };
+    return { text: "", chars: 0, cap: input.cap ?? L0_CAP, shown: [], omitted: [], counts };
+  }
+  const dates = entries.length === 0 ? [] : parseComments(input.noteText!).map((c) => c.date);
+  return buildL0({
+    issueId: input.issueId,
+    title: input.title,
+    description: descriptionOf(input.noteText!),
+    entries,
+    trackerId: input.prefix ?? ID_RE.exec(input.issueId)?.[1] ?? "",
+    trackerEntries,
+    newestComment: dates.length ? dates.reduce((a, b) => (b > a ? b : a)) : null,
+    cap: input.cap,
+  });
+}
+
+/** Lock-free read of the L0 view of an issue (the caller takes the lock when it needs one). */
+export async function contextView(t: Tracker, id: string, opts: { cap?: number } = {}): Promise<L0View> {
+  const idx = await readIndex(t);
+  const item = requireItem(idx, id);
+  const path = await resolveNote(t, id, item.archived);
+  const text = path === null ? null : await t.io.read(path);
+  if (text === null) throw new OpError(`${id}: note missing`);
+  return buildContextView({
+    issueId: id,
+    // The rule of the records that `show` uses.
+    title: cleanTitle(new Doc(text).getStr("title")) || item.title,
+    noteText: text,
+    indexText: idx.doc.text(),
+    prefix: idx.prefix,
+    cap: opts.cap ?? L0_CAP,
+  });
 }
