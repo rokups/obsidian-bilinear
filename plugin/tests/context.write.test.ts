@@ -44,15 +44,15 @@ function found(text: string, local: string) {
 describe("nextNumber", () => {
   it("is 1 when there is none", () => {
     expect(nextNumber("Just text.\n", "D")).toBe(1);
-    expect(nextNumber("## Context\n", "D")).toBe(1);
+    expect(nextNumber("## Context log\n", "D")).toBe(1);
   });
   it("is the highest number plus one, with gaps and duplicates", () => {
-    const text = `## Context\n\n### D1: a\n- status: active\n\n### D7: b\n- status: active\n\n### D3: c\n- status: active\n\n### D7: dup\n- status: active\n`;
+    const text = `## Context log\n\n### D1: a\n- status: active\n\n### D7: b\n- status: active\n\n### D3: c\n- status: active\n\n### D7: dup\n- status: active\n`;
     expect(nextNumber(text, "D")).toBe(8);
     expect(nextNumber(text, "d")).toBe(8);
   });
   it("ignores other letters", () => {
-    const text = `## Context\n\n### D5: a\n- status: active\n\n### C2: b\n- status: active\n`;
+    const text = `## Context log\n\n### D5: a\n- status: active\n\n### C2: b\n- status: active\n`;
     expect(nextNumber(text, "C")).toBe(3);
     expect(nextNumber(text, "F")).toBe(1);
   });
@@ -66,47 +66,47 @@ describe("insertEntry", () => {
   };
 
   it("creates the section at the end without Context and Comments", () => {
-    check(`${FM}Description.\n`, `${FM}Description.\n\n## Context\n\n${NEW_TEXT}`);
+    check(`${FM}Description.\n`, `${FM}Description.\n\n## Context log\n\n${NEW_TEXT}`);
   });
   it("creates the section in a note with frontmatter only", () => {
-    check("---\ntitle: Fix\n---\n", `---\ntitle: Fix\n---\n\n## Context\n\n${NEW_TEXT}`);
+    check("---\ntitle: Fix\n---\n", `---\ntitle: Fix\n---\n\n## Context log\n\n${NEW_TEXT}`);
   });
   it("creates the section before Comments", () => {
-    check(`${FM}Description.\n\n## Comments\n\n- 2026-10-01 rk: hi\n`, `${FM}Description.\n\n## Context\n\n${NEW_TEXT}\n## Comments\n\n- 2026-10-01 rk: hi\n`);
+    check(`${FM}Description.\n\n## Comments\n\n- 2026-10-01 rk: hi\n`, `${FM}Description.\n\n## Context log\n\n${NEW_TEXT}\n## Comments\n\n- 2026-10-01 rk: hi\n`);
   });
   it("adds a blank line before Comments when there is none", () => {
-    check(`${FM}Description.\n## Comments\n- c\n`, `${FM}Description.\n\n## Context\n\n${NEW_TEXT}\n## Comments\n- c\n`);
+    check(`${FM}Description.\n## Comments\n- c\n`, `${FM}Description.\n\n## Context log\n\n${NEW_TEXT}\n## Comments\n- c\n`);
   });
   it("appends to a section with entries", () => {
     const old = "### D1: Old\n- status: active\n\nOld content.\n";
-    check(`${FM}Description.\n\n## Context\n\n${old}\n## Comments\n\n- c\n`, `${FM}Description.\n\n## Context\n\n${old}\n${NEW_TEXT}\n## Comments\n\n- c\n`);
+    check(`${FM}Description.\n\n## Context log\n\n${old}\n## Comments\n\n- c\n`, `${FM}Description.\n\n## Context log\n\n${old}\n${NEW_TEXT}\n## Comments\n\n- c\n`);
   });
   it("appends to an empty section", () => {
-    check(`${FM}Description.\n\n## Context\n`, `${FM}Description.\n\n## Context\n\n${NEW_TEXT}`);
+    check(`${FM}Description.\n\n## Context log\n`, `${FM}Description.\n\n## Context log\n\n${NEW_TEXT}`);
   });
   it("appends to a section that comes after Comments", () => {
     const old = "### D1: Old\n- status: active\n";
-    check(`${FM}Text.\n\n## Comments\n\n- c\n\n## Context\n\n${old}`, `${FM}Text.\n\n## Comments\n\n- c\n\n## Context\n\n${old}\n${NEW_TEXT}`);
+    check(`${FM}Text.\n\n## Comments\n\n- c\n\n## Context log\n\n${old}`, `${FM}Text.\n\n## Comments\n\n- c\n\n## Context log\n\n${old}\n${NEW_TEXT}`);
   });
   it("keeps the blank lines at the end of a section", () => {
     const old = "### D1: Old\n- status: active\n";
-    check(`## Context\n\n${old}\n\n## Comments\n`, `## Context\n\n${old}\n${NEW_TEXT}\n\n## Comments\n`);
+    check(`## Context log\n\n${old}\n\n## Comments\n`, `## Context log\n\n${old}\n${NEW_TEXT}\n\n## Comments\n`);
   });
   it("writes a CRLF note with CRLF", () => {
     const before = crlf(`${FM}Description.\n\n## Comments\n\n- c\n`);
     const out = insertEntry(before, NEW);
-    expect(out).toBe(crlf(`${FM}Description.\n\n## Context\n\n${NEW_TEXT}\n## Comments\n\n- c\n`));
+    expect(out).toBe(crlf(`${FM}Description.\n\n## Context log\n\n${NEW_TEXT}\n## Comments\n\n- c\n`));
     expect(found(out, "D4")).toEqual(bare(NEW));
     expect(out.replace(/\r\n/g, "")).not.toMatch(/[\r\n]/);
   });
   it("finishes the last line of a note with no final line break", () => {
-    check(`${FM}Description.`, `${FM}Description.\n\n## Context\n\n${NEW_TEXT}`);
-    check(`${FM}## Context\n\n### D1: Old\n- status: active`, `${FM}## Context\n\n### D1: Old\n- status: active\n\n${NEW_TEXT}`);
+    check(`${FM}Description.`, `${FM}Description.\n\n## Context log\n\n${NEW_TEXT}`);
+    check(`${FM}## Context log\n\n### D1: Old\n- status: active`, `${FM}## Context log\n\n### D1: Old\n- status: active\n\n${NEW_TEXT}`);
   });
   it("puts the section at the end of an index note", () => {
     const index = "---\nprefix: BL\n---\n\n## Issues\n\n- [[BL-1]] One\n\n## Archive\n\n- [[BL-2]] Two\n";
     const out = insertEntry(index, NEW);
-    expect(out).toBe(`${index}\n## Context\n\n${NEW_TEXT}`);
+    expect(out).toBe(`${index}\n## Context log\n\n${NEW_TEXT}`);
     expect(found(out, "D4")).toEqual(bare(NEW));
     expect(found(insertEntry(out, mk("C", 1)), "C1")).toEqual(bare(mk("C", 1)));
   });
@@ -119,22 +119,22 @@ describe("addComment with Context", () => {
   const old = "### D1: Old\n- status: active\n\nOld content.\n";
   const entries = (text: string) => parseContext(text).entries.map(bare);
   it("adds to Comments when Context comes before", () => {
-    const before = `${FM}Text.\n\n## Context\n\n${old}\n## Comments\n\n- 2026-10-01 rk: first\n`;
+    const before = `${FM}Text.\n\n## Context log\n\n${old}\n## Comments\n\n- 2026-10-01 rk: first\n`;
     const out = addComment(before, "2026-10-02", "ana", "second");
-    expect(out).toBe(`${FM}Text.\n\n## Context\n\n${old}\n## Comments\n\n- 2026-10-01 rk: first\n- 2026-10-02 ana: second\n`);
+    expect(out).toBe(`${FM}Text.\n\n## Context log\n\n${old}\n## Comments\n\n- 2026-10-01 rk: first\n- 2026-10-02 ana: second\n`);
     expect(entries(out)).toEqual(entries(before));
   });
   it("adds to Comments when Context comes after", () => {
-    const before = `${FM}Text.\n\n## Comments\n\n- 2026-10-01 rk: first\n\n## Context\n\n${old}`;
+    const before = `${FM}Text.\n\n## Comments\n\n- 2026-10-01 rk: first\n\n## Context log\n\n${old}`;
     const out = addComment(before, "2026-10-02", "ana", "second");
-    expect(out).toBe(`${FM}Text.\n\n## Comments\n\n- 2026-10-01 rk: first\n- 2026-10-02 ana: second\n\n## Context\n\n${old}`);
+    expect(out).toBe(`${FM}Text.\n\n## Comments\n\n- 2026-10-01 rk: first\n- 2026-10-02 ana: second\n\n## Context log\n\n${old}`);
     expect(entries(out)).toEqual(entries(before));
   });
 });
 
 describe("patchEntry", () => {
   const E = (n: number) => `### D${n}: Entry ${n}\n- status: active\n\nContent ${n}.\n`;
-  const text = `${FM}Text.\n\n## Context\n\n${E(1)}\n${E(2)}\n${E(3)}\n\n## Comments\n\n- c\n`;
+  const text = `${FM}Text.\n\n## Context log\n\n${E(1)}\n${E(2)}\n${E(3)}\n\n## Comments\n\n- c\n`;
   const resolve = (e: ContextEntry): ContextEntry => ({ ...e, status: "resolved" });
   const lineCount = (s: string) => s.split("\n").length;
 
@@ -150,12 +150,12 @@ describe("patchEntry", () => {
     expect(patchEntry(text, "d2", resolve)).toBe(patchEntry(text, "D2", resolve));
   });
   it("keeps a missing final line break", () => {
-    const before = `## Context\n\n${E(1)}\n### D2: Entry 2\n- status: active\n\nContent 2.`;
+    const before = `## Context log\n\n${E(1)}\n### D2: Entry 2\n- status: active\n\nContent 2.`;
     const out = patchEntry(before, "D2", resolve);
-    expect(out).toBe(`## Context\n\n${E(1)}\n### D2: Entry 2\n- status: resolved\n\nContent 2.`);
+    expect(out).toBe(`## Context log\n\n${E(1)}\n### D2: Entry 2\n- status: resolved\n\nContent 2.`);
   });
   it("keeps trailing blank lines at the end of a note", () => {
-    const before = `## Context\n\n${E(1)}\n\n`;
+    const before = `## Context log\n\n${E(1)}\n\n`;
     expect(patchEntry(before, "D1", resolve)).toBe(before.replace("active", "resolved"));
   });
   it("writes a CRLF note with CRLF", () => {
@@ -165,12 +165,12 @@ describe("patchEntry", () => {
   });
   it("changes an entry with extra bullets and a status that stays in extra", () => {
     const hand = "### D2: Hand\n- status: waiting\n- owner: rk\n  - nested\n\nBody.\n";
-    const before = `## Context\n\n${E(1)}\n${hand}\n${E(3)}`;
+    const before = `## Context log\n\n${E(1)}\n${hand}\n${E(3)}`;
     const out = patchEntry(before, "D2", (e) => {
       expect(e.statusInExtra).toBe(true);
       return { ...e, subject: "Renamed" };
     });
-    expect(out).toBe(`## Context\n\n${E(1)}\n### D2: Renamed\n- owner: rk\n  - nested\n- status: waiting\n\nBody.\n\n${E(3)}`.replace("- owner: rk\n  - nested\n- status: waiting", "- status: waiting\n- owner: rk\n  - nested"));
+    expect(out).toBe(`## Context log\n\n${E(1)}\n### D2: Renamed\n- owner: rk\n  - nested\n- status: waiting\n\nBody.\n\n${E(3)}`.replace("- owner: rk\n  - nested\n- status: waiting", "- status: waiting\n- owner: rk\n  - nested"));
     expect(found(out, "D2")?.status).toBe("active");
     expect(found(out, "D2")?.extra).toEqual(["- status: waiting", "- owner: rk", "  - nested"]);
     // A new valid status replaces the bullet that did not parse.
@@ -190,22 +190,22 @@ describe("patchEntry", () => {
 describe("stripContext", () => {
   const E = "### D1: Entry\n- status: active\n\nContent.\n";
   it("removes a section in the middle", () => {
-    expect(stripContext(`${FM}Text.\n\n## Context\n\n${E}\n## Comments\n\n- c\n`)).toBe(`${FM}Text.\n\n## Comments\n\n- c\n`);
+    expect(stripContext(`${FM}Text.\n\n## Context log\n\n${E}\n## Comments\n\n- c\n`)).toBe(`${FM}Text.\n\n## Comments\n\n- c\n`);
   });
   it("removes a section at the end with the blank lines before it", () => {
-    expect(stripContext(`${FM}Text.\n\n## Comments\n\n- c\n\n## Context\n\n${E}`)).toBe(`${FM}Text.\n\n## Comments\n\n- c\n`);
-    expect(stripContext(`${FM}Text.\n\n## Context\n\n${E}\n\n`)).toBe(`${FM}Text.\n`);
+    expect(stripContext(`${FM}Text.\n\n## Comments\n\n- c\n\n## Context log\n\n${E}`)).toBe(`${FM}Text.\n\n## Comments\n\n- c\n`);
+    expect(stripContext(`${FM}Text.\n\n## Context log\n\n${E}\n\n`)).toBe(`${FM}Text.\n`);
   });
   it("removes a section in a CRLF note", () => {
-    expect(stripContext(crlf(`${FM}Text.\n\n## Context\n\n${E}`))).toBe(crlf(`${FM}Text.\n`));
+    expect(stripContext(crlf(`${FM}Text.\n\n## Context log\n\n${E}`))).toBe(crlf(`${FM}Text.\n`));
   });
   it("returns the text when there is no section", () => {
     const t = `${FM}Text.\n\n## Comments\n\n- c`;
     expect(stripContext(t)).toBe(t);
   });
   it("keeps a heading in a code block and the other sections", () => {
-    const t = "## Plan\n\n```\n## Context\n```\n\n## Context\n\n### D1: x\n\n## Notes\n\nEnd.\n";
-    expect(stripContext(t)).toBe("## Plan\n\n```\n## Context\n```\n\n## Notes\n\nEnd.\n");
+    const t = "## Plan\n\n```\n## Context log\n```\n\n## Context log\n\n### D1: x\n\n## Notes\n\nEnd.\n";
+    expect(stripContext(t)).toBe("## Plan\n\n```\n## Context log\n```\n\n## Notes\n\nEnd.\n");
   });
   it("is the inverse of insertEntry on a note without the section", () => {
     const t = `${FM}Text.\n\n## Comments\n\n- c\n`;
@@ -325,7 +325,7 @@ describe("checkEntry", () => {
 
 describe("links of the description", () => {
   const body = (order: "context-first" | "comments-first") => {
-    const context = "## Context\n\n### D1: x\n- status: active\n\nSee [[BL-3]].\n\nRationale: [[BL-4]]\n";
+    const context = "## Context log\n\n### D1: x\n- status: active\n\nSee [[BL-3]].\n\nRationale: [[BL-4]]\n";
     const comments = "## Comments\n\n- 2026-10-01 rk: see [[BL-5]]\n";
     return `See [[BL-1]] and ![[BL-2]].\n\n${order === "context-first" ? `${context}\n${comments}` : `${comments}\n${context}`}`;
   };
@@ -357,7 +357,7 @@ describe("links of the description", () => {
 
 describe("insertEntry with a code fence that is not closed", () => {
   it("throws when the last entry of the section has one", () => {
-    const text = "## Context\n\n### D1: Old\n- status: active\n\n```\ncode\n";
+    const text = "## Context log\n\n### D1: Old\n- status: active\n\n```\ncode\n";
     expect(() => insertEntry(text, NEW)).toThrow(/code fence in the note is not closed/);
   });
   it("throws when the description has one and the section is created", () => {
@@ -377,12 +377,12 @@ describe("entries read from hand-written text", () => {
   const resolve = (e: ContextEntry): ContextEntry => ({ ...e, status: "resolved" });
 
   it("can have their status changed after a blank line of spaces", () => {
-    const text = "## Context\n\n### D1: x\n- status: active\n\nBody.\n  \n### D2: y\n- status: active\n";
+    const text = "## Context log\n\n### D1: x\n- status: active\n\nBody.\n  \n### D2: y\n- status: active\n";
     expect(found(text, "D1")?.content).toBe("Body.");
-    expect(patchEntry(text, "D1", resolve)).toBe("## Context\n\n### D1: x\n- status: resolved\n\nBody.\n  \n### D2: y\n- status: active\n");
+    expect(patchEntry(text, "D1", resolve)).toBe("## Context log\n\n### D1: x\n- status: resolved\n\nBody.\n  \n### D2: y\n- status: active\n");
   });
   it("can have their status changed with a fence on the first line of a value", () => {
-    const text = "## Context\n\n### D1: x\n- status: active\n\nRationale: ```js inline\nmore\n";
+    const text = "## Context log\n\n### D1: x\n- status: active\n\nRationale: ```js inline\nmore\n";
     expect(found(text, "D1")?.rationale).toBe("```js inline\nmore");
     expect(patchEntry(text, "D1", resolve)).toBe(text.replace("active", "resolved"));
   });
@@ -412,7 +412,7 @@ describe("entries read from hand-written text", () => {
   };
   for (const [name, entryText] of Object.entries(hand)) {
     it(`passes checkEntry unchanged, and can be patched: ${name}`, () => {
-      const text = `${FM}Text.\n\n## Context\n\n${entryText}\n### C9: next\n- status: active\n`;
+      const text = `${FM}Text.\n\n## Context log\n\n${entryText}\n### C9: next\n- status: active\n`;
       const [e] = parseContext(text).entries;
       expect(checkEntry(e)).toEqual([]);
       const out = patchEntry(text, e.local, resolve);
@@ -422,10 +422,10 @@ describe("entries read from hand-written text", () => {
   }
 
   it("cannot pass when the subject is empty or a fence is not closed", () => {
-    const empty = parseContext("## Context\n\n### D1:\n- status: active\n").entries[0];
+    const empty = parseContext("## Context log\n\n### D1:\n- status: active\n").entries[0];
     expect(empty.subject).toBe("");
     expect(checkEntry(empty).length).toBeGreaterThan(0);
-    const open = parseContext("## Context\n\n### D1: x\n- status: active\n\n```\ncode\n").entries[0];
+    const open = parseContext("## Context log\n\n### D1: x\n- status: active\n\n```\ncode\n").entries[0];
     expect(checkEntry(open).some((p) => /not closed/.test(p))).toBe(true);
   });
 });
@@ -433,24 +433,24 @@ describe("entries read from hand-written text", () => {
 describe("insertEntry and patchEntry in odd notes", () => {
   it("keeps the BOM", () => {
     const bom = "\uFEFF";
-    expect(insertEntry(`${bom}${FM}Text.\n`, NEW)).toBe(`${bom}${FM}Text.\n\n## Context\n\n${NEW_TEXT}`);
-    const text = `${bom}${FM}## Context\n\n${NEW_TEXT}`;
+    expect(insertEntry(`${bom}${FM}Text.\n`, NEW)).toBe(`${bom}${FM}Text.\n\n## Context log\n\n${NEW_TEXT}`);
+    const text = `${bom}${FM}## Context log\n\n${NEW_TEXT}`;
     expect(patchEntry(text, "D4", (e) => ({ ...e, status: "resolved" }))).toBe(text.replace("active", "resolved"));
-    expect(insertEntry(`${bom}## Context\n`, NEW)).toBe(`${bom}## Context\n\n${NEW_TEXT}`);
+    expect(insertEntry(`${bom}## Context log\n`, NEW)).toBe(`${bom}## Context log\n\n${NEW_TEXT}`);
   });
   it("appends after intro text in the section", () => {
-    const out = insertEntry("## Context\n\nSome intro text.\n", NEW);
-    expect(out).toBe(`## Context\n\nSome intro text.\n\n${NEW_TEXT}`);
+    const out = insertEntry("## Context log\n\nSome intro text.\n", NEW);
+    expect(out).toBe(`## Context log\n\nSome intro text.\n\n${NEW_TEXT}`);
     expect(found(out, "D4")).toEqual(bare(NEW));
   });
   it("appends after a block that is not an entry", () => {
-    const out = insertEntry("## Context\n\n### Notes\nfoo\n\n## Comments\n", NEW);
-    expect(out).toBe(`## Context\n\n### Notes\nfoo\n\n${NEW_TEXT}\n## Comments\n`);
+    const out = insertEntry("## Context log\n\n### Notes\nfoo\n\n## Comments\n", NEW);
+    expect(out).toBe(`## Context log\n\n### Notes\nfoo\n\n${NEW_TEXT}\n## Comments\n`);
     expect(found(out, "D4")).toEqual(bare(NEW));
   });
   it("keeps a heading that follows the section directly", () => {
-    const out = insertEntry("## Context\n## Comments\n- c\n", NEW);
-    expect(out).toBe(`## Context\n\n${NEW_TEXT}\n## Comments\n- c\n`);
+    const out = insertEntry("## Context log\n## Comments\n- c\n", NEW);
+    expect(out).toBe(`## Context log\n\n${NEW_TEXT}\n## Comments\n- c\n`);
     expect(found(out, "D4")).toEqual(bare(NEW));
   });
 });
@@ -459,28 +459,61 @@ describe("stripEntries", () => {
   const E = "### D1: Entry\n- status: active\n\nContent.\n";
   const F = "### F1: Other\n- status: active\n\nMore.\n";
   it("removes a section of entries only, without a pile of blank lines", () => {
-    expect(stripEntries(`${FM}Text.\n\n## Context\n\n${E}\n${F}\n## Comments\n\n- c\n`)).toBe(`${FM}Text.\n\n## Comments\n\n- c\n`);
+    expect(stripEntries(`${FM}Text.\n\n## Context log\n\n${E}\n${F}\n## Comments\n\n- c\n`)).toBe(`${FM}Text.\n\n## Comments\n\n- c\n`);
   });
   it("removes a section of entries at the end with the blank lines before it", () => {
-    expect(stripEntries(`${FM}Text.\n\n## Comments\n\n- c\n\n## Context\n\n${E}`)).toBe(`${FM}Text.\n\n## Comments\n\n- c\n`);
+    expect(stripEntries(`${FM}Text.\n\n## Comments\n\n- c\n\n## Context log\n\n${E}`)).toBe(`${FM}Text.\n\n## Comments\n\n- c\n`);
   });
   it("keeps the prose before the first entry under the heading", () => {
-    expect(stripEntries(`${FM}Text.\n\n## Context\n\nProse.\n\n${E}\n## Comments\n\n- c\n`)).toBe(`${FM}Text.\n\n## Context\n\nProse.\n\n## Comments\n\n- c\n`);
+    expect(stripEntries(`${FM}Text.\n\n## Context log\n\nProse.\n\n${E}\n## Comments\n\n- c\n`)).toBe(`${FM}Text.\n\n## Context log\n\nProse.\n\n## Comments\n\n- c\n`);
   });
   it("keeps a foreign block between entries", () => {
-    expect(stripEntries(`${FM}Text.\n\n## Context\n\n${E}\n### Notes\n\nMine.\n\n${F}\n## Comments\n`)).toBe(`${FM}Text.\n\n## Context\n\n### Notes\n\nMine.\n\n## Comments\n`);
+    expect(stripEntries(`${FM}Text.\n\n## Context log\n\n${E}\n### Notes\n\nMine.\n\n${F}\n## Comments\n`)).toBe(`${FM}Text.\n\n## Context log\n\n### Notes\n\nMine.\n\n## Comments\n`);
   });
   it("keeps CRLF", () => {
-    expect(stripEntries(crlf(`${FM}Text.\n\n## Context\n\nProse.\n\n${E}\n## Comments\n`))).toBe(crlf(`${FM}Text.\n\n## Context\n\nProse.\n\n## Comments\n`));
-    expect(stripEntries(crlf(`${FM}Text.\n\n## Context\n\n${E}`))).toBe(crlf(`${FM}Text.\n`));
+    expect(stripEntries(crlf(`${FM}Text.\n\n## Context log\n\nProse.\n\n${E}\n## Comments\n`))).toBe(crlf(`${FM}Text.\n\n## Context log\n\nProse.\n\n## Comments\n`));
+    expect(stripEntries(crlf(`${FM}Text.\n\n## Context log\n\n${E}`))).toBe(crlf(`${FM}Text.\n`));
   });
   it("returns a note without a section or without entries as it is", () => {
-    for (const text of [`${FM}Text.\n`, `${FM}Text.\n\n## Context\n\nProse.\n\n## Comments\n`, `${FM}Text.\n\n## Context\n\n## Comments\n`]) {
+    for (const text of [`${FM}Text.\n`, `${FM}Text.\n\n## Context log\n\nProse.\n\n## Comments\n`, `${FM}Text.\n\n## Context log\n\n## Comments\n`]) {
       expect(stripEntries(text)).toBe(text);
     }
   });
   it("leaves no entry for parseContext", () => {
-    const out = stripEntries(`${FM}Text.\n\n## Context\n\nProse.\n\n${E}\n${F}\n## Comments\n`);
+    const out = stripEntries(`${FM}Text.\n\n## Context log\n\nProse.\n\n${E}\n${F}\n## Comments\n`);
     expect(parseContext(out).entries).toEqual([]);
+  });
+});
+
+describe("a hand-written ## Context section", () => {
+  const HAND = "## Context\n\nWhy we do this, see [[BL-7]].\n\n### D1: looks like an entry\n- status: active\n\nMore prose with [[BL-8]].\n";
+
+  it("has no entries for parseContext", () => {
+    const parsed = parseContext(`${FM}Intro.\n\n${HAND}`);
+    expect(parsed.entries).toEqual([]);
+    expect(parsed.section).toBeNull();
+  });
+  it("stays unchanged when insertEntry creates a separate ## Context log section", () => {
+    const before = `${FM}Intro.\n\n${HAND}`;
+    const out = insertEntry(before, NEW);
+    expect(out).toBe(`${before}\n## Context log\n\n${NEW_TEXT}`);
+    expect(out.startsWith(before)).toBe(true);
+    expect(parseContext(out).entries.map((e) => e.local)).toEqual(["D4"]);
+  });
+  it("puts the new section before ## Comments and leaves ## Context unchanged", () => {
+    const before = `${FM}Intro.\n\n${HAND}\n## Comments\n\n- c\n`;
+    expect(insertEntry(before, NEW)).toBe(`${FM}Intro.\n\n${HAND}\n## Context log\n\n${NEW_TEXT}\n## Comments\n\n- c\n`);
+  });
+  it("counts its links as links of the description", () => {
+    expect(bodyLinks(`Intro [[BL-1]].\n\n${HAND}\n## Context log\n\n### D1: x\n- status: active\n\n[[BL-9]]\n`)).toEqual(["BL-1", "BL-7", "BL-8"]);
+  });
+  it("is not touched by stripContext and stripEntries", () => {
+    const text = `${FM}Intro.\n\n${HAND}\n## Context log\n\n${NEW_TEXT}`;
+    expect(stripContext(text)).toBe(`${FM}Intro.\n\n${HAND}`);
+    expect(stripEntries(text)).toBe(`${FM}Intro.\n\n${HAND}`);
+  });
+  it("leaves only the entries under ## Context log for parseContext", () => {
+    const text = `${FM}Intro.\n\n${HAND}\n## Context log\n\n### D2: real\n- status: active\n\nBody.\n\n### C3: also real\n- status: active\n`;
+    expect(parseContext(text).entries.map((e) => e.local)).toEqual(["D2", "C3"]);
   });
 });

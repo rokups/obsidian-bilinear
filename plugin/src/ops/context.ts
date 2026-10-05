@@ -347,7 +347,7 @@ export async function getContext(t: Tracker, ids: string[]): Promise<Array<{ id:
   return out;
 }
 
-/** The body of a note without its `## Context` and `## Comments` sections; the other text is whole. */
+/** The body of a note without its `## Context log` and `## Comments` sections; the other text is whole. */
 export function descriptionOf(noteText: string): string {
   const lines = splitLines(new Doc(noteText).body);
   const ranges = [...findSections(lines, NON_DESCRIPTION_SECTIONS).sections.values()];

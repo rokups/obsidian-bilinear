@@ -2161,9 +2161,9 @@ describe("show with context", () => {
   });
 
   it("an empty Context section and a missing note change nothing", async () => {
-    s().edit(s().note("BL-1"), "## Comments", "## Context\n\n## Comments");
+    s().edit(s().note("BL-1"), "## Comments", "## Context log\n\n## Comments");
     const text = await s().ok("show", "BL-1");
-    expect(text).toContain("## Context\n");
+    expect(text).toContain("## Context log\n");
     expect(text).not.toContain("CONTEXT BL-1");
     await s().ok("new", "Two");
     fs.rmSync(s().note("BL-2"));
@@ -2249,7 +2249,7 @@ describe("show with context", () => {
     expect(j.context.chars).toBe(j.context.l0.length);
     expect(j.context.cap).toBe(8000);
     expect(j.context.shown).toEqual(["BL-1/D1"]);
-    expect(j.body).toContain("## Context");
+    expect(j.body).toContain("## Context log");
     expect(j.body).toContain("- status: active");
   });
 
@@ -2267,7 +2267,7 @@ describe("show with context", () => {
       { length: 300 },
       (_, i) => `### D${i + 1}: Decision number ${i + 1} about topic ${i * 7}\n- status: active\n- author: rk\n- created: 2026-10-01\n- updated: 2026-10-01\n\n${"Long content. ".repeat(20)}\n`,
     );
-    s().edit(s().note("BL-1"), "## Comments", `## Context\n\n${entries.join("\n")}\n## Comments`);
+    s().edit(s().note("BL-1"), "## Comments", `## Context log\n\n${entries.join("\n")}\n## Comments`);
     const j = await showJson();
     expect(j.context.chars).toBe(j.context.l0.length);
     expect(j.context.chars).toBeLessThanOrEqual(8000);
@@ -2278,12 +2278,12 @@ describe("show with context", () => {
 
   it("shows an issue without entries byte for byte as before: hand-written Context, archived", async () => {
     const plain = "BL-1  One\nstatus:      backlog\npriority:    none\ncreated:     2026-10-01\n\nIntro text.\n\n### Sub\n\nMore.\n\n";
-    s().edit(s().note("BL-1"), "## Comments", "## Context\n\n## Comments");
-    expect(await s().ok("show", "BL-1")).toBe(`${plain}## Context\n\n## Comments\n- 2026-10-01 rk: hello\n`);
-    s().edit(s().note("BL-1"), "## Context\n\n## Comments", "## Context\n\nMy notes.\n\n## Comments");
-    expect(await s().ok("show", "BL-1")).toBe(`${plain}## Context\n\nMy notes.\n\n## Comments\n- 2026-10-01 rk: hello\n`);
+    s().edit(s().note("BL-1"), "## Comments", "## Context log\n\n## Comments");
+    expect(await s().ok("show", "BL-1")).toBe(`${plain}## Context log\n\n## Comments\n- 2026-10-01 rk: hello\n`);
+    s().edit(s().note("BL-1"), "## Context log\n\n## Comments", "## Context log\n\nMy notes.\n\n## Comments");
+    expect(await s().ok("show", "BL-1")).toBe(`${plain}## Context log\n\nMy notes.\n\n## Comments\n- 2026-10-01 rk: hello\n`);
     await s().ok("archive", "BL-1");
-    expect(await s().ok("show", "BL-1")).toBe(`${plain.replace("created:     2026-10-01\n", "created:     2026-10-01\narchived:    yes\n")}## Context\n\nMy notes.\n\n## Comments\n- 2026-10-01 rk: hello\n`);
+    expect(await s().ok("show", "BL-1")).toBe(`${plain.replace("created:     2026-10-01\n", "created:     2026-10-01\narchived:    yes\n")}## Context log\n\nMy notes.\n\n## Comments\n- 2026-10-01 rk: hello\n`);
   });
 
   it("does not turn the block on for a tracker with only superseded entries", async () => {
@@ -2303,19 +2303,19 @@ describe("show with context", () => {
 
   it("keeps hand-written text of the Context section: (A) no entry, active tracker entry", async () => {
     await record("BL", "--type", "constraint", "--subject", "No net", "--content", "Offline.");
-    s().edit(s().note("BL-1"), "## Comments", "## Context\n\nMy notes.\n\n## Comments");
+    s().edit(s().note("BL-1"), "## Comments", "## Context log\n\nMy notes.\n\n## Comments");
     const text = await s().ok("show", "BL-1");
     expect(text).toContain("Tracker constraints:\n  BL/C1 No net");
-    expect(text).toContain("## Context\n\nMy notes.\n");
+    expect(text).toContain("## Context log\n\nMy notes.\n");
   });
 
   it("keeps hand-written text of the Context section: (B) an entry, prose and a Notes block", async () => {
     await record(...decision());
-    s().edit(s().note("BL-1"), "## Context\n\n", "## Context\n\nMy prose.\n\n");
+    s().edit(s().note("BL-1"), "## Context log\n\n", "## Context log\n\nMy prose.\n\n");
     s().edit(s().note("BL-1"), "## Comments", "### Notes\n\nMy notes.\n\n## Comments");
     const text = await s().ok("show", "BL-1");
     expect(text).toMatch(L0_HEADER);
-    expect(text).toContain("## Context\n\nMy prose.\n");
+    expect(text).toContain("## Context log\n\nMy prose.\n");
     expect(text).toContain("### Notes\n\nMy notes.\n");
     expect(text).not.toContain("### D1");
     expect(text).not.toContain("- status: active");

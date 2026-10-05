@@ -57,7 +57,7 @@ export interface LinkCache {
 
 /**
  * Link targets in a note's description, in document order: links and embeds
- * outside the `## Comments` and `## Context` sections. (The cache already leaves out code and
+ * outside the `## Comments` and `## Context log` sections. (The cache already leaves out code and
  * frontmatter.)
  */
 export function descriptionLinks(cache: LinkCache | null | undefined): string[] {

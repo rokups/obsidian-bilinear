@@ -396,7 +396,7 @@ const COMMANDS: Record<string, Command> = {
       const rel = relations.get(id);
       if (rel?.blocks.length) out(`${pad("blocks:", 12)} ${states(rel.blocks)}`);
       if (rel?.related.length) out(`${pad("related:", 12)} ${states(rel.related)}`);
-      // With entries, the L0 text takes the place of the `## Context` section and comes before the description.
+      // With entries, the L0 text takes the place of the `## Context log` section and comes before the description.
       const l0 = view.text !== "";
       if (l0) out(`\n${view.text.replace(/\n+$/, "")}`);
       const body = (l0 ? new Doc(stripEntries(text!)).body : doc.body).replace(/^[\r\n]+|[\r\n]+$/g, "");

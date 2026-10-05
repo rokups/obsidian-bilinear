@@ -45,7 +45,7 @@ export function addComment(text: string, date: string, author: string, comment: 
 /**
  * IDs of the issues a note's body links to, in order, each once. Links and
  * embeds count wherever they are in the description; links in code and under
- * `## Comments` or `## Context` do not, so that mentioning an issue in a comment does not make
+ * `## Comments` or `## Context log` do not, so that mentioning an issue in a comment does not make
  * it part of this one.
  */
 export function bodyLinks(body: string, selfId: string | null = null): string[] {

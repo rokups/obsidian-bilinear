@@ -52,7 +52,7 @@ export interface ContextEntry {
 
 export interface ParsedContext {
   entries: ContextEntry[];
-  /** [heading line, end line (exclusive)] of `## Context`, or null if there is none. */
+  /** [heading line, end line (exclusive)] of `## Context log`, or null if there is none. */
   section: [number, number] | null;
   /** Local IDs that occur more than once. */
   duplicates: string[];
@@ -100,7 +100,7 @@ export function parseFullId(s: string): { noteId: string; local: string } | null
 }
 
 /**
- * Entries under `## Context` of a note's text (frontmatter allowed). Ranges and
+ * Entries under `## Context log` of a note's text (frontmatter allowed). Ranges and
  * `section` are line numbers of that text. Never throws on odd input.
  */
 export function parseContext(text: string): ParsedContext {
@@ -449,7 +449,7 @@ function assertEntry(e: ContextEntry): void {
 }
 
 /**
- * Add an entry at the end of the `## Context` section of a note (frontmatter allowed). Without the section, it is
+ * Add an entry at the end of the `## Context log` section of a note (frontmatter allowed). Without the section, it is
  * created before `## Comments`, or at the end of the note when there is no such section. The tracker index note
  * has no `## Comments`, so there the section goes at the end.
  */
@@ -517,7 +517,7 @@ export function patchEntry(text: string, local: string, patch: (e: ContextEntry)
 }
 
 /**
- * The note without its `## Context` section, heading and content. It takes the whole note, as `parseContext` does,
+ * The note without its `## Context log` section, heading and content. It takes the whole note, as `parseContext` does,
  * so the section is found with the frontmatter in the way of nothing. When the section was the last of the note,
  * the blank lines before it go too.
  */
@@ -534,7 +534,7 @@ export function stripContext(text: string): string {
 }
 
 /**
- * The note without the lines of its context entries. Text of the `## Context` section that is not an entry
+ * The note without the lines of its context entries. Text of the `## Context log` section that is not an entry
  * (prose, a `### Notes` block) stays. The heading goes only when the rest of the section is blank. A note
  * without entries is returned as it is. Like `stripContext`, it takes the whole note.
  */

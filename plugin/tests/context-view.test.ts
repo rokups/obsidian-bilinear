@@ -327,7 +327,7 @@ describe("buildL0", () => {
 
   it("goes through parseContext with entries of every type", () => {
     const note = [
-      "## Context",
+      "## Context log",
       "",
       "### D1: Pick it",
       "- status: active",

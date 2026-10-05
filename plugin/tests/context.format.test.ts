@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { formatEntry, fullId, parseContext, parseFullId, type ContextEntry } from "../src/format/context";
 import { TYPE_LETTERS } from "../src/format/ids";
 
-const EXAMPLE = `## Context
+const EXAMPLE = `## Context log
 
 ### D3: Use one cache directory per test
 - status: active
@@ -25,7 +25,7 @@ Alternatives: A global lock. A fixture reset.
 const note = (body: string) => `---\ntitle: Fix\nstatus: todo\n---\n\nDescription.\n\n${body}`;
 
 /** Wrap an entry text in its section, as it is in a note, and parse it. */
-const reparse = (text: string, eol = "\n") => parseContext(`## Context${eol}${eol}${text}`);
+const reparse = (text: string, eol = "\n") => parseContext(`## Context log${eol}${eol}${text}`);
 const withoutRange = ({ range, ...rest }: ContextEntry) => rest;
 
 function entry(letter: string, extra: Partial<ContextEntry> = {}): ContextEntry {
@@ -82,7 +82,7 @@ describe("parseContext", () => {
     ]);
   });
 
-  it("gives no section and no entries for a note without ## Context", () => {
+  it("gives no section and no entries for a note without ## Context log", () => {
     const r = parseContext(note("## Comments\n- 2026-10-01 rk: hi\n"));
     expect(r).toEqual({ entries: [], section: null, duplicates: [], problems: [] });
     expect(parseContext("")).toEqual({ entries: [], section: null, duplicates: [], problems: [] });
@@ -112,26 +112,26 @@ describe("parseContext", () => {
 
   it("gives exact ranges for the odd shapes of a text", () => {
     const entry1 = "### D1: x\n- status: active\n";
-    const crlf = parseContext("## Context\r\n\r\n### D1: x\r\n- status: active\r\n\r\nBody.\r\n");
+    const crlf = parseContext("## Context log\r\n\r\n### D1: x\r\n- status: active\r\n\r\nBody.\r\n");
     expect(crlf.section).toEqual([0, 6]);
     expect(crlf.entries[0].range).toEqual([2, 6]);
     expect([crlf.entries[0].subject, crlf.entries[0].content]).toEqual(["x", "Body."]);
-    const bom = parseContext("\ufeff## Context\n" + entry1);
+    const bom = parseContext("\ufeff## Context log\n" + entry1);
     expect(bom.section).toEqual([0, 3]);
     expect(bom.entries[0].range).toEqual([1, 3]);
-    const bomFm = parseContext("\ufeff---\ntitle: T\n---\n## Context\n" + entry1);
+    const bomFm = parseContext("\ufeff---\ntitle: T\n---\n## Context log\n" + entry1);
     expect(bomFm.section).toEqual([3, 6]);
     expect(bomFm.entries[0].range).toEqual([4, 6]);
-    const noEol = parseContext("## Context\n### D1: x\n- status: active");
+    const noEol = parseContext("## Context log\n### D1: x\n- status: active");
     expect(noEol.section).toEqual([0, 3]);
     expect(noEol.entries[0].range).toEqual([1, 3]);
-    const two = parseContext("## Context\n" + entry1 + "### D2: y\n- status: active\n");
+    const two = parseContext("## Context log\n" + entry1 + "### D2: y\n- status: active\n");
     expect(two.section).toEqual([0, 5]);
     expect(two.entries.map((x) => x.range)).toEqual([[1, 3], [3, 5]]);
-    const fm = parseContext("---\ntitle: T\n---\n## Context\n" + entry1 + "## Comments\n- 2026-10-01 rk: hi\n");
+    const fm = parseContext("---\ntitle: T\n---\n## Context log\n" + entry1 + "## Comments\n- 2026-10-01 rk: hi\n");
     expect(fm.section).toEqual([3, 6]);
     expect(fm.entries[0].range).toEqual([4, 6]);
-    const plain = parseContext("Text\n\n## Context\n" + entry1);
+    const plain = parseContext("Text\n\n## Context log\n" + entry1);
     expect(plain.section).toEqual([2, 5]);
     expect(plain.entries[0].range).toEqual([3, 5]);
   });
@@ -238,15 +238,15 @@ describe("parseContext", () => {
   });
 
   it("writes a label alone when its value starts with a code fence", () => {
-    const text = "## Context\n\n### D1: x\n- status: active\n\nRationale:\n```ts\ncode\n```\n\n### D2: y\n- status: active\n\n## Comments\n- 2026-10-01 rk: hi\n";
+    const text = "## Context log\n\n### D1: x\n- status: active\n\nRationale:\n```ts\ncode\n```\n\n### D2: y\n- status: active\n\n## Comments\n- 2026-10-01 rk: hi\n";
     const r = parseContext(text);
     expect(r.entries.map((x) => x.local)).toEqual(["D1", "D2"]);
     expect(r.entries[0].rationale).toBe("\n```ts\ncode\n```");
     expect(r.entries[1].range).toEqual([10, 13]);
     expect(r.section).toEqual([0, 13]);
     const out = r.entries.map((x) => formatEntry(x, "\n")).join("\n");
-    expect(`## Context\n\n${out}\n## Comments\n- 2026-10-01 rk: hi\n`).toBe(text);
-    const again = parseContext(`## Context\n\n${out}`);
+    expect(`## Context log\n\n${out}\n## Comments\n- 2026-10-01 rk: hi\n`).toBe(text);
+    const again = parseContext(`## Context log\n\n${out}`);
     expect(again.entries.map((x) => withoutRange(x))).toEqual(r.entries.map((x) => withoutRange(x)));
   });
 
@@ -259,14 +259,14 @@ describe("parseContext", () => {
       ["Rationale: a\n```\nb\n\n```", "a\n```\nb\n\n```"],
     ];
     for (const [label, value] of cases) {
-      const text = `## Context\n\n### D1: x\n- status: active\n\n${label}\n\n### D2: y\n- status: active\n\n## Comments\n- 2026-10-01 rk: hi\n`;
+      const text = `## Context log\n\n### D1: x\n- status: active\n\n${label}\n\n### D2: y\n- status: active\n\n## Comments\n- 2026-10-01 rk: hi\n`;
       const r = parseContext(text);
       expect(r.entries.map((x) => x.local), label).toEqual(["D1", "D2"]);
       expect(r.entries[0].rationale, label).toBe(value);
       expect(r.section![1], label).toBe(text.split("\n").indexOf("## Comments"));
       const out = r.entries.map((x) => formatEntry(x, "\n")).join("\n");
-      expect(`## Context\n\n${out}\n## Comments\n- 2026-10-01 rk: hi\n`, label).toBe(text);
-      const again = parseContext(`## Context\n\n${out}`);
+      expect(`## Context log\n\n${out}\n## Comments\n- 2026-10-01 rk: hi\n`, label).toBe(text);
+      const again = parseContext(`## Context log\n\n${out}`);
       expect(again.entries.map((x) => withoutRange(x)), label).toEqual(r.entries.map((x) => withoutRange(x)));
     }
   });
@@ -296,7 +296,7 @@ describe("parseContext", () => {
 
   it("skips foreign level-3 blocks, keeps intro text, and ends an entry at any heading", () => {
     const r = parseContext(
-      "## Context\n\nSome intro.\n\n### Notes\nfree text\n\n### q4: Open?\n- status: Resolved\n\nBody.\n\n#### Deeper\nstays\n\n### Other\nx\n\n### S1: State\n- status: active\n",
+      "## Context log\n\nSome intro.\n\n### Notes\nfree text\n\n### q4: Open?\n- status: Resolved\n\nBody.\n\n#### Deeper\nstays\n\n### Other\nx\n\n### S1: State\n- status: active\n",
     );
     expect(r.problems).toEqual([]);
     expect(r.entries.map((e) => e.local)).toEqual(["Q4", "S1"]);
@@ -353,17 +353,17 @@ describe("parseContext", () => {
   });
 
   it("does not throw on odd text", () => {
-    for (const t of ["## Context", "## Context\n### D1", "## Context\n### D1:\n-", "## Context\n### D1: x\n- :\n- status", "\ufeff## Context\r\n### Z9: x\r\n"]) {
+    for (const t of ["## Context log", "## Context log\n### D1", "## Context log\n### D1:\n-", "## Context log\n### D1: x\n- :\n- status", "\ufeff## Context log\r\n### Z9: x\r\n"]) {
       expect(() => parseContext(t), t).not.toThrow();
     }
-    expect(parseContext("## Context\r\n### D1: x\r\n- status: active\r\n").entries[0].subject).toBe("x");
+    expect(parseContext("## Context log\r\n### D1: x\r\n- status: active\r\n").entries[0].subject).toBe("x");
   });
 });
 
 describe("formatEntry", () => {
   it("writes the canonical form of the example", () => {
     const e = parseContext(EXAMPLE).entries[0];
-    expect(`## Context\n\n${formatEntry(e, "\n")}`).toBe(EXAMPLE);
+    expect(`## Context log\n\n${formatEntry(e, "\n")}`).toBe(EXAMPLE);
   });
 
   it("round-trips each type, with all fields", () => {
@@ -405,7 +405,7 @@ describe("formatEntry", () => {
   });
 
   it("writes the letter in upper case from the type", () => {
-    const e = parseContext("## Context\n### d7: x\n- status: active\n").entries[0];
+    const e = parseContext("## Context log\n### d7: x\n- status: active\n").entries[0];
     expect(formatEntry(e, "\n").startsWith("### D7: x\n")).toBe(true);
   });
 });

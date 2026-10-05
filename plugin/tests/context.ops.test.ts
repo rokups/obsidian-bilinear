@@ -33,8 +33,8 @@ describe("recordContext in an issue", () => {
     const [r] = await rec("bl-1", dec("Use X", "Because.", { rationale: "It is fast", evidence: ["commit:abc"] }));
     expect(r).toEqual({ id: "BL-1/D1", action: "created", superseded: [], warnings: [] });
     const text = note();
-    expect(text.indexOf("## Context")).toBeGreaterThan(0);
-    expect(text.indexOf("## Context")).toBeLessThan(text.indexOf("## Comments"));
+    expect(text.indexOf("## Context log")).toBeGreaterThan(0);
+    expect(text.indexOf("## Context log")).toBeLessThan(text.indexOf("## Comments"));
     const e = entry(text, "D1");
     expect(e).toMatchObject({ subject: "Use X", content: "Because.", rationale: "It is fast", author: "ann", created: TODAY, updated: TODAY, status: "active", evidence: ["commit:abc"] });
     const again: Tracker = { io, dir: "T/Bilinear", indexPath: "T/Bilinear/Bilinear.md" };

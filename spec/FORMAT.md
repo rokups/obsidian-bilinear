@@ -71,7 +71,7 @@ list lines.
 - A heading is `#` to `######`, whitespace, then the name. Trailing `#`s and
   whitespace are not part of the name.
 - A *section* is a level-2 heading with an exact, case-sensitive name
-  (`Issues`, `Archive`, `Comments`, `Context`). It runs to the next level-1 or level-2
+  (`Issues`, `Archive`, `Comments`, `Context log`). It runs to the next level-1 or level-2
   heading, or to the end of the file. Deeper headings stay inside it. If a name
   appears on more than one level-2 heading only the first is the section.
 
@@ -270,7 +270,7 @@ naming itself, are ignored here and reported by `lint`. `blocked-by` must not
 lead back to the issue it starts from, also through the issues of the other
 trackers; `related-to` has no such rule.
 
-The description is the note body outside the `## Context` and `## Comments`
+The description is the note body outside the `## Context log` and `## Comments`
 sections. A link in
 it is a wikilink or an embed, `[[BL-3]]` or `![[BL-3]]`, reduced to an ID the
 same way as an index line link; links inside fenced code blocks and inline
@@ -331,14 +331,15 @@ it must also be quoted when it contains `,`, `[`, `]`, `{` or `}`.
 ### 1.7 Context entries
 
 An issue note may hold structured knowledge about the work: decisions,
-constraints and the like. The entries are under a `## Context` section, which
+constraints and the like. The entries are under a `## Context log` section, which
 may come before or after `## Comments`. The usual order is frontmatter,
-description, `## Context`, `## Comments`. The index note may also have a
-`## Context` section, for entries of the whole tracker; it is best placed at
-the end of the note.
+description, `## Context log`, `## Comments`. The index note may also have a
+`## Context log` section, for entries of the whole tracker; it is best placed at
+the end of the note. A `## Context` section, without `log`, is a normal part of
+the description: a tool does not read entries from it or change it.
 
 ```
-## Context
+## Context log
 
 ### D3: Use one cache directory per test
 - status: active
@@ -389,7 +390,7 @@ type `R` also has `Attempted:`, `Promising:`, `Happened:`, `Failed:` and
 blank line. A value under an empty label line keeps its position: the line
 break after the label stays part of the value.
 
-When a tool creates `## Context` in an issue note, it puts the section directly
+When a tool creates `## Context log` in an issue note, it puts the section directly
 before `## Comments`, or at the end of the note if there is no `## Comments`.
 In the index note it goes at the end. A new entry goes at the end of the
 section, after a blank line.
@@ -415,7 +416,7 @@ Hand-edited entries are read as follows:
   value goes on through the lines of a fenced code block, blank lines included,
   and keeps its indentation.
 - A level-3 heading that is not in the form of an entry is not an entry. Its
-  lines are skipped, and so is any text between `## Context` and the first
+  lines are skipped, and so is any text between `## Context log` and the first
   entry.
 - A local ID that occurs more than once in a note is reported; the entries
   are all kept.
